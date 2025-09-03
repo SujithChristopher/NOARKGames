@@ -1,0 +1,117 @@
+[gd_resource type="Resource" script_class="PatientDetails" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Main_screen/Scripts/patient_db.gd" id="1_ypd56"]
+
+[resource]
+script = ExtResource("1_ypd56")
+patient_register = {
+"337315M": {
+"affected_hand": "right",
+"age": 15,
+"comments": "",
+"dominant_hand": "right",
+"gender": "male",
+"name": "Jeril Abraham Triju",
+"stroke_time": 1
+},
+"479899": {
+"affected_hand": "both",
+"age": 69,
+"comments": "SCI",
+"dominant_hand": "right",
+"gender": "male",
+"name": "Singhal MP Right hand",
+"stroke_time": 48
+},
+"479899H": {
+"affected_hand": "left",
+"age": 69,
+"comments": "",
+"dominant_hand": "right",
+"gender": "male",
+"name": "Singhal M P",
+"stroke_time": 24
+},
+"AI74486": {
+"affected_hand": "left",
+"age": 65,
+"comments": "",
+"dominant_hand": "right",
+"gender": "female",
+"name": "laipubam",
+"stroke_time": 1
+},
+"BIJU": {
+"affected_hand": "right",
+"age": 26,
+"comments": "",
+"dominant_hand": "right",
+"gender": "male",
+"name": "BIJU",
+"stroke_time": 30
+},
+"MECH": {
+"affected_hand": "left",
+"age": 29,
+"comments": "Not coming to work on time",
+"dominant_hand": "right",
+"gender": "male",
+"name": "Tia",
+"stroke_time": 30
+},
+"SAM": {
+"affected_hand": "unspecified",
+"age": 22,
+"comments": "",
+"dominant_hand": "unspecified",
+"gender": "male",
+"name": "SAM",
+"stroke_time": 20
+},
+"asdf": {
+"affected_hand": "unspecified",
+"age": 44,
+"comments": "",
+"dominant_hand": "unspecified",
+"gender": "male",
+"name": "asdf",
+"stroke_time": 0
+},
+"dd": {
+"affected_hand": "unspecified",
+"age": 20,
+"comments": "",
+"dominant_hand": "unspecified",
+"gender": "unspecified",
+"name": "dd",
+"stroke_time": 0
+},
+"divakar": {
+"affected_hand": "right",
+"age": 28,
+"comments": "laksjdflkjds",
+"dominant_hand": "left",
+"gender": "male",
+"name": "Divakar",
+"stroke_time": 5
+},
+"ee": {
+"affected_hand": "unspecified",
+"age": 20,
+"comments": "",
+"dominant_hand": "unspecified",
+"gender": "male",
+"name": "ee",
+"stroke_time": 0
+},
+"sujith": {
+"affected_hand": "left",
+"age": 29,
+"comments": "asldkfjlsadkjflaksj",
+"dominant_hand": "right",
+"gender": "male",
+"name": "Sujith",
+"stroke_time": 5
+}
+}
+current_patient_id = "BIJU"

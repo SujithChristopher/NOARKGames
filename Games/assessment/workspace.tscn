@@ -1,0 +1,310 @@
+[gd_scene load_steps=6 format=3 uid="uid://bn0in381lxfeb"]
+
+[ext_resource type="Script" uid="uid://cedht487nl6p3" path="res://Games/assessment/workspace.gd" id="1_vm5ig"]
+[ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="2_3kta3"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_gocbw"]
+[ext_resource type="Texture2D" uid="uid://dy8y607pjywvd" path="res://Assets/pp_assets/arts/Ball.png" id="3_jae2j"]
+
+[sub_resource type="CanvasTexture" id="CanvasTexture_lqn52"]
+
+[node name="workspace" type="Node2D"]
+script = ExtResource("1_vm5ig")
+
+[node name="TextureRect" type="TextureRect" parent="."]
+z_index = -3
+z_as_relative = false
+offset_left = -136.0
+offset_top = -79.0
+offset_right = 1285.0
+offset_bottom = 732.0
+texture = SubResource("CanvasTexture_lqn52")
+stretch_mode = 1
+
+[node name="StopButton" type="Button" parent="."]
+texture_filter = 1
+offset_left = 567.0
+offset_top = 549.0
+offset_right = 711.0
+offset_bottom = 619.0
+theme = ExtResource("2_3kta3")
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Calc.  AW"
+
+[node name="set_orgin" type="Button" parent="."]
+visible = false
+texture_filter = 1
+offset_left = 394.0
+offset_top = 594.0
+offset_right = 485.0
+offset_bottom = 633.0
+text = "Set orgin
+"
+
+[node name="Enter" type="Button" parent="."]
+texture_filter = 1
+offset_left = 823.0
+offset_top = 367.0
+offset_right = 968.0
+offset_bottom = 431.0
+theme = ExtResource("2_3kta3")
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Save"
+
+[node name="start" type="Button" parent="."]
+texture_filter = 1
+offset_left = 400.0
+offset_top = 550.0
+offset_right = 542.0
+offset_bottom = 620.0
+theme = ExtResource("2_3kta3")
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Start"
+
+[node name="Clear" type="Button" parent="."]
+texture_filter = 1
+offset_left = 973.0
+offset_top = 368.0
+offset_right = 1114.0
+offset_bottom = 431.0
+theme = ExtResource("2_3kta3")
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Clear"
+
+[node name="Reset" type="Button" parent="."]
+visible = false
+texture_filter = 1
+offset_left = 15.0
+offset_top = 602.0
+offset_right = 105.0
+offset_bottom = 642.0
+text = "Set-Zero"
+
+[node name="SelectGame" type="Button" parent="."]
+offset_left = 1011.0
+offset_top = 30.0
+offset_right = 1122.0
+offset_bottom = 86.0
+theme = ExtResource("2_3kta3")
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Game
+"
+
+[node name="Lines" type="Node2D" parent="."]
+
+[node name="Player" type="Sprite2D" parent="."]
+position = Vector2(603, 489)
+scale = Vector2(0.533334, 0.533334)
+texture = ExtResource("3_jae2j")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+offset_left = 865.0
+offset_top = 203.0
+offset_right = 1101.0
+offset_bottom = 361.0
+
+[node name="AW" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Active workspace (AW)"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "X Dir: "
+
+[node name="axval" type="Label" parent="VBoxContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="HBoxContainer3" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/HBoxContainer3"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Z Dir: "
+
+[node name="azval" type="Label" parent="VBoxContainer/HBoxContainer3"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="TW" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Training workspace (TW)"
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/HBoxContainer2"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "X Dir: "
+
+[node name="txval" type="Label" parent="VBoxContainer/HBoxContainer2"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="HBoxContainer4" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBoxContainer/HBoxContainer4"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Z Dir: "
+
+[node name="tzval" type="Label" parent="VBoxContainer/HBoxContainer4"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="3D_workspace" type="VBoxContainer" parent="."]
+visible = false
+offset_left = 865.0
+offset_top = 203.0
+offset_right = 1101.0
+offset_bottom = 361.0
+
+[node name="AW" type="Label" parent="3D_workspace"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Active workspace (AW)"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="3D_workspace"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="3D_workspace/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "X Dir: "
+
+[node name="axval" type="Label" parent="3D_workspace/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="HBoxContainer3" type="HBoxContainer" parent="3D_workspace"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="3D_workspace/HBoxContainer3"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Y Dir: "
+
+[node name="ayval" type="Label" parent="3D_workspace/HBoxContainer3"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="TW" type="Label" parent="3D_workspace"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Training workspace (TW)"
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="3D_workspace"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="3D_workspace/HBoxContainer2"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "X Dir: "
+
+[node name="txval" type="Label" parent="3D_workspace/HBoxContainer2"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="HBoxContainer4" type="HBoxContainer" parent="3D_workspace"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="3D_workspace/HBoxContainer4"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Y Dir: "
+
+[node name="tyval" type="Label" parent="3D_workspace/HBoxContainer4"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "0.0"
+
+[node name="SaveDialogBox" type="Window" parent="."]
+auto_translate_mode = 1
+initial_position = 2
+size = Vector2i(400, 152)
+visible = false
+
+[node name="Label" type="Label" parent="SaveDialogBox"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -198.0
+offset_top = 16.0
+offset_right = 200.0
+offset_bottom = 133.0
+grow_horizontal = 2
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "The Active and Training workspaces are saved."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 1
+
+[node name="close_button" type="Button" parent="SaveDialogBox"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -30.0
+offset_top = -38.0
+offset_right = 20.0
+offset_bottom = -7.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_fonts/font = ExtResource("2_gocbw")
+text = "Close"
+
+[connection signal="mouse_entered" from="StopButton" to="." method="_on_stop_button_mouse_entered"]
+[connection signal="mouse_exited" from="StopButton" to="." method="_on_stop_button_mouse_exited"]
+[connection signal="pressed" from="StopButton" to="." method="_on_stop_button_pressed"]
+[connection signal="pressed" from="set_orgin" to="." method="_on_set_orgin_pressed"]
+[connection signal="mouse_entered" from="Enter" to="." method="_on_enter_mouse_entered"]
+[connection signal="mouse_exited" from="Enter" to="." method="_on_enter_mouse_exited"]
+[connection signal="pressed" from="Enter" to="." method="_on_enter_pressed"]
+[connection signal="mouse_entered" from="start" to="." method="_on_start_mouse_entered"]
+[connection signal="mouse_exited" from="start" to="." method="_on_start_mouse_exited"]
+[connection signal="pressed" from="start" to="." method="_on_start_pressed"]
+[connection signal="mouse_entered" from="Clear" to="." method="_on_clear_mouse_entered"]
+[connection signal="mouse_exited" from="Clear" to="." method="_on_clear_mouse_exited"]
+[connection signal="pressed" from="Clear" to="." method="_on_clear_pressed"]
+[connection signal="mouse_entered" from="SelectGame" to="." method="_on_select_game_mouse_entered"]
+[connection signal="mouse_exited" from="SelectGame" to="." method="_on_select_game_mouse_exited"]
+[connection signal="pressed" from="SelectGame" to="." method="_on_select_game_pressed"]
+[connection signal="mouse_entered" from="SaveDialogBox/close_button" to="." method="_on_close_button_mouse_entered"]
+[connection signal="mouse_exited" from="SaveDialogBox/close_button" to="." method="_on_close_button_mouse_exited"]
+[connection signal="pressed" from="SaveDialogBox/close_button" to="." method="_on_close_button_pressed"]

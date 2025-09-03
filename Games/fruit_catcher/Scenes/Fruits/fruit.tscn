@@ -1,0 +1,81 @@
+[gd_scene load_steps=12 format=3 uid="uid://0iopctt3ttlm"]
+
+[ext_resource type="Script" uid="uid://0u1ce2gw2ndh" path="res://Games/fruit_catcher/Scenes/Fruits/fruit.gd" id="1_5jo5f"]
+[ext_resource type="Texture2D" uid="uid://ihga4qlmm5f1" path="res://Games/fruit_catcher/assets/element_red_diamond.png" id="2_f5rah"]
+[ext_resource type="Texture2D" uid="uid://cy7oii4247nme" path="res://Games/fruit_catcher/assets/Collected.png" id="3_xm5m6"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_tv10m"]
+size = Vector2(35.3553, 35.3553)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ddkv3"]
+atlas = ExtResource("3_xm5m6")
+region = Rect2(0, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_6fnrh"]
+atlas = ExtResource("3_xm5m6")
+region = Rect2(32, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_1foqy"]
+atlas = ExtResource("3_xm5m6")
+region = Rect2(64, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_2xvly"]
+atlas = ExtResource("3_xm5m6")
+region = Rect2(96, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_l5qpf"]
+atlas = ExtResource("3_xm5m6")
+region = Rect2(128, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_cj06g"]
+atlas = ExtResource("3_xm5m6")
+region = Rect2(160, 0, 32, 32)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_u8vsj"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ddkv3")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_6fnrh")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_1foqy")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_2xvly")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_l5qpf")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_cj06g")
+}],
+"loop": false,
+"name": &"collected",
+"speed": 10.0
+}]
+
+[node name="Gem" type="Area2D"]
+script = ExtResource("1_5jo5f")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+position = Vector2(0, 25)
+scale = Vector2(0.1, 0.1)
+texture = ExtResource("2_f5rah")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, 25)
+rotation = 0.785398
+shape = SubResource("RectangleShape2D_tv10m")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+position = Vector2(9.53674e-07, 41.5)
+scale = Vector2(2.25, 2.59375)
+sprite_frames = SubResource("SpriteFrames_u8vsj")
+animation = &"collected"
+frame = 5
+frame_progress = 1.0
+
+[connection signal="area_entered" from="." to="." method="_on_area_entered"]

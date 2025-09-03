@@ -1,0 +1,47 @@
+[gd_scene load_steps=3 format=3 uid="uid://7nr2tlykv2n5"]
+
+[ext_resource type="Script" uid="uid://bxjnhknp5qmc4" path="res://Games/flappy_bird/Scripts/game_over.gd" id="1_uusqj"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_y2x4k"]
+
+[node name="GameOver" type="CanvasLayer"]
+script = ExtResource("1_uusqj")
+
+[node name="Panel" type="Panel" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -577.0
+offset_top = -321.0
+offset_right = 576.0
+offset_bottom = 325.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TimeRemaining" type="Label" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -76.5
+offset_top = -11.5
+offset_right = 76.5
+offset_bottom = 11.5
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0.671644, 0.192915, 0.553253, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_y2x4k")
+theme_override_font_sizes/font_size = 25
+text = "Restarting Game in "
+uppercase = true
+
+[node name="RestartTimer" type="Timer" parent="."]
+wait_time = 5.0
+one_shot = true
+
+[connection signal="timeout" from="RestartTimer" to="." method="_on_restart_timer_timeout"]

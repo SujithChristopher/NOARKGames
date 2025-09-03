@@ -1,2 +1,1 @@
-# NOARKGames
-NOARK games
+Simple games

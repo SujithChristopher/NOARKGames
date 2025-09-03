@@ -1,0 +1,55 @@
+[gd_scene load_steps=5 format=3 uid="uid://cb2qb3tiwn21y"]
+
+[ext_resource type="Script" uid="uid://djkm422xonvir" path="res://Main_screen/Scripts/mode.gd" id="1_pnk74"]
+[ext_resource type="Texture2D" uid="uid://b3vybovnn7ifm" path="res://Assets/Background/modebg-2.png" id="2_sarbq"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_ymswy"]
+[ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="4_ymswy"]
+
+[node name="Mode" type="Node2D"]
+script = ExtResource("1_pnk74")
+
+[node name="TextureRect" type="TextureRect" parent="."]
+offset_right = 1155.0
+offset_bottom = 649.0
+texture = ExtResource("2_sarbq")
+expand_mode = 1
+
+[node name="3D Games" type="Button" parent="."]
+offset_left = 606.0
+offset_top = 260.0
+offset_right = 879.0
+offset_bottom = 387.0
+theme = ExtResource("4_ymswy")
+theme_override_fonts/font = ExtResource("3_ymswy")
+theme_override_font_sizes/font_size = 35
+text = "3D Games"
+
+[node name="2D Games" type="Button" parent="."]
+offset_left = 306.0
+offset_top = 261.0
+offset_right = 581.0
+offset_bottom = 387.0
+theme = ExtResource("4_ymswy")
+theme_override_fonts/font = ExtResource("3_ymswy")
+theme_override_font_sizes/font_size = 35
+keep_pressed_outside = true
+text = "2D Games
+"
+
+[node name="Window" type="Window" parent="."]
+initial_position = 1
+size = Vector2i(275, 150)
+visible = false
+theme_override_fonts/title_font = ExtResource("3_ymswy")
+
+[node name="Label" type="Label" parent="."]
+offset_left = 321.0
+offset_top = 114.0
+offset_right = 869.0
+offset_bottom = 180.0
+theme_override_fonts/font = ExtResource("3_ymswy")
+theme_override_font_sizes/font_size = 50
+text = "Select game mode !"
+
+[connection signal="pressed" from="3D Games" to="." method="_on_3d_games_pressed"]
+[connection signal="pressed" from="2D Games" to="." method="_on_2d_games_pressed"]
