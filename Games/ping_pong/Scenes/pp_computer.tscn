@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://c80st638uowc8"]
+
+[ext_resource type="Texture2D" uid="uid://dyocrhu2leg8l" path="res://Assets/pp_assets/arts/Computer.png" id="1_st5d4"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_4vig2"]
+size = Vector2(182, 24)
+
+[node name="computer" type="CharacterBody2D"]
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+rotation = 1.5708
+scale = Vector2(1.5, 1.5)
+texture = ExtResource("1_st5d4")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_4vig2")

@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="PatientDetails" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Main_screen/Scripts/patient_db.gd" id="1_ypd56"]
+
+[resource]
+script = ExtResource("1_ypd56")
+patient_register = {
+"Jumpify": {
+"affected_hand": "Right",
+"age": 25,
+"comments": "Testing the new game and connecting it with DB",
+"dominant_hand": "Left",
+"gender": "Others",
+"name": "Test",
+"stroke_time": 0
+},
+"vvv": {
+"affected_hand": "Unspecified",
+"age": 22,
+"comments": "",
+"dominant_hand": "Unspecified",
+"gender": "Male",
+"name": "vvv",
+"stroke_time": 0
+}
+}
+current_patient_id = "Jumpify"

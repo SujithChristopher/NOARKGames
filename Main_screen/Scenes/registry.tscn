@@ -1,0 +1,397 @@
+[gd_scene load_steps=7 format=3 uid="uid://dna3kovngiew3"]
+
+[ext_resource type="Script" uid="uid://ckiph54obfh1t" path="res://Main_screen/Scripts/registry.gd" id="1_tjqgy"]
+[ext_resource type="Texture2D" uid="uid://s48uvbgatc0w" path="res://Assets/Background/Pink.png" id="2_tjqgy"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_m584y"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_5sax6"]
+bg_color = Color(0.22736, 0.641662, 0.870024, 1)
+border_width_bottom = 5
+border_color = Color(0.621818, 0.835453, 0.947054, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+shadow_size = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_jhord"]
+bg_color = Color(1, 0.184314, 0, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0, 0, 0, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="Theme" id="Theme_be0ri"]
+Button/styles/normal = SubResource("StyleBoxFlat_jhord")
+
+[node name="Register" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_tjqgy")
+
+[node name="TextureRect" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_tjqgy")
+
+[node name="PatientRegistryLabel" type="Label" parent="TextureRect"]
+layout_mode = 0
+offset_left = 475.0
+offset_top = 13.0
+offset_right = 697.0
+offset_bottom = 60.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_colors/font_shadow_color = Color(0.471852, 0.0029198, 0.902901, 1)
+theme_override_colors/font_outline_color = Color(0.944636, 0.924111, 0.951961, 1)
+theme_override_font_sizes/font_size = 25
+text = "Patient registry"
+horizontal_alignment = 1
+vertical_alignment = 1
+uppercase = true
+
+[node name="PatientDetailsLabel" type="Label" parent="TextureRect"]
+layout_mode = 0
+offset_left = 882.0
+offset_top = 59.0
+offset_right = 1104.0
+offset_bottom = 106.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_colors/font_shadow_color = Color(0.471852, 0.0029198, 0.902901, 1)
+theme_override_colors/font_outline_color = Color(0.944636, 0.924111, 0.951961, 1)
+theme_override_font_sizes/font_size = 25
+text = "Patient details"
+horizontal_alignment = 1
+vertical_alignment = 1
+uppercase = true
+
+[node name="Patient_display" type="RichTextLabel" parent="TextureRect"]
+layout_mode = 0
+offset_left = 875.0
+offset_top = 118.0
+offset_right = 1127.0
+offset_bottom = 495.0
+theme_override_colors/default_color = Color(0, 0, 0, 1)
+
+[node name="RegisterPatient" type="Button" parent="TextureRect"]
+layout_mode = 0
+offset_left = 56.0
+offset_top = 529.0
+offset_right = 286.0
+offset_bottom = 589.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_styles/normal = SubResource("StyleBoxFlat_5sax6")
+text = "Register"
+
+[node name="PatientName" type="LineEdit" parent="TextureRect"]
+layout_mode = 0
+offset_left = 56.0
+offset_top = 88.0
+offset_right = 286.0
+offset_bottom = 148.0
+placeholder_text = "Patient Full name"
+
+[node name="Age" type="LineEdit" parent="TextureRect"]
+layout_mode = 0
+offset_left = 56.0
+offset_top = 167.0
+offset_right = 286.0
+offset_bottom = 227.0
+placeholder_text = "Age"
+
+[node name="HospID" type="LineEdit" parent="TextureRect"]
+layout_mode = 0
+offset_left = 56.0
+offset_top = 250.0
+offset_right = 286.0
+offset_bottom = 310.0
+placeholder_text = "Hospital number"
+
+[node name="GenderLabel" type="Label" parent="TextureRect"]
+layout_mode = 0
+offset_left = 57.0
+offset_top = 332.0
+offset_right = 162.0
+offset_bottom = 355.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Select gender"
+
+[node name="Gender" type="OptionButton" parent="TextureRect"]
+layout_mode = 0
+offset_left = 56.0
+offset_top = 356.0
+offset_right = 286.0
+offset_bottom = 416.0
+item_count = 3
+popup/item_0/text = "Male"
+popup/item_0/id = 0
+popup/item_1/text = "Female"
+popup/item_1/id = 1
+popup/item_2/text = "Others"
+popup/item_2/id = 2
+
+[node name="dominant_hand_label" type="Label" parent="TextureRect"]
+layout_mode = 0
+offset_left = 328.0
+offset_top = 89.0
+offset_right = 449.0
+offset_bottom = 112.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Dominant hand"
+
+[node name="DominantHand" type="OptionButton" parent="TextureRect"]
+texture_filter = 2
+layout_mode = 0
+offset_left = 326.0
+offset_top = 114.0
+offset_right = 556.0
+offset_bottom = 174.0
+item_count = 3
+popup/item_0/text = "Left"
+popup/item_0/id = 0
+popup/item_1/text = "Right"
+popup/item_1/id = 1
+popup/item_2/text = "ambidextrous"
+popup/item_2/id = 2
+
+[node name="affected_hand_label2" type="Label" parent="TextureRect"]
+layout_mode = 0
+offset_left = 328.0
+offset_top = 187.0
+offset_right = 449.0
+offset_bottom = 210.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Affected hand"
+
+[node name="AffectedHand" type="OptionButton" parent="TextureRect"]
+layout_mode = 0
+offset_left = 326.0
+offset_top = 212.0
+offset_right = 556.0
+offset_bottom = 272.0
+item_count = 3
+popup/item_0/text = "Left"
+popup/item_0/id = 0
+popup/item_1/text = "Right"
+popup/item_1/id = 1
+popup/item_2/text = "Both sides"
+popup/item_2/id = 2
+
+[node name="StrokeTime" type="LineEdit" parent="TextureRect"]
+layout_mode = 0
+offset_left = 56.0
+offset_top = 436.0
+offset_right = 286.0
+offset_bottom = 496.0
+placeholder_text = "Time since stroke (Months)"
+virtual_keyboard_type = 2
+
+[node name="PatientListLabel" type="Label" parent="TextureRect"]
+layout_mode = 0
+offset_left = 633.0
+offset_top = 92.0
+offset_right = 754.0
+offset_bottom = 115.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Patient list
+"
+
+[node name="PatientList" type="ItemList" parent="TextureRect"]
+layout_mode = 0
+offset_left = 631.0
+offset_top = 125.0
+offset_right = 846.0
+offset_bottom = 358.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="Delete" type="Button" parent="TextureRect"]
+layout_mode = 0
+offset_left = 634.0
+offset_top = 388.0
+offset_right = 847.0
+offset_bottom = 445.0
+text = "Delete
+"
+
+[node name="ExitButton" type="Button" parent="TextureRect"]
+layout_mode = 0
+offset_left = 744.0
+offset_top = 465.0
+offset_right = 849.0
+offset_bottom = 512.0
+theme = SubResource("Theme_be0ri")
+text = "Exit"
+
+[node name="BackButton" type="Button" parent="TextureRect"]
+layout_mode = 0
+offset_left = 616.0
+offset_top = 466.0
+offset_right = 723.0
+offset_bottom = 513.0
+text = "Main menu"
+
+[node name="Auth" type="Window" parent="TextureRect"]
+initial_position = 2
+size = Vector2i(300, 152)
+visible = false
+
+[node name="Label" type="Label" parent="TextureRect/Auth"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -60.5
+offset_top = 30.0
+offset_right = 60.5
+offset_bottom = 80.0
+grow_horizontal = 2
+text = "Enter password"
+
+[node name="password" type="LineEdit" parent="TextureRect/Auth"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -100.0
+offset_top = -15.5
+offset_right = 100.0
+offset_bottom = 15.5
+grow_horizontal = 2
+grow_vertical = 2
+placeholder_text = "Hint: Department"
+secret = true
+
+[node name="delete_login" type="Button" parent="TextureRect/Auth"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -23.0
+offset_top = -31.0
+offset_right = 23.0
+grow_horizontal = 2
+grow_vertical = 0
+text = "login"
+
+[node name="InvalidDetails" type="Window" parent="TextureRect"]
+auto_translate_mode = 1
+initial_position = 2
+size = Vector2i(300, 152)
+visible = false
+
+[node name="Label" type="Label" parent="TextureRect/InvalidDetails"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -60.5
+offset_top = 30.0
+offset_right = 60.5
+offset_bottom = 80.0
+grow_horizontal = 2
+text = "Please enter all necessary details."
+
+[node name="close_button" type="Button" parent="TextureRect/InvalidDetails"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -23.0
+offset_top = -31.0
+offset_right = 23.0
+grow_horizontal = 2
+grow_vertical = 0
+text = "Close"
+
+[node name="LoginSelectPatient" type="Window" parent="TextureRect"]
+auto_translate_mode = 1
+initial_position = 2
+size = Vector2i(300, 152)
+visible = false
+
+[node name="Label" type="Label" parent="TextureRect/LoginSelectPatient"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -60.5
+offset_top = 30.0
+offset_right = 60.5
+offset_bottom = 80.0
+grow_horizontal = 2
+theme_override_fonts/font = ExtResource("3_m584y")
+text = "Do you want to login as:
+"
+
+[node name="PatientName" type="Label" parent="TextureRect/LoginSelectPatient"]
+visible = false
+offset_left = 100.0
+offset_top = 58.0
+offset_right = 207.0
+offset_bottom = 88.0
+theme_override_fonts/font = ExtResource("3_m584y")
+horizontal_alignment = 1
+
+[node name="login_button" type="Button" parent="TextureRect/LoginSelectPatient"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -100.0
+offset_top = -58.0
+offset_right = -10.0
+offset_bottom = -27.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_fonts/font = ExtResource("3_m584y")
+text = "Login"
+
+[node name="cancel" type="Button" parent="TextureRect/LoginSelectPatient"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -58.0
+offset_right = 110.0
+offset_bottom = -27.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_fonts/font = ExtResource("3_m584y")
+text = "Cancel"
+
+[node name="AdditionalComments" type="TextEdit" parent="TextureRect"]
+layout_mode = 0
+offset_left = 325.0
+offset_top = 300.0
+offset_right = 555.0
+offset_bottom = 390.0
+placeholder_text = "Additional comments"
+
+[connection signal="pressed" from="TextureRect/RegisterPatient" to="." method="_on_register_patient_pressed"]
+[connection signal="item_activated" from="TextureRect/PatientList" to="." method="_on_patient_list_item_activated"]
+[connection signal="item_selected" from="TextureRect/PatientList" to="." method="_on_patient_list_item_selected"]
+[connection signal="pressed" from="TextureRect/Delete" to="." method="_on_delete_pressed"]
+[connection signal="pressed" from="TextureRect/ExitButton" to="." method="_on_exit_button_pressed"]
+[connection signal="pressed" from="TextureRect/BackButton" to="." method="_on_back_button_pressed"]
+[connection signal="close_requested" from="TextureRect/Auth" to="." method="_on_auth_close_requested"]
+[connection signal="pressed" from="TextureRect/Auth/delete_login" to="." method="_on_delete_login_pressed"]
+[connection signal="close_requested" from="TextureRect/InvalidDetails" to="." method="_on_close_button_pressed"]
+[connection signal="pressed" from="TextureRect/InvalidDetails/close_button" to="." method="_on_close_button_pressed"]
+[connection signal="close_requested" from="TextureRect/LoginSelectPatient" to="." method="_on_close_button_pressed"]
+[connection signal="pressed" from="TextureRect/LoginSelectPatient/login_button" to="." method="_on_login_button_pressed"]
+[connection signal="pressed" from="TextureRect/LoginSelectPatient/cancel" to="." method="_on_close_button_pressed"]

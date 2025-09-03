@@ -1,0 +1,91 @@
+[gd_scene load_steps=13 format=3 uid="uid://ciht5nisjgbqp"]
+
+[ext_resource type="Script" uid="uid://c4r6h6t6dnh7f" path="res://Games/random_reach/Scripts/player.gd" id="1_w5ee0"]
+[ext_resource type="Texture2D" uid="uid://b7btc0p4mvt8f" path="res://Assets/Tiny Swords/Resources/Sheep/HappySheep_Idle.png" id="3_uhilm"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ksehs"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(0, 0, 128, 128)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_hcilq"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(256, 0, 128, 128)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_inmmm"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(384, 0, 128, 128)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_larki"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(512, 0, 128, 128)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_wjy1m"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(640, 0, 128, 128)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_k6h4h"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(768, 0, 128, 128)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_ctmfg"]
+atlas = ExtResource("3_uhilm")
+region = Rect2(896, 0, 128, 128)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_dlft7"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ksehs")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_hcilq")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_inmmm")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_larki")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_wjy1m")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_k6h4h")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_ctmfg")
+}],
+"loop": true,
+"name": &"sheep",
+"speed": 5.0
+}]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_y05v0"]
+radius = 7.33333
+height = 14.6667
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_64rk2"]
+radius = 6.66667
+height = 14.0
+
+[node name="CharacterBody2D" type="CharacterBody2D"]
+scale = Vector2(3, 3)
+script = ExtResource("1_w5ee0")
+
+[node name="Sprite2D" type="AnimatedSprite2D" parent="."]
+texture_filter = 1
+position = Vector2(-0.499999, 0.333334)
+scale = Vector2(0.335938, 0.322917)
+sprite_frames = SubResource("SpriteFrames_dlft7")
+animation = &"sheep"
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CapsuleShape2D_y05v0")
+
+[node name="Area2D" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Area2D"]
+shape = SubResource("CapsuleShape2D_64rk2")
+
+[connection signal="area_entered" from="Area2D" to="." method="_on_area_2d_area_entered"]
+[connection signal="area_exited" from="Area2D" to="." method="_on_area_2d_area_exited"]

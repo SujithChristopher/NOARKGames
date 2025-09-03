@@ -1,0 +1,481 @@
+[gd_scene load_steps=21 format=3 uid="uid://fj2c6cebl8pk"]
+
+[ext_resource type="Script" uid="uid://cplymo30m4t22" path="res://Games/flappy_bird/Scripts/flappy_main.gd" id="1_ahv5j"]
+[ext_resource type="PackedScene" uid="uid://cd76jpqxb0eqo" path="res://Games/flappy_bird/Scenes/ground.tscn" id="2_lkjn6"]
+[ext_resource type="Texture2D" uid="uid://c04jveo8e7lmn" path="res://Assets/Background/chirag-vijay-environment.jpg" id="2_qkajw"]
+[ext_resource type="Script" uid="uid://slnssvf31hcb" path="res://Games/flappy_bird/Scripts/ground.gd" id="3_i4a5s"]
+[ext_resource type="PackedScene" uid="uid://wvw586u8r01h" path="res://Games/flappy_bird/Scenes/bird.tscn" id="4_ye8y1"]
+[ext_resource type="Script" uid="uid://beumoolioq1b2" path="res://Games/flappy_bird/Scripts/pilot.gd" id="5_fuths"]
+[ext_resource type="Texture2D" uid="uid://uoq3jhwpvq60" path="res://Assets/Plane/Fly (1).png" id="6_sq106"]
+[ext_resource type="Texture2D" uid="uid://fn3psom18nnv" path="res://Assets/health_and_pointers_bar/Sprites/Heart Bar/Heart Stage 1.png" id="7_60dfc"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="7_m56p3"]
+[ext_resource type="Texture2D" uid="uid://co33yn52kaeqb" path="res://Assets/health_and_pointers_bar/Sprites/Heart Bar/Heart Stage 5.png" id="8_oja8t"]
+[ext_resource type="PackedScene" uid="uid://7nr2tlykv2n5" path="res://Games/flappy_bird/Scenes/game_over.tscn" id="9_wgnds"]
+[ext_resource type="Script" uid="uid://nqypnx6hl2qj" path="res://Games/flappy_bird/Scripts/timer_label.gd" id="10_7qyl5"]
+[ext_resource type="Texture2D" uid="uid://chno14wxf5g0e" path="res://Assets/scoring_system/Background.png" id="11_hp4h5"]
+[ext_resource type="Theme" uid="uid://b431cc7xowdav" path="res://addons/new_theme.tres" id="12_0goge"]
+[ext_resource type="Texture2D" uid="uid://b1ifscbhf76bo" path="res://Assets/scoring_system/medal.webp" id="13_8iopb"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ovamc"]
+bg_color = Color(0.254902, 0.752941, 1, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_size = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ywesg"]
+bg_color = Color(0.857629, 0.665457, 0.907348, 1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.811725, 0.27799, 0.590984, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+shadow_size = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_c6kp5"]
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+shadow_size = 2
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_oy1mx"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("8_oja8t")
+}],
+"loop": true,
+"name": &"Dead",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("7_60dfc")
+}],
+"loop": true,
+"name": &"default",
+"speed": 5.0
+}]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_lyy77"]
+texture = ExtResource("11_hp4h5")
+
+[node name="FlappyMain" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_ahv5j")
+
+[node name="TextureRect" type="TextureRect" parent="."]
+layout_mode = 0
+offset_left = -184.0
+offset_top = -183.0
+offset_right = 1336.0
+offset_bottom = 849.0
+texture = ExtResource("2_qkajw")
+
+[node name="ground" parent="." instance=ExtResource("2_lkjn6")]
+z_index = 1
+position = Vector2(-189, 659)
+script = ExtResource("3_i4a5s")
+
+[node name="pilot" parent="." instance=ExtResource("4_ye8y1")]
+position = Vector2(96, 327)
+scale = Vector2(2, 2)
+script = ExtResource("5_fuths")
+
+[node name="PipeTimer" type="Timer" parent="."]
+wait_time = 2.0
+autostart = true
+
+[node name="logout" type="Button" parent="."]
+z_index = 12
+layout_mode = 0
+offset_left = 7.0
+offset_top = 570.0
+offset_right = 101.0
+offset_bottom = 606.0
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "⬅️ logout
+"
+
+[node name="ScoreBoard" type="Panel" parent="."]
+visible = false
+z_index = 11
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = 886.0
+offset_top = 179.0
+offset_right = 1114.0
+offset_bottom = 243.0
+grow_horizontal = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_ovamc")
+
+[node name="Health" type="Panel" parent="."]
+z_index = 10
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = 911.0
+offset_top = 13.0
+offset_right = 1137.0
+offset_bottom = 81.0
+grow_horizontal = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_ywesg")
+
+[node name="ApplePic" type="Panel" parent="Health"]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 7.0
+offset_top = -25.0
+offset_right = 57.0
+offset_bottom = 25.0
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_c6kp5")
+
+[node name="TextureRect" type="TextureRect" parent="Health/ApplePic"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("7_60dfc")
+expand_mode = 3
+
+[node name="heart1" type="AnimatedSprite2D" parent="Health"]
+position = Vector2(85, 35)
+scale = Vector2(0.625, 0.625)
+sprite_frames = SubResource("SpriteFrames_oy1mx")
+animation = &"Dead"
+autoplay = "default"
+
+[node name="heart2" type="AnimatedSprite2D" parent="Health"]
+position = Vector2(134, 35)
+scale = Vector2(0.625, 0.625)
+sprite_frames = SubResource("SpriteFrames_oy1mx")
+animation = &"Dead"
+autoplay = "default"
+
+[node name="heart3" type="AnimatedSprite2D" parent="Health"]
+position = Vector2(184, 34)
+scale = Vector2(0.625, 0.625)
+sprite_frames = SubResource("SpriteFrames_oy1mx")
+animation = &"Dead"
+autoplay = "default"
+
+[node name="GameOver" parent="." instance=ExtResource("9_wgnds")]
+visible = false
+
+[node name="AdaptRom" type="CheckButton" parent="."]
+z_index = 13
+layout_mode = 0
+offset_left = 497.0
+offset_top = 11.0
+offset_right = 681.0
+offset_bottom = 46.0
+theme_override_colors/font_disabled_color = Color(0, 0, 0, 1)
+theme_override_colors/font_hover_pressed_color = Color(0, 0, 0, 1)
+theme_override_colors/font_hover_color = Color(0, 0, 0, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_colors/font_focus_color = Color(0, 0, 0, 1)
+theme_override_colors/font_pressed_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 20
+text = "Adapt PROM"
+flat = true
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+script = ExtResource("10_7qyl5")
+
+[node name="TimerLabel" type="Label" parent="CanvasLayer"]
+visible = false
+offset_left = 18.0
+offset_top = 11.0
+offset_right = 161.0
+offset_bottom = 55.0
+
+[node name="TimerSelectorPanel" type="Panel" parent="CanvasLayer"]
+visible = false
+offset_left = 392.0
+offset_top = 183.0
+offset_right = 744.0
+offset_bottom = 484.0
+theme_override_styles/panel = SubResource("StyleBoxTexture_lyy77")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/TimerSelectorPanel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -155.5
+offset_top = -103.0
+offset_right = 157.5
+offset_bottom = 138.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 125
+
+[node name="Label" type="Label" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.7065, 0.126, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 25
+text = "SET TIME TO PLAY !"
+horizontal_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="PlayButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "    Play Game    "
+
+[node name="CloseButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "   Close   "
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/TimerSelectorPanel"]
+layout_mode = 0
+offset_left = 218.0
+offset_top = 117.0
+offset_right = 317.0
+offset_bottom = 156.0
+
+[node name="AddOneButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer"]
+layout_mode = 2
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "  +1  "
+
+[node name="AddFiveButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer"]
+layout_mode = 2
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "  +5  "
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="CanvasLayer/TimerSelectorPanel"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 0
+offset_left = 44.0
+offset_top = 117.0
+offset_right = 140.0
+offset_bottom = 157.0
+
+[node name="SubOneButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer2"]
+layout_mode = 2
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "  -1  "
+
+[node name="SubFiveButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer2"]
+layout_mode = 2
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "  -5  "
+
+[node name="TimeSelector" type="Label" parent="CanvasLayer/TimerSelectorPanel"]
+layout_mode = 0
+offset_left = 152.0
+offset_top = 123.0
+offset_right = 195.0
+offset_bottom = 156.0
+theme = ExtResource("12_0goge")
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 20
+text = "0 m"
+
+[node name="CountdownTimer" type="Timer" parent="CanvasLayer"]
+
+[node name="CountdownLabel" type="Label" parent="CanvasLayer/CountdownTimer"]
+offset_left = 474.0
+offset_top = 47.0
+offset_right = 666.0
+offset_bottom = 85.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 25
+text = "Time left:"
+
+[node name="GameOverLabel" type="Label" parent="CanvasLayer"]
+visible = false
+offset_left = 496.0
+offset_top = 272.0
+offset_right = 684.0
+offset_bottom = 314.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_colors/font_shadow_color = Color(0.914062, 0.914062, 0.914062, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 30
+text = "GAME OVER !"
+
+[node name="LogoutButton" type="Button" parent="CanvasLayer/GameOverLabel"]
+layout_mode = 0
+offset_left = -17.0
+offset_top = 56.0
+offset_right = 81.0
+offset_bottom = 95.0
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "⬅️ Logout"
+
+[node name="RetryButton" type="Button" parent="CanvasLayer/GameOverLabel"]
+layout_mode = 0
+offset_left = 104.0
+offset_top = 56.0
+offset_right = 208.0
+offset_bottom = 95.0
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "🔄:Retry"
+
+[node name="PauseButton" type="Button" parent="CanvasLayer"]
+offset_left = 567.0
+offset_top = 575.0
+offset_right = 640.0
+offset_bottom = 608.0
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "Pause"
+
+[node name="TextureRect" type="TextureRect" parent="CanvasLayer"]
+offset_left = 228.0
+offset_top = 11.0
+offset_right = 293.0
+offset_bottom = 83.0
+texture = ExtResource("13_8iopb")
+expand_mode = 1
+
+[node name="TopScoreLabel" type="Label" parent="CanvasLayer/TextureRect"]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 16.0
+offset_right = 49.0
+offset_bottom = 41.0
+theme_override_fonts/font = ExtResource("7_m56p3")
+horizontal_alignment = 1
+
+[node name="ApplePic" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 17.0
+offset_top = 19.0
+offset_right = 81.0
+offset_bottom = 72.0
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_c6kp5")
+
+[node name="TextureRect" type="TextureRect" parent="ApplePic"]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -13.0
+offset_top = 2.0
+offset_right = 10.3442
+offset_bottom = 2.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("6_sq106")
+expand_mode = 3
+
+[node name="ScoreLabel" type="Label" parent="."]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.557
+anchor_bottom = 0.5
+offset_left = 107.0
+offset_top = 26.0
+offset_right = 192.0
+offset_bottom = 61.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 25
+text = "Score"
+
+[node name="Score" type="Label" parent="."]
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = 204.0
+offset_top = 26.0
+offset_right = 252.0
+offset_bottom = 61.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 25
+text = "0"
+
+[node name="Window" type="Window" parent="."]
+auto_translate_mode = 1
+initial_position = 2
+size = Vector2i(610, 200)
+visible = false
+
+[node name="Label" type="Label" parent="Window"]
+offset_left = -1.0
+offset_top = 17.0
+offset_right = 615.0
+offset_bottom = 149.0
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "ASSESSMENT NOT COMPLETED YET!
+PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Window"]
+offset_left = 176.0
+offset_top = 128.0
+offset_right = 404.0
+offset_bottom = 168.0
+theme_override_constants/separation = 20
+
+[node name="do_asses" type="Button" parent="Window/HBoxContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "Do assessment"
+
+[node name="close_asses" type="Button" parent="Window/HBoxContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("7_m56p3")
+text = "Close"
+
+[connection signal="area_entered" from="ground" to="ground" method="_on_area_entered"]
+[connection signal="timeout" from="PipeTimer" to="." method="_on_pipe_timer_timeout"]
+[connection signal="pressed" from="logout" to="." method="_on_logout_pressed"]
+[connection signal="toggled" from="AdaptRom" to="pilot" method="_on_adapt_rom_toggled"]
+[connection signal="pressed" from="Window/HBoxContainer/do_asses" to="." method="_on_do_asses_pressed"]
+[connection signal="pressed" from="Window/HBoxContainer/close_asses" to="." method="_on_close_asses_pressed"]
