@@ -1,12 +1,9 @@
-[gd_scene load_steps=3 format=3 uid="uid://d1q0d6ufo0nxq"]
+[gd_scene load_steps=2 format=3 uid="uid://d1q0d6ufo0nxq"]
 
-[ext_resource type="AudioStream" uid="uid://dwvyohf1k33pv" path="res://Assets/sound_track/music-theme.ogg" id="1_707dt"]
 [ext_resource type="Script" uid="uid://djign3p66ko6e" path="res://Main_screen/Scripts/background_music.gd" id="2_jv8ln"]
 
 [node name="SoundFx" type="Node"]
 
 [node name="BackgroundMusic" type="AudioStreamPlayer" parent="."]
-stream = ExtResource("1_707dt")
 volume_db = -8.432
-parameters/looping = true
 script = ExtResource("2_jv8ln")

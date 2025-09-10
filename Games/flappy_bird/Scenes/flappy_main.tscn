@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://fj2c6cebl8pk"]
+[gd_scene load_steps=18 format=3 uid="uid://fj2c6cebl8pk"]
 
 [ext_resource type="Script" uid="uid://cplymo30m4t22" path="res://Games/flappy_bird/Scripts/flappy_main.gd" id="1_ahv5j"]
 [ext_resource type="PackedScene" uid="uid://cd76jpqxb0eqo" path="res://Games/flappy_bird/Scenes/ground.tscn" id="2_lkjn6"]
@@ -12,8 +12,6 @@
 [ext_resource type="Texture2D" uid="uid://co33yn52kaeqb" path="res://Assets/health_and_pointers_bar/Sprites/Heart Bar/Heart Stage 5.png" id="8_oja8t"]
 [ext_resource type="PackedScene" uid="uid://7nr2tlykv2n5" path="res://Games/flappy_bird/Scenes/game_over.tscn" id="9_wgnds"]
 [ext_resource type="Script" uid="uid://nqypnx6hl2qj" path="res://Games/flappy_bird/Scripts/timer_label.gd" id="10_7qyl5"]
-[ext_resource type="Texture2D" uid="uid://chno14wxf5g0e" path="res://Assets/scoring_system/Background.png" id="11_hp4h5"]
-[ext_resource type="Theme" uid="uid://b431cc7xowdav" path="res://addons/new_theme.tres" id="12_0goge"]
 [ext_resource type="Texture2D" uid="uid://b1ifscbhf76bo" path="res://Assets/scoring_system/medal.webp" id="13_8iopb"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ovamc"]
@@ -63,9 +61,6 @@ animations = [{
 "name": &"default",
 "speed": 5.0
 }]
-
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_lyy77"]
-texture = ExtResource("11_hp4h5")
 
 [node name="FlappyMain" type="Control"]
 layout_mode = 3
@@ -207,106 +202,6 @@ offset_left = 18.0
 offset_top = 11.0
 offset_right = 161.0
 offset_bottom = 55.0
-
-[node name="TimerSelectorPanel" type="Panel" parent="CanvasLayer"]
-visible = false
-offset_left = 392.0
-offset_top = 183.0
-offset_right = 744.0
-offset_bottom = 484.0
-theme_override_styles/panel = SubResource("StyleBoxTexture_lyy77")
-
-[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/TimerSelectorPanel"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -155.5
-offset_top = -103.0
-offset_right = 157.5
-offset_bottom = 138.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 125
-
-[node name="Label" type="Label" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.9, 0.7065, 0.126, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("7_m56p3")
-theme_override_font_sizes/font_size = 25
-text = "SET TIME TO PLAY !"
-horizontal_alignment = 1
-
-[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer"]
-custom_minimum_size = Vector2(40, 40)
-layout_mode = 2
-theme_override_constants/separation = 20
-alignment = 1
-
-[node name="PlayButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "    Play Game    "
-
-[node name="CloseButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "   Close   "
-
-[node name="HBoxContainer" type="HBoxContainer" parent="CanvasLayer/TimerSelectorPanel"]
-layout_mode = 0
-offset_left = 218.0
-offset_top = 117.0
-offset_right = 317.0
-offset_bottom = 156.0
-
-[node name="AddOneButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "  +1  "
-
-[node name="AddFiveButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "  +5  "
-
-[node name="HBoxContainer2" type="HBoxContainer" parent="CanvasLayer/TimerSelectorPanel"]
-custom_minimum_size = Vector2(40, 40)
-layout_mode = 0
-offset_left = 44.0
-offset_top = 117.0
-offset_right = 140.0
-offset_bottom = 157.0
-
-[node name="SubOneButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer2"]
-layout_mode = 2
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "  -1  "
-
-[node name="SubFiveButton" type="Button" parent="CanvasLayer/TimerSelectorPanel/HBoxContainer2"]
-layout_mode = 2
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "  -5  "
-
-[node name="TimeSelector" type="Label" parent="CanvasLayer/TimerSelectorPanel"]
-layout_mode = 0
-offset_left = 152.0
-offset_top = 123.0
-offset_right = 195.0
-offset_bottom = 156.0
-theme = ExtResource("12_0goge")
-theme_override_fonts/font = ExtResource("7_m56p3")
-theme_override_font_sizes/font_size = 20
-text = "0 m"
 
 [node name="CountdownTimer" type="Timer" parent="CanvasLayer"]
 
