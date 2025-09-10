@@ -1,11 +1,11 @@
 [gd_scene load_steps=7 format=3 uid="uid://dv4g57qgdfg33"]
 
-[ext_resource type="Script" uid="uid://chlk3v2pashqe" path="res://Games/fruit_catcher/Scenes/Game/game.gd" id="1_ln2h6"]
+[ext_resource type="Script" uid="uid://c2kyl5dnhrnsq" path="res://Games/fruit_catcher/Scenes/Game/game.gd" id="1_ln2h6"]
 [ext_resource type="PackedScene" uid="uid://dqhaj3fx1ah8r" path="res://Games/fruit_catcher/Scenes/Paddle/paddle.tscn" id="2_gwu2e"]
-[ext_resource type="Texture2D" uid="uid://d04q4wfpcqudk" path="res://Games/fruit_catcher/assets/vecteezy_deep-forest-scene-with-trees-cartoon-background-vector_9577135-1.jpg" id="2_y3kpf"]
-[ext_resource type="AudioStream" uid="uid://c6b4darsin5cb" path="res://Games/fruit_catcher/assets/bgm_action_5.mp3" id="4_ln2h6"]
-[ext_resource type="AudioStream" uid="uid://nunov43qa4b0" path="res://Games/fruit_catcher/assets/spell1_0.wav" id="5_y3kpf"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="8_5dybn"]
+[ext_resource type="Texture2D" uid="uid://c27b2nv71ayht" path="res://Games/fruit_catcher/assets/vecteezy_deep-forest-scene-with-trees-cartoon-background-vector_9577135-1.jpg" id="2_y3kpf"]
+[ext_resource type="AudioStream" uid="uid://deeydsgr4286x" path="res://Games/fruit_catcher/assets/bgm_action_5.mp3" id="4_ln2h6"]
+[ext_resource type="AudioStream" uid="uid://du13ka8foyvek" path="res://Games/fruit_catcher/assets/spell1_0.wav" id="5_y3kpf"]
+[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="8_5dybn"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_ln2h6")

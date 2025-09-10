@@ -1,14 +1,14 @@
 [gd_scene load_steps=20 format=4 uid="uid://dcremoelo5qoc"]
 
-[ext_resource type="Texture2D" uid="uid://bxc0p8vtk7acc" path="res://Assets/Background/SheepBG-min-2.png" id="1_v066f"]
+[ext_resource type="Texture2D" uid="uid://dm32mbjdxrx3i" path="res://Assets/Background/SheepBG-min-2.png" id="1_v066f"]
 [ext_resource type="PackedScene" uid="uid://ciht5nisjgbqp" path="res://Games/random_reach/scenes/player.tscn" id="2_7fnnd"]
-[ext_resource type="Texture2D" uid="uid://bngcn6oh2q8e8" path="res://Assets/Background/grass-2.png" id="2_o6ju6"]
-[ext_resource type="Texture2D" uid="uid://cwqtv62nto34u" path="res://Assets/Terrian/Terrain (16x16).png" id="3_o6ju6"]
-[ext_resource type="Texture2D" uid="uid://b1ifscbhf76bo" path="res://Assets/scoring_system/medal.webp" id="8_3vvhp"]
+[ext_resource type="Texture2D" uid="uid://dcwv7hw3rlpsm" path="res://Assets/Background/grass-2.png" id="2_o6ju6"]
+[ext_resource type="Texture2D" uid="uid://b60plgxeckm7m" path="res://Assets/Terrian/Terrain (16x16).png" id="3_o6ju6"]
+[ext_resource type="Texture2D" uid="uid://do6xyuyqpioqc" path="res://Assets/scoring_system/medal.webp" id="8_3vvhp"]
 [ext_resource type="PackedScene" uid="uid://c6bg6bhe2v1e3" path="res://Games/random_reach/scenes/home_pos.tscn" id="9_72q7b"]
-[ext_resource type="Texture2D" uid="uid://cklorvnyyai30" path="res://Games/random_reach/Sprites/AppleStatic.png" id="10_kaukv"]
-[ext_resource type="AudioStream" uid="uid://bn4wpjscqoj8b" path="res://Games/random_reach/Sprites/apple_eating1.mp3" id="11_0aj7a"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="11_7fnnd"]
+[ext_resource type="Texture2D" uid="uid://dox7kiixfba82" path="res://Games/random_reach/Sprites/AppleStatic.png" id="10_kaukv"]
+[ext_resource type="AudioStream" uid="uid://kbsih5g5vmis" path="res://Games/random_reach/Sprites/apple_eating1.mp3" id="11_0aj7a"]
+[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="11_7fnnd"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_fipgi"]
 texture = ExtResource("3_o6ju6")

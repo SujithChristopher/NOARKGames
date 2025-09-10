@@ -1,7 +1,7 @@
 [gd_scene load_steps=13 format=3 uid="uid://ciht5nisjgbqp"]
 
-[ext_resource type="Script" uid="uid://c4r6h6t6dnh7f" path="res://Games/random_reach/Scripts/player.gd" id="1_w5ee0"]
-[ext_resource type="Texture2D" uid="uid://b7btc0p4mvt8f" path="res://Assets/Tiny Swords/Resources/Sheep/HappySheep_Idle.png" id="3_uhilm"]
+[ext_resource type="Script" uid="uid://d4m2j04ssdu7x" path="res://Games/random_reach/Scripts/player.gd" id="1_w5ee0"]
+[ext_resource type="Texture2D" uid="uid://b00bccirw4eat" path="res://Assets/Tiny Swords/Resources/Sheep/HappySheep_Idle.png" id="3_uhilm"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_ksehs"]
 atlas = ExtResource("3_uhilm")

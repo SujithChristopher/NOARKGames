@@ -1,9 +1,9 @@
 [gd_scene load_steps=9 format=4 uid="uid://vhx3bkgoif43"]
 
-[ext_resource type="VideoStream" uid="uid://8jyvye72a65e" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
-[ext_resource type="Script" uid="uid://dfesven8e7gry" path="res://Main_screen/Scripts/main_window.gd" id="3_54gjo"]
+[ext_resource type="VideoStream" uid="uid://urk7t4x73swm" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
+[ext_resource type="Script" uid="uid://rt0eqog104is" path="res://Main_screen/Scripts/main_window.gd" id="3_54gjo"]
 [ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="3_oasjk"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="4_oasjk"]
+[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="4_oasjk"]
 
 [sub_resource type="Image" id="Image_hwkvm"]
 data = {

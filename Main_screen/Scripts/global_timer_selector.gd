@@ -23,57 +23,57 @@ const MAX_COUNTDOWN_TIME = 2700
 var countdown_time: int = 0
 
 func _ready() -> void:
-    _update_label()
+	_update_label()
 
 func show_panel() -> void:
-    visible = true
-    timer_panel.visible = true
-    _show_timer_buttons()
+	visible = true
+	timer_panel.visible = true
+	_show_timer_buttons()
 
 func hide_panel() -> void:
-    visible = false
-    timer_panel.visible = false
+	visible = false
+	timer_panel.visible = false
 
 func _show_timer_buttons() -> void:
-    add_one_btn.show()
-    add_five_btn.show()
-    sub_one_btn.show()
-    sub_five_btn.show()
+	add_one_btn.show()
+	add_five_btn.show()
+	sub_one_btn.show()
+	sub_five_btn.show()
 
 func _hide_timer_buttons() -> void:
-    add_one_btn.hide()
-    add_five_btn.hide()
-    sub_one_btn.hide()
-    sub_five_btn.hide()
+	add_one_btn.hide()
+	add_five_btn.hide()
+	sub_one_btn.hide()
+	sub_five_btn.hide()
 
 func _modify_countdown_time(amount: int) -> void:
-    countdown_time = clamp(countdown_time + amount, 0, MAX_COUNTDOWN_TIME)
-    _update_label()
+	countdown_time = clamp(countdown_time + amount, 0, MAX_COUNTDOWN_TIME)
+	_update_label()
 
 func _update_label() -> void:
-    var minutes = countdown_time / 60
-    time_label.text = "%2d m" % [minutes]
+	var minutes = countdown_time / 60
+	time_label.text = "%2d m" % [minutes]
 
 func _on_add_one_pressed() -> void:
-    _modify_countdown_time(ONE_MINUTE)
+	_modify_countdown_time(ONE_MINUTE)
 
 func _on_add_five_pressed() -> void:
-    _modify_countdown_time(FIVE_MINUTES)
+	_modify_countdown_time(FIVE_MINUTES)
 
 func _on_sub_one_pressed() -> void:
-    _modify_countdown_time(-ONE_MINUTE)
+	_modify_countdown_time(-ONE_MINUTE)
 
 func _on_sub_five_pressed() -> void:
-    _modify_countdown_time(-FIVE_MINUTES)
+	_modify_countdown_time(-FIVE_MINUTES)
 
 func _on_play_pressed() -> void:
-    _hide_timer_buttons()
-    play_pressed.emit(countdown_time)
+	_hide_timer_buttons()
+	play_pressed.emit(countdown_time)
 
 func _on_close_pressed() -> void:
-    _hide_timer_buttons()
-    close_pressed.emit()
+	_hide_timer_buttons()
+	close_pressed.emit()
 
 func reset_for_retry() -> void:
-    show_panel()
-    _show_timer_buttons()
+	show_panel()
+	_show_timer_buttons()

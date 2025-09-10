@@ -1,7 +1,8 @@
-res://Main_screen/Scenes/main.tscn
+res://Games/random_reach/scenes/random_reach.tscn
 res://Assets/Background/button_icon.tres
 res://Assets/Background/button.tres
-res://Games/random_reach/scenes/random_reach.tscn
+res://debug.json
+res://Main_screen/Scenes/main.tscn
 res://Main_screen/Scenes/GlobalTimerSelector.tscn
 res://Games/random_reach/scenes/player.tscn
 res://Games/flappy_bird/Scenes/flappy_main.tscn
