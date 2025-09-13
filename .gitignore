@@ -1,3 +1,41 @@
+# Godot files
 *.uid
 *.import
 .DS_Store
+
+# Godot 4 specific
+.godot/
+*.tmp
+
+# Godot editor settings
+.import/
+override.cfg
+export.cfg
+export_presets.cfg
+
+# Godot project settings
+project.godot.backup*
+
+# Addons (uncomment if you want to ignore specific addons)
+# addons/
+
+# Logs
+*.log
+
+# Build outputs
+builds/
+exports/
+
+# OS specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# Claude Code files
+.claude/
+claude_*.json
+claude_*.md
+.claude_*

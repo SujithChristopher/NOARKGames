@@ -1,6 +1,7 @@
-res://Games/flappy_bird/Scenes/bird.tscn
+res://Main_screen/Scenes/3d_games.tscn
 res://Assets/Background/button_icon.tres
 res://Assets/Background/button.tres
+res://Games/flappy_bird/Scenes/bird.tscn
 res://Games/flappy_bird/Scenes/flappy_main.tscn
 res://Games/flappy_bird/Scenes/game_over.tscn
 res://Games/flappy_bird/Scenes/ground.tscn
