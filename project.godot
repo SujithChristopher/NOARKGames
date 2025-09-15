@@ -30,6 +30,7 @@ ScoreManager="*res://Main_screen/Scripts/score_manager.gd"
 DebugSettings="*res://Main_screen/Scripts/debug_settings.gd"
 AudioManager="*res://Games/Jumpify/Scenes/Managers/AudioManager.tscn"
 SceneTransition="*res://Games/Jumpify/Scenes/Managers/SceneTransition.tscn"
+GlobalTimerManager="*res://Main_screen/Scripts/GlobalTimerManager.gd"
 
 [display]
 

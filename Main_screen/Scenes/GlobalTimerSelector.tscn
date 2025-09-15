@@ -1,0 +1,114 @@
+[gd_scene load_steps=5 format=3 uid="uid://jl8vnkyebl2h"]
+
+[ext_resource type="Script" uid="uid://cbfu8ryfopt7i" path="res://Main_screen/Scripts/global_timer_selector.gd" id="1_vkyq6"]
+[ext_resource type="Texture2D" uid="uid://bhcf1raqwat0t" path="res://Assets/scoring_system/Background.png" id="2_nrxdl"]
+[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_vkyq6"]
+[ext_resource type="Theme" uid="uid://buuhh047e6jrf" path="res://Assets/Background/button_icon.tres" id="3_nrxdl"]
+
+[node name="Control" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 152.0
+offset_top = 22.0
+offset_right = 960.0
+offset_bottom = 630.0
+script = ExtResource("1_vkyq6")
+
+[node name="Window" type="Window" parent="."]
+initial_position = 2
+size = Vector2i(350, 270)
+
+[node name="TextureRect" type="TextureRect" parent="Window"]
+offset_left = -24.0
+offset_top = -20.0
+offset_right = 375.0
+offset_bottom = 299.0
+texture = ExtResource("2_nrxdl")
+expand_mode = 1
+
+[node name="SubOneButton" type="Button" parent="Window"]
+offset_left = 15.0
+offset_top = 95.0
+offset_right = 75.0
+offset_bottom = 145.0
+theme = ExtResource("3_nrxdl")
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+text = "-1"
+
+[node name="SubFiveButton" type="Button" parent="Window"]
+offset_left = 78.0
+offset_top = 95.0
+offset_right = 138.0
+offset_bottom = 145.0
+theme = ExtResource("3_nrxdl")
+theme_override_colors/icon_hover_pressed_color = Color(0, 0, 0, 1)
+theme_override_colors/icon_pressed_color = Color(0, 0, 0, 1)
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_colors/font_pressed_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+text = "-5"
+
+[node name="AddOneButton" type="Button" parent="Window"]
+offset_left = 203.0
+offset_top = 95.0
+offset_right = 263.0
+offset_bottom = 145.0
+theme = ExtResource("3_nrxdl")
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+text = "+1"
+
+[node name="AddFiveButton" type="Button" parent="Window"]
+offset_left = 271.0
+offset_top = 95.0
+offset_right = 331.0
+offset_bottom = 145.0
+theme = ExtResource("3_nrxdl")
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+text = "+5"
+
+[node name="PlayButton" type="Button" parent="Window"]
+offset_left = 23.0
+offset_top = 162.0
+offset_right = 173.0
+offset_bottom = 222.0
+theme = ExtResource("3_nrxdl")
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+text = "    PLAY GAME   "
+
+[node name="CloseButton" type="Button" parent="Window"]
+offset_left = 175.0
+offset_top = 161.0
+offset_right = 325.0
+offset_bottom = 221.0
+theme = ExtResource("3_nrxdl")
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+text = "   CLOSE  "
+
+[node name="Title" type="Label" parent="Window"]
+offset_left = 25.0
+offset_top = 22.0
+offset_right = 330.0
+offset_bottom = 62.0
+theme_override_colors/font_color = Color(0.988235, 0.776471, 0, 1)
+theme_override_fonts/font = ExtResource("2_vkyq6")
+theme_override_font_sizes/font_size = 30
+text = "SET TIME TO PLAY !"
+
+[node name="Time" type="Label" parent="Window"]
+offset_left = 150.0
+offset_top = 106.0
+offset_right = 193.0
+offset_bottom = 136.0
+theme_override_fonts/font = ExtResource("2_vkyq6")
+
+[connection signal="pressed" from="Window/SubOneButton" to="." method="_on_sub_one_pressed"]
+[connection signal="pressed" from="Window/SubFiveButton" to="." method="_on_sub_five_pressed"]
+[connection signal="pressed" from="Window/AddOneButton" to="." method="_on_add_one_pressed"]
+[connection signal="pressed" from="Window/AddFiveButton" to="." method="_on_add_five_pressed"]
+[connection signal="pressed" from="Window/PlayButton" to="." method="_on_play_pressed"]
+[connection signal="pressed" from="Window/CloseButton" to="." method="_on_close_pressed"]

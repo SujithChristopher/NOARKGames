@@ -2,9 +2,6 @@ extends Node2D
 
 # Constants
 const LOG_INTERVAL: float = 0.02
-const MAX_COUNTDOWN_TIME: int = 2700  # 45 minutes max
-const ONE_MINUTE: int = 60
-const FIVE_MINUTES: int = 300
 const GAME_NAME: String = "FruitCatcher"
 const GEM = preload("res://Games/fruit_catcher/Scenes/Fruits/fruit.tscn")
 const MARGIN: float = 70.0
@@ -42,33 +39,21 @@ var log_timer: Timer
 
 # Node references
 @onready var spawn_timer: Timer = $SpawnTimer
-
 @onready var paddle: Area2D = $Paddle
 @onready var score_sound: AudioStreamPlayer2D = $ScoreSound
 @onready var sound: AudioStreamPlayer = $Sound
 @onready var score_label: Label = $ScoreLabel
 @onready var game_over_label: ColorRect = $ColorRect
-
-# Timer UI nodes
-@onready var timer_panel: Control = $TimerSelectorPanel
 @onready var countdown_display: Label = $CountdownLabel
-@onready var time_label: Label = $TimerSelectorPanel/TimeSelector
-@onready var countdown_timer: Timer = $CountdownTimer
 @onready var top_score_label: Label = $TopScoreLabel
 
-# Button nodes
-@onready var _button_nodes = {
-	"play_button": $TimerSelectorPanel/VBoxContainer/HBoxContainer/PlayButton,
-	"close_button": $TimerSelectorPanel/VBoxContainer/HBoxContainer/CloseButton,
+# Button nodes (cleaned up)
+@onready var button_nodes = {
 	"pause_button": $PauseButton,
 	"retry_button": $ColorRect/GameOverLabel/RetryButton,
-	"add_one_btn": $TimerSelectorPanel/HBoxContainer/AddOneButton,
-	"add_five_btn": $TimerSelectorPanel/HBoxContainer/AddFiveButton,
-	"sub_one_btn": $TimerSelectorPanel/HBoxContainer2/SubOneButton,
-	"sub_five_btn": $TimerSelectorPanel/HBoxContainer2/SubFiveButton,
-	"close_assess":$Window/HBoxContainer/close_asses,
+	"close_assess": $Window/HBoxContainer/close_asses,
 	"do_assess": $Window/HBoxContainer/do_asses,
-	"adapt_prom":$AdaptProm,
+	"adapt_prom": $AdaptProm,
 	"warning_window": $Window
 }
 
@@ -79,18 +64,26 @@ func _enter_tree() -> void:
 	print("Game:: _enter_tree")
 
 func _ready() -> void:
-	_setup_screen_boundaries()
-	_setup_timers()
-	_setup_ui()
-	_initialize_game_state()
-	_update_top_score_display()
+	setup_screen_boundaries()
+	setup_timers()
+	setup_ui()
+	initialize_game_state()
+	update_top_score_display()
+	setup_global_timer()
 	
+func setup_global_timer() -> void:
+	# Add the global timer selector to this game
+	GlobalTimerManager.add_timer_selector_to_game(self)
+	
+	# Connect to global timer signals
+	GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
+	GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
 
-func _setup_screen_boundaries() -> void:
+func setup_screen_boundaries() -> void:
 	START_OF_SCREEN_X = get_viewport_rect().position.x
 	END_OF_SCREEN_X = get_viewport_rect().end.x
 
-func _setup_timers() -> void:
+func setup_timers() -> void:
 	# Setup log timer
 	log_timer = Timer.new()
 	log_timer.wait_time = LOG_INTERVAL
@@ -101,33 +94,63 @@ func _setup_timers() -> void:
 	# Stop spawn timer initially
 	spawn_timer.stop()
 
-func _setup_ui() -> void:
-	timer_panel.visible = true
+func setup_ui() -> void:
 	game_over_label.visible = false
-	countdown_display.hide()
-	_button_nodes.pause_button.hide()
-	update_time_label()
+	countdown_display.visible = false
+	button_nodes.pause_button.hide()
 
-func _initialize_game_state() -> void:
+func initialize_game_state() -> void:
 	game_active = false
 	game_started = false
 	is_paused = false
 	pause_state = 1
 	status = "waiting"
 
-func _update_top_score_display() -> void:
+func update_top_score_display() -> void:
 	var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
 	var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
 	top_score_label.text = "Top Score: " + str(top_score)
 	print("Top score for patient ", patient_id, " in ", GAME_NAME, ": ", top_score)
 
+# Global Timer Callbacks
+func _on_global_timer_play_pressed(time: int) -> void:
+	GlobalTimer.start_timer()
+	game_started = true
+	countdown_time = time
+	start_game_with_timer(time)
+
+func _on_global_timer_close_pressed() -> void:
+	game_started = true
+	countdown_display.hide()
+	start_game_without_timer()
+
+func start_game_with_timer(time: int) -> void:
+	countdown_active = true
+	countdown_time = time
+	countdown_display.visible = true
+	GlobalTimerManager.start_countdown_with_time(time)
+	start_game()
+	
+func start_game_without_timer() -> void:
+	countdown_active = false
+	GlobalTimer.start_timer()
+	GlobalTimerManager.start_game_without_timer()
+	start_game()
+
+func _on_global_countdown_finished() -> void:
+	end_game()
+
+func _on_global_countdown_updated(time_left: int) -> void:
+	countdown_time = time_left
+	countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+
 func _process(delta: float) -> void:
 	if not game_started:
 		return
 	if game_started and game_active:
-		_update_tracking_data()
+		update_tracking_data()
 
-func _update_tracking_data() -> void:
+func update_tracking_data() -> void:
 	# Update paddle position
 	paddle_x = paddle.position.x
 	paddle_y = paddle.position.y
@@ -145,72 +168,16 @@ func _update_tracking_data() -> void:
 	device_y = GlobalScript.raw_y
 	device_z = GlobalScript.raw_z
 
-# Timer Control Functions
-func update_time_label() -> void:
-	var minutes = countdown_time / 60
-	time_label.text = "%2d m" % [minutes]
-
-func _modify_countdown_time(amount: int) -> void:
-	countdown_time = clamp(countdown_time + amount, 0, MAX_COUNTDOWN_TIME)
-	update_time_label()
-	countdown_display.visible = true
-	_update_countdown_display()
-
-func _on_add_one_pressed() -> void:
-	_modify_countdown_time(ONE_MINUTE)
-
-func _on_add_five_pressed() -> void:
-	_modify_countdown_time(FIVE_MINUTES)
-
-func _on_sub_one_pressed() -> void:
-	_modify_countdown_time(-ONE_MINUTE)
-
-func _on_sub_five_pressed() -> void:
-	_modify_countdown_time(-FIVE_MINUTES)
-
-func _on_play_pressed() -> void:
-	if countdown_time <= 0:
-		return
-	
-	GlobalTimer.start_timer()
-	_hide_timer_ui()
-	_start_game_with_timer()
-
-func _on_close_pressed() -> void:
-	_hide_timer_ui()
-	_start_game_without_timer()
-
-func _hide_timer_ui() -> void:
-	timer_panel.visible = false
-	time_label.hide()
-	_button_nodes.pause_button.show()
-
-func _show_timer_ui() -> void:
-	timer_panel.show()
-	_button_nodes.pause_button.hide()
-	update_time_label()
-
-func _start_game_with_timer() -> void:
-	countdown_active = true
-	countdown_timer.wait_time = 1.0
-	countdown_timer.start()
-	_start_game()
-	_update_countdown_display()
-
-func _start_game_without_timer() -> void:
-	countdown_active = false
-	GlobalTimer.start_timer()
-	_start_game()
-
-func _start_game() -> void:
+func start_game() -> void:
 	game_active = true
 	game_started = true
 	status = "playing"
-	_setup_game_logging()
+	setup_game_logging()
 	log_timer.start()
+	button_nodes.pause_button.show()
 	spawn_gem()
 
-func _setup_game_logging() -> void:
+func setup_game_logging() -> void:
 	GlobalScript.start_new_session_if_needed()
 	game_log_file = Manager.create_game_log_file(GAME_NAME, GlobalSignals.current_patient_id)
 	game_log_file.store_csv_line(PackedStringArray([
@@ -244,8 +211,8 @@ func _on_gem_off_screen() -> void:
 	print("Game:: _on_gem_off_screen - Gem missed")
 	current_gem = null
 	status = "gem_missed"
-	missed_gems +=1
-	if missed_gems >=3:
+	missed_gems += 1
+	if missed_gems >= 3:
 		game_over_label.show()
 		game_active = false
 		return
@@ -262,7 +229,7 @@ func _on_paddle_area_entered(area: Area2D) -> void:
 		status = "gem_caught"
 		
 		ScoreManager.update_top_score(GlobalSignals.current_patient_id, GAME_NAME, _score)
-		_update_top_score_display()
+		update_top_score_display()
 		if not score_sound.playing:
 			score_sound.position = area.position
 			score_sound.play()
@@ -273,18 +240,16 @@ func _on_paddle_area_entered(area: Area2D) -> void:
 		if game_active:
 			spawn_gem()
 
-
 func _on_pause_button_pressed() -> void:
 	if is_paused:
-		_resume_game()
+		resume_game()
 	else:
-		_pause_game()
+		pause_game()
 	is_paused = !is_paused
 
-func _pause_game() -> void:
+func pause_game() -> void:
 	GlobalTimer.pause_timer()
-	if countdown_active:
-		countdown_timer.stop()
+	GlobalTimerManager.pause_countdown()
 	
 	game_active = false
 	paddle.set_process(false)
@@ -292,14 +257,13 @@ func _pause_game() -> void:
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.set_process(false)
 	
-	_button_nodes.pause_button.text = "Resume"
+	button_nodes.pause_button.text = "Resume"
 	pause_state = 0
 	status = "paused"
 
-func _resume_game() -> void:
+func resume_game() -> void:
 	GlobalTimer.resume_timer()
-	if countdown_active:
-		countdown_timer.start()
+	GlobalTimerManager.resume_countdown()
 	
 	game_active = true
 	paddle.set_process(true)
@@ -307,26 +271,11 @@ func _resume_game() -> void:
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.set_process(true)
 	
-	_button_nodes.pause_button.text = "Pause"
+	button_nodes.pause_button.text = "Pause"
 	pause_state = 1
 	status = "playing"
 
-# Countdown Timer Functions
-func _on_countdown_timer_timeout() -> void:
-	if countdown_active:
-		countdown_time -= 1
-		_update_countdown_display()
-		if countdown_time <= 0:
-			countdown_active = false
-			countdown_timer.stop()
-			_end_game()
-
-func _update_countdown_display() -> void:
-	var minutes = countdown_time / 60
-	var seconds = countdown_time % 60
-	countdown_display.text = "TIME LEFT: %02d:%02d" % [minutes, seconds]
-
-func _end_game() -> void:
+func end_game() -> void:
 	print("Game Over! Final Score: ", _score)
 	game_active = false
 	game_started = false
@@ -340,46 +289,45 @@ func _end_game() -> void:
 	log_timer.stop()
 	
 	# Save final score
-	_save_final_score()
+	save_final_score()
 	
 	# Play end sound
-	#sound.stream = EXPLODE
 	sound.play()
 	
 	# Show game over UI
 	GlobalTimer.stop_timer()
 	game_over_label.visible = true
 
-func _save_final_score() -> void:
+func save_final_score() -> void:
 	print("Saving final score: ", _score)
 	
 	if game_log_file:
 		game_log_file.store_line("Final Score: " + str(_score))
 		game_log_file.flush()
 	
-	# Use update_top_score method (your ScoreManager's correct method)
+	# Use update_top_score method
 	var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
 	print("Updating top score for patient: ", patient_id, " Game: ", GAME_NAME, " Score: ", _score)
 	
 	ScoreManager.update_top_score(patient_id, GAME_NAME, _score)
 	
 	# Update top score display immediately
-	_update_top_score_display()
+	update_top_score_display()
 	
 	# Debug: Print current scores
 	print("Current top score after saving: ", ScoreManager.get_top_score(patient_id, GAME_NAME))
 
-
 func _on_retry_button_pressed() -> void:
-	timer_panel.show()
-	_reset_game()
-	_show_timer_ui()
+	reset_game()
+	# Show timer selector for retry
+	GlobalTimerManager.show_timer_selector_for_retry()
 
 func _on_logout_button_pressed() -> void:
+	GlobalTimerManager.remove_timer_selector_from_game()
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
 
-func _reset_game() -> void:
+func reset_game() -> void:
 	# Clean up current gem
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.queue_free()
@@ -395,23 +343,25 @@ func _reset_game() -> void:
 	is_paused = false
 	pause_state = 1
 	status = "waiting"
+	missed_gems = 0
 	
 	# Reset UI
 	game_over_label.visible = false
-	countdown_display.hide()
-	countdown_timer.stop()
-	log_timer.stop()
+	countdown_display.visible = false
+	button_nodes.pause_button.hide()
 	
 	# Close log file
 	if game_log_file:
 		game_log_file.close()
 		game_log_file = null
 	
+	log_timer.stop()
+	
 	# Reset paddle
 	paddle.set_process(true)
 	
 	# Update top score display
-	_update_top_score_display()
+	update_top_score_display()
 
 # Logging Function
 func _on_log_timer_timeout() -> void:
@@ -430,7 +380,7 @@ func _on_log_timer_timeout() -> void:
 			str(gem_y),
 			str(countdown_time),
 			str(_score),  # gems_caught (same as score)
-			"0"  # gems_missed (could be tracked separately if needed)
+			str(missed_gems)
 		]))
 
 # Assessment Functions
@@ -438,15 +388,16 @@ func _on_do_asses_pressed() -> void:
 	get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
-	_button_nodes.warning_window.visible = false
-
+	button_nodes.warning_window.visible = false
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		if game_log_file:
 			game_log_file.close()
+		GlobalTimerManager.remove_timer_selector_from_game()
 		get_tree().quit()
 
 func _on_gameover_logout_pressed() -> void:
+	GlobalTimerManager.remove_timer_selector_from_game()
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
