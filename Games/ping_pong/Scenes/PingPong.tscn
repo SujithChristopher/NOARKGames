@@ -1,9 +1,9 @@
-[gd_scene load_steps=21 format=4 uid="uid://cuej5ryifr164"]
+[gd_scene load_steps=21 format=4 uid="uid://w15x815lgg7o"]
 
 [ext_resource type="Texture2D" uid="uid://dq0fpat00ukhu" path="res://Assets/Background/Space.jpg" id="1_koe3q"]
 [ext_resource type="PackedScene" uid="uid://cqbhdd3f3ysqn" path="res://Games/ping_pong/Scenes/pp_player.tscn" id="2_x01ca"]
 [ext_resource type="Script" uid="uid://twnu4hd5yb43" path="res://Games/ping_pong/scripts/pp_player.gd" id="3_day0s"]
-[ext_resource type="PackedScene" uid="uid://c80st638uowc8" path="res://Games/ping_pong/Scenes/pp_computer.tscn" id="3_p81ul"]
+[ext_resource type="PackedScene" path="res://Games/ping_pong/Scenes/pp_computer.tscn" id="3_p81ul"]
 [ext_resource type="PackedScene" uid="uid://bgsliavl2kr2u" path="res://Games/ping_pong/Scenes/ball.tscn" id="4_ec0xc"]
 [ext_resource type="Script" uid="uid://bxqi2oc3x6whx" path="res://Games/ping_pong/scripts/pp_computer.gd" id="4_mxgn3"]
 [ext_resource type="Script" uid="uid://qe7u2dgdar7d" path="res://Games/ping_pong/scripts/ball.gd" id="5_cp50h"]
