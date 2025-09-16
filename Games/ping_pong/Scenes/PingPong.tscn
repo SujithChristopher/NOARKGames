@@ -570,13 +570,13 @@ theme_override_font_sizes/font_size = 25
 text = "Time left :"
 
 [node name="GameOverLabel" type="Label" parent="CanvasLayer"]
-visible = false
 offset_left = 452.0
 offset_top = 269.0
 offset_right = 673.0
 offset_bottom = 311.0
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("15_koe3q")
 theme_override_font_sizes/font_size = 30
 text = "GAME OVER!"
 horizontal_alignment = 1
@@ -587,6 +587,7 @@ offset_left = 10.0
 offset_top = 53.0
 offset_right = 107.0
 offset_bottom = 94.0
+theme_override_fonts/font = ExtResource("15_koe3q")
 text = "⬅️ Logout"
 
 [node name="RetryButton" type="Button" parent="CanvasLayer/GameOverLabel"]
@@ -595,6 +596,7 @@ offset_left = 121.0
 offset_top = 54.0
 offset_right = 239.0
 offset_bottom = 91.0
+theme_override_fonts/font = ExtResource("15_koe3q")
 text = "🔄:Retry"
 
 [node name="PauseButton" type="Button" parent="CanvasLayer"]
@@ -621,6 +623,14 @@ offset_right = 56.0
 offset_bottom = 39.0
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 horizontal_alignment = 1
+
+[node name="ScoreDisplayLabel" type="Label" parent="CanvasLayer"]
+offset_left = 476.0
+offset_top = 295.0
+offset_right = 691.0
+offset_bottom = 341.0
+theme_override_fonts/font = ExtResource("15_koe3q")
+theme_override_font_sizes/font_size = 30
 
 [node name="TileMapLayer" type="TileMapLayer" parent="."]
 position = Vector2(8, 8)
