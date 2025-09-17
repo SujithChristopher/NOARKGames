@@ -1,9 +1,9 @@
 [gd_scene load_steps=10 format=4 uid="uid://w7m2uhyqp1ir"]
 
-[ext_resource type="Script" uid="uid://l80o1fuw3l58" path="res://Main_screen/Scripts/select_game.gd" id="1_td58v"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_crqup"]
+[ext_resource type="Script" uid="uid://1l14fd3uxspq" path="res://Main_screen/Scripts/select_game.gd" id="1_td58v"]
+[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_crqup"]
 [ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="2_ghqbc"]
-[ext_resource type="Texture2D" uid="uid://q3jbwkcjw30n" path="res://Assets/Background/2d.png" id="2_h1wm0"]
+[ext_resource type="Texture2D" uid="uid://c0dd1vgroj6v8" path="res://Assets/Background/2d.png" id="2_h1wm0"]
 
 [sub_resource type="Image" id="Image_mcliy"]
 data = {

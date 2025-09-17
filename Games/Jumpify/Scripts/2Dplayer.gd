@@ -13,9 +13,6 @@ const MAX_BOUNDS = Vector2(1105, 577)
 
 # Timer constants
 const LOG_INTERVAL = 0.02
-const MAX_COUNTDOWN_TIME = 2700
-const ONE_MINUTE = 60
-const FIVE_MINUTES = 300
 
 # Movement variables
 var network_position = Vector2.ZERO
@@ -29,16 +26,14 @@ var score = 0
 var game_over = false
 var countdown_time = 0
 var countdown_active = false
-var current_time := 0
 var is_paused = false
 var pause_state = 1
 var adapt_toggle: bool = false
 
-
 # Status tracking variables
 var coin_collected_timer = 0.0
 var coin_missed_timer = 0.0
-var status_hold_duration = 0.5  # Hold special status for 0.5 seconds
+var status_hold_duration = 0.5
 
 # Position tracking variables
 var pos_x: float
@@ -48,8 +43,8 @@ var game_x: float
 var game_y = 0.0
 var game_z: float
 
-# Coin tracking variables - NEW - Direct node reference
-@onready var coin_node: Area2D = $"../Coin"  # Direct path to your coin
+# Coin tracking variables - Direct node reference
+@onready var coin_node: Area2D = $"../Coin"
 var coin_target_x: float = 0.0
 var coin_target_z: float = 0.0
 
@@ -62,35 +57,23 @@ var game_name = "Jumpify"
 var game_log_file
 var log_timer := Timer.new()
 
-# Node references - UI elements
-@onready var _ui_nodes = {
+# Node references - UI elements (cleaned up)
+@onready var ui_nodes = {
 	"score_board": %ScoreLabel,
 	"countdown_display": $"../UserInterface/GameUI/CountdownLabel",
 	"game_over_label": $"../UserInterface/GameUI/ColorRect/GameOverLabel",
-	"time_label": $"../UserInterface/GameUI/TimerSelectorPanel/TimeSelector",
 	"top_score_label": $"../UserInterface/GameUI/TopScoreLabel",
 	"color_rect": $"../UserInterface/GameUI/ColorRect",
 	"warning_window": $"../UserInterface/GameUI/Window"
 }
 
-@onready var _timer_nodes = {
-	"countdown_timer": $"../UserInterface/GameUI/CountdownTimer"
-}
-
-@onready var _panel_nodes = {
-	"timer_panel": $"../UserInterface/GameUI/TimerSelectorPanel",
+@onready var panel_nodes = {
 	"pause_button": $"../UserInterface/GameUI/PauseButton"
 }
 
-@onready var _button_nodes = {
-	"play_button": $"../UserInterface/GameUI/TimerSelectorPanel/VBoxContainer/HBoxContainer/PlayButton",
-	"close_button": $"../UserInterface/GameUI/TimerSelectorPanel/VBoxContainer/HBoxContainer/CloseButton",
+@onready var button_nodes = {
 	"logout_button": $"../UserInterface/GameUI/ColorRect/GameOverLabel/LogoutButton",
 	"retry_button": $"../UserInterface/GameUI/ColorRect/GameOverLabel/RetryButton",
-	"add_one_btn": $"../UserInterface/GameUI/TimerSelectorPanel/HBoxContainer/AddOneButton",
-	"add_five_btn": $"../UserInterface/GameUI/TimerSelectorPanel/HBoxContainer/AddFiveButton",
-	"sub_one_btn": $"../UserInterface/GameUI/TimerSelectorPanel/HBoxContainer2/SubOneButton",
-	"sub_five_btn": $"../UserInterface/GameUI/TimerSelectorPanel/HBoxContainer2/SubFiveButton",
 	"close_assess": $"../UserInterface/GameUI/Window/HBoxContainer/close_asses",
 	"do_assess": $"../UserInterface/GameUI/Window/HBoxContainer/do_asses",
 	"adapt_prom": $"../UserInterface/GameUI/AdaptProm"
@@ -106,63 +89,99 @@ var path = "res://debug.json"
 var debug
 
 func _ready() -> void:
-	_load_debug_config()
-	_setup_timers()
-	_setup_ui()
-	_connect_signals()
-	_initialize_game_state()
+	load_debug_config()
+	setup_timers()
+	setup_ui()
+	connect_signals()
+	initialize_game_state()
+	setup_global_timer()
 	network_position = Vector2.ZERO
 	previous_position = position
 
-func _load_debug_config() -> void:
+func setup_global_timer() -> void:
+	# Add the global timer selector to this game
+	GlobalTimerManager.add_timer_selector_to_game(self)
+	
+	# Connect to global timer signals
+	GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
+	GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
+
+func load_debug_config() -> void:
 	debug = JSON.parse_string(FileAccess.get_file_as_string(path))['debug']
 
-func _setup_timers() -> void:
+func setup_timers() -> void:
 	log_timer.wait_time = LOG_INTERVAL
 	log_timer.autostart = true
 	add_child(log_timer)
 
-func _setup_ui() -> void:
-	_panel_nodes.timer_panel.visible = true
-	_ui_nodes.color_rect.visible = false
-	_ui_nodes.game_over_label.visible = false
-	_ui_nodes.game_over_label.hide()
-	_ui_nodes.color_rect.hide()
-	_update_top_score_display()
-	update_label()
+func setup_ui() -> void:
+	ui_nodes.color_rect.visible = false
+	ui_nodes.game_over_label.visible = false
+	ui_nodes.game_over_label.hide()
+	ui_nodes.color_rect.hide()
+	ui_nodes.countdown_display.visible = false
+	update_top_score_display()
 	
 	# Initialize score display
-	_ui_nodes.score_board.text = "Score: 0"
+	ui_nodes.score_board.text = "Score: 0"
 
-func _connect_signals() -> void:
-	# Timer connections
-	_timer_nodes.countdown_timer.timeout.connect(_on_countdown_timer_timeout)
-	
-	# Connect coin signal - now using direct node reference
+func connect_signals() -> void:
+	# Connect coin signal - using direct node reference
 	if coin_node:
 		coin_node.coin_missed.connect(_on_coin_missed)
 		print("✓ Coin signal connected successfully")
 	else:
 		print("✗ ERROR: Coin node not found - check the path in @onready var coin_node")
-	
-func _initialize_game_state() -> void:
+
+func initialize_game_state() -> void:
 	network_position = Vector2.ZERO
 	GlobalScript.start_new_session_if_needed()
 
-func _update_top_score_display() -> void:
+func update_top_score_display() -> void:
 	var top_score = ScoreManager.get_top_score(patient_id, game_name)
-	_ui_nodes.top_score_label.text = "HIGH SCORE: " + str(top_score)
+	ui_nodes.top_score_label.text = "HIGH SCORE: " + str(top_score)
+
+# Global Timer Callbacks
+func _on_global_timer_play_pressed(time: int) -> void:
+	GlobalTimer.start_timer()
+	game_started = true
+	countdown_time = time
+	start_game_with_timer(time)
+	setup_game_logging()
+
+func _on_global_timer_close_pressed() -> void:
+	game_started = true
+	ui_nodes.countdown_display.hide()
+	start_game_without_timer()
+	setup_game_logging()
+
+func start_game_with_timer(time: int) -> void:
+	countdown_active = true
+	countdown_time = time
+	ui_nodes.countdown_display.visible = true
+	GlobalTimerManager.start_countdown_with_time(time)
+	
+func start_game_without_timer() -> void:
+	countdown_active = false
+	GlobalTimer.start_timer()
+	GlobalTimerManager.start_game_without_timer()
+
+func _on_global_countdown_finished() -> void:
+	show_game_over()
+
+func _on_global_countdown_updated(time_left: int) -> void:
+	countdown_time = time_left
+	ui_nodes.countdown_display.text = GlobalTimerManager.get_countdown_display_text()
 
 func _physics_process(delta):
 	if game_started and not is_paused:
-		_update_player_position()
-		_update_animations()
-		_update_status_based_on_timers(delta)
-		_update_timer_display()
-		_update_coin_target_position()  # NEW: Update coin target tracking
+		update_player_position()
+		update_animations()
+		update_status_based_on_timers(delta)
+		update_coin_target_position()
 
-# NEW: Function to update coin target position for logging
-func _update_coin_target_position() -> void:
+# Function to update coin target position for logging
+func update_coin_target_position() -> void:
 	if coin_node and is_instance_valid(coin_node):
 		var coin_pos = coin_node.position
 		
@@ -179,7 +198,7 @@ func _update_coin_target_position() -> void:
 		coin_target_x = game_x
 		coin_target_z = game_z
 
-func _update_player_position() -> void:
+func update_player_position() -> void:
 	# Store previous position for animation calculations
 	previous_position = position
 	
@@ -203,9 +222,9 @@ func _update_player_position() -> void:
 		position.x = clamp(position.x, MIN_BOUNDS.x, MAX_BOUNDS.x)
 		position.y = clamp(position.y, MIN_BOUNDS.y, MAX_BOUNDS.y)
 		
-		_update_position_tracking()
+		update_position_tracking()
 
-func _update_position_tracking() -> void:
+func update_position_tracking() -> void:
 	pos_x = GlobalScript.raw_x
 	pos_y = GlobalScript.raw_y
 	pos_z = GlobalScript.raw_z
@@ -222,7 +241,7 @@ func _update_position_tracking() -> void:
 		game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Z * GlobalSignals.global_scalar_y)
 
 # Handle status with timers - no coin.gd changes needed
-func _update_status_based_on_timers(delta):
+func update_status_based_on_timers(delta):
 	# Update timers
 	if coin_collected_timer > 0:
 		coin_collected_timer -= delta
@@ -237,7 +256,7 @@ func _update_status_based_on_timers(delta):
 	# Default to moving
 	status = "moving"
 
-func _update_animations():
+func update_animations():
 	# Calculate movement based on position changes
 	var position_diff = position - previous_position
 	var is_moving = position_diff.length() > 1.0
@@ -270,103 +289,25 @@ func _update_animations():
 		elif last_movement_direction > 0:
 			player_sprite.flip_h = false
 
-# Timer Selection Functions
-func update_label() -> void:
-	_ui_nodes.time_label.text = str(current_time) + " sec"
-	var minutes = countdown_time / 60
-	_ui_nodes.time_label.text = "%2d m" % [minutes]
-
-func _modify_countdown_time(amount: int) -> void:
-	countdown_time = clamp(countdown_time + amount, 0, MAX_COUNTDOWN_TIME)
-	_update_time_display()
-	_ui_nodes.countdown_display.visible = true
-	update_label()
-
-func _on_add_one_pressed() -> void:
-	_modify_countdown_time(ONE_MINUTE)
-
-func _on_add_five_pressed() -> void:
-	_modify_countdown_time(FIVE_MINUTES)
-
-func _on_sub_one_pressed() -> void:
-	_modify_countdown_time(-ONE_MINUTE)
-
-func _on_sub_five_pressed() -> void:
-	_modify_countdown_time(-FIVE_MINUTES)
-
-func _on_play_pressed() -> void:
-	GlobalTimer.start_timer()
-	_panel_nodes.timer_panel.visible = false
-	game_started = true
-	_hide_timer_buttons()
-	start_game_with_timer()
-	_setup_game_logging()
-
-func _on_close_pressed() -> void:
-	_panel_nodes.timer_panel.visible = false
-	_hide_timer_buttons()
-	game_started = true
-	_ui_nodes.countdown_display.hide()
-	start_game_without_timer()
-	_setup_game_logging()
-
-func _hide_timer_buttons() -> void:
-	for button_name in ["add_one_btn", "add_five_btn", "sub_one_btn", "sub_five_btn"]:
-		_button_nodes[button_name].hide()
-
-func _show_timer_buttons() -> void:
-	for button_name in ["add_one_btn", "add_five_btn", "sub_one_btn", "sub_five_btn"]:
-		_button_nodes[button_name].show()
-
-func start_game_with_timer() -> void:
-	countdown_active = true
-	_timer_nodes.countdown_timer.wait_time = 1.0
-	_timer_nodes.countdown_timer.start()
-	_update_time_display()
-	
-func start_game_without_timer() -> void:
-	countdown_active = false
-	GlobalTimer.start_timer()
-
-func _on_countdown_timer_timeout() -> void:
-	if countdown_active:
-		countdown_time -= 1
-		_ui_nodes.countdown_display.text = "%02d:%02d" % [countdown_time / 60, countdown_time % 60]
-		_update_time_display()
-		if countdown_time <= 0:
-			countdown_active = false
-			_timer_nodes.countdown_timer.stop()
-			show_game_over()
-
-func _update_time_display() -> void:
-	var minutes = countdown_time / 60
-	var seconds = countdown_time % 60
-	_ui_nodes.countdown_display.text = "Time Left: %02d:%02d" % [minutes, seconds]
-
-func _update_timer_display() -> void:
-	if countdown_active:
-		var minutes = countdown_time / 60
-		var seconds = countdown_time % 60
-
 # Pause System
 func _on_pause_button_pressed() -> void:
 	if is_paused:
-		_resume_game()
+		resume_game()
 	else:
-		_pause_game()
+		pause_game()
 	is_paused = !is_paused
 
-func _pause_game() -> void:
+func pause_game() -> void:
 	GlobalTimer.pause_timer()
-	_timer_nodes.countdown_timer.stop()
-	_panel_nodes.pause_button.text = "Resume"
+	GlobalTimerManager.pause_countdown()
+	panel_nodes.pause_button.text = "Resume"
 	game_started = false
 	pause_state = 0
 
-func _resume_game() -> void:
+func resume_game() -> void:
 	GlobalTimer.resume_timer()
-	_timer_nodes.countdown_timer.start()
-	_panel_nodes.pause_button.text = "Pause"
+	GlobalTimerManager.resume_countdown()
+	panel_nodes.pause_button.text = "Pause"
 	game_started = true
 	pause_state = 1
 
@@ -374,11 +315,11 @@ func _resume_game() -> void:
 func add_score(points: int = 1) -> void:
 	if score < max_score:
 		score += points
-		_ui_nodes.score_board.text = "Score: " + str(score)
+		ui_nodes.score_board.text = "Score: " + str(score)
 		
 		# Update top score
 		ScoreManager.update_top_score(patient_id, game_name, score)
-		_update_top_score_display()
+		update_top_score_display()
 
 # Coin event handlers
 func _on_coin_missed() -> void:
@@ -395,32 +336,36 @@ func show_game_over() -> void:
 	GlobalTimer.stop_timer()
 	game_started = false
 	save_final_score_to_log(score)
-	_ui_nodes.game_over_label.visible = true
-	_ui_nodes.color_rect.visible = true
-	
+	ui_nodes.game_over_label.visible = true
+	ui_nodes.color_rect.visible = true
+
 func _on_logout_button_pressed() -> void:
+	GlobalTimerManager.remove_timer_selector_from_game()
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/3d_games.tscn")
 
 func _on_retry_button_pressed() -> void:
 	get_tree().paused = false
-	_ui_nodes.color_rect.visible = false
-	_ui_nodes.game_over_label.hide()
-	_panel_nodes.timer_panel.show()
-	_show_timer_buttons()
+	ui_nodes.color_rect.visible = false
+	ui_nodes.game_over_label.hide()
 	
 	# Reset game state
 	score = 0
-	_ui_nodes.score_board.text = "Score: 0"
+	ui_nodes.score_board.text = "Score: 0"
 	game_over = false
 	countdown_time = 0
+	countdown_active = false
+	game_started = false
 	status = "moving"
+	
+	# Show timer selector for retry
+	GlobalTimerManager.show_timer_selector_for_retry()
 
 # Adaptive ROM System
 func _on_adapt_rom_toggled(toggled_on: bool) -> void:
 	if toggled_on and not GlobalSignals.assessment_done:
-		_button_nodes.adapt_prom.button_pressed = false
-		_ui_nodes.warning_window.visible = true
+		button_nodes.adapt_prom.button_pressed = false
+		ui_nodes.warning_window.visible = true
 		return
 	adapt_toggle = toggled_on
 
@@ -428,10 +373,10 @@ func _on_do_assess_pressed() -> void:
 	get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_assess_pressed() -> void:
-	_ui_nodes.warning_window.visible = false
+	ui_nodes.warning_window.visible = false
 
 # CSV Logging System
-func _setup_game_logging() -> void:
+func setup_game_logging() -> void:
 	log_timer.timeout.connect(_on_log_timer_timeout)
 	
 	game_log_file = Manager.create_game_log_file(game_name, GlobalSignals.current_patient_id)
@@ -448,7 +393,7 @@ func save_final_score_to_log(final_score: int) -> void:
 
 func _on_log_timer_timeout() -> void:
 	if game_log_file and not debug:
-		# FIXED: Now using actual coin position as target
+		# Using actual coin position as target
 		var target_x = coin_target_x
 		var target_y = 0.0  # Jumpify is 2D, so target_y is always 0
 		var target_z = coin_target_z
@@ -469,3 +414,4 @@ func _notification(what) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		if game_log_file:
 			game_log_file.close()
+		GlobalTimerManager.remove_timer_selector_from_game()

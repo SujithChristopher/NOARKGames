@@ -1,9 +1,9 @@
 [gd_scene load_steps=6 format=3 uid="uid://bn0in381lxfeb"]
 
-[ext_resource type="Script" uid="uid://cedht487nl6p3" path="res://Games/assessment/workspace.gd" id="1_vm5ig"]
+[ext_resource type="Script" uid="uid://dpdsnb6s8leba" path="res://Games/assessment/workspace.gd" id="1_vm5ig"]
 [ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="2_3kta3"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_gocbw"]
-[ext_resource type="Texture2D" uid="uid://dy8y607pjywvd" path="res://Assets/pp_assets/arts/Ball.png" id="3_jae2j"]
+[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_gocbw"]
+[ext_resource type="Texture2D" uid="uid://bvhukqrm11pi" path="res://Assets/pp_assets/arts/Ball.png" id="3_jae2j"]
 
 [sub_resource type="CanvasTexture" id="CanvasTexture_lqn52"]
 
