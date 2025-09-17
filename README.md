@@ -2,6 +2,8 @@
 
 A rehabilitation gaming platform designed for stroke patients, built with Godot 4.4. This project provides a collection of mini-games that help track patient progress and motor skills recovery.
 
+![alt text](image.png)
+
 ## Features
 
 - **Multiple Mini-Games**: Flappy Bird, Ping Pong, Fruit Catcher, Jumpify, Random Reach, and Assessment modules
