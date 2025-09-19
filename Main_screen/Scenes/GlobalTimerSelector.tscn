@@ -1,9 +1,9 @@
-[gd_scene load_steps=5 format=3 uid="uid://jl8vnkyebl2h"]
+[gd_scene load_steps=5 format=3 ]
 
-[ext_resource type="Script" uid="uid://cbfu8ryfopt7i" path="res://Main_screen/Scripts/global_timer_selector.gd" id="1_vkyq6"]
-[ext_resource type="Texture2D" uid="uid://bhcf1raqwat0t" path="res://Assets/scoring_system/Background.png" id="2_nrxdl"]
-[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_vkyq6"]
-[ext_resource type="Theme" uid="uid://buuhh047e6jrf" path="res://Assets/Background/button_icon.tres" id="3_nrxdl"]
+[ext_resource type="Script"  path="res://Main_screen/Scripts/global_timer_selector.gd" id="1_vkyq6"]
+[ext_resource type="Texture2D"  path="res://Assets/scoring_system/Background.png" id="2_nrxdl"]
+[ext_resource type="FontFile" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_vkyq6"]
+[ext_resource type="Theme"  path="res://Assets/Background/button_icon.tres" id="3_nrxdl"]
 
 [node name="Control" type="Control"]
 layout_mode = 3

@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3 uid="uid://d1q0d6ufo0nxq"]
+[gd_scene load_steps=2 format=3 ]
 
-[ext_resource type="Script" uid="uid://pbftlym2rhra" path="res://Main_screen/Scripts/background_music.gd" id="2_jv8ln"]
+[ext_resource type="Script" path="res://Main_screen/Scripts/background_music.gd" id="2_jv8ln"]
 
 [node name="SoundFx" type="Node"]
 
