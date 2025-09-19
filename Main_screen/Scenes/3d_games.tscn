@@ -17,9 +17,9 @@ expand_mode = 1
 
 [node name="RandomReach3D" type="Button" parent="."]
 offset_left = 188.0
-offset_top = 165.0
+offset_top = 181.0
 offset_right = 396.0
-offset_bottom = 239.0
+offset_bottom = 255.0
 theme = ExtResource("2_jcsql")
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
@@ -37,9 +37,9 @@ text = "Exit"
 
 [node name="Jumpify" type="Button" parent="."]
 offset_left = 729.0
-offset_top = 161.0
+offset_top = 178.0
 offset_right = 930.0
-offset_bottom = 233.0
+offset_bottom = 250.0
 theme = ExtResource("2_jcsql")
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
@@ -47,9 +47,9 @@ text = "Jumpify"
 
 [node name="FlyThrough3D" type="Button" parent="."]
 offset_left = 460.0
-offset_top = 165.0
+offset_top = 181.0
 offset_right = 660.0
-offset_bottom = 239.0
+offset_bottom = 255.0
 theme = ExtResource("2_jcsql")
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
@@ -87,27 +87,27 @@ text = "Results"
 
 [node name="LoggedInAs" type="Label" parent="."]
 offset_left = 456.0
-offset_top = 48.0
+offset_top = 40.0
 offset_right = 643.0
-offset_bottom = 78.0
+offset_bottom = 70.0
 theme_override_fonts/font = ExtResource("2_t5h8i")
 theme_override_font_sizes/font_size = 22
 text = "Patient name :"
 
 [node name="TrainingLabel" type="Label" parent="."]
-offset_left = 419.0
-offset_top = 85.0
-offset_right = 658.0
-offset_bottom = 122.0
+offset_left = 413.0
+offset_top = 77.0
+offset_right = 652.0
+offset_bottom = 114.0
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
 theme_override_font_sizes/font_size = 22
 
 [node name="2D_mode" type="CheckButton" parent="."]
-offset_left = 418.0
-offset_top = 471.0
-offset_right = 677.0
-offset_bottom = 506.0
+offset_left = 435.0
+offset_top = 126.0
+offset_right = 694.0
+offset_bottom = 161.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
 theme_override_font_sizes/font_size = 20

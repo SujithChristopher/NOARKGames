@@ -14,15 +14,6 @@ patient_register = {
 "name": "Test",
 "stroke_time": 0
 },
-"Panel": {
-"affected_hand": "Right",
-"age": 34,
-"comments": "",
-"dominant_hand": "Right",
-"gender": "Male",
-"name": "Timer",
-"stroke_time": 0
-},
 "vvv": {
 "affected_hand": "Unspecified",
 "age": 22,
