@@ -1,9 +1,9 @@
-[gd_scene load_steps=5 format=3 uid="uid://cb2qb3tiwn21y"]
+[gd_scene load_steps=5 format=3 ]
 
-[ext_resource type="Script" uid="uid://imy2cvc7tdfx" path="res://Main_screen/Scripts/mode.gd" id="1_pnk74"]
-[ext_resource type="Texture2D" uid="uid://dri7l4nuv6nr5" path="res://Assets/Background/modebg-2.png" id="2_sarbq"]
-[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_ymswy"]
-[ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="4_ymswy"]
+[ext_resource type="Script"  path="res://Main_screen/Scripts/mode.gd" id="1_pnk74"]
+[ext_resource type="Texture2D"  path="res://Assets/Background/modebg-2.png" id="2_sarbq"]
+[ext_resource type="FontFile" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_ymswy"]
+[ext_resource type="Theme" path="res://Assets/Background/button.tres" id="4_ymswy"]
 
 [node name="Mode" type="Node2D"]
 script = ExtResource("1_pnk74")

@@ -1,8 +1,8 @@
-[gd_scene load_steps=5 format=3 uid="uid://dp8avrsps34u4"]
+[gd_scene load_steps=5 format=3]
 
-[ext_resource type="Script" uid="uid://ctt6nt374p0y7" path="res://Results/Scripts/user_progress.gd" id="1_clmbw"]
-[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_bfrqg"]
-[ext_resource type="PackedScene" uid="uid://dlwq4kmdb3bhs" path="res://addons/easy_charts/control_charts/chart.tscn" id="2_pcn45"]
+[ext_resource type="Script" uid="uid://c4b7dnm6awsnd" path="res://Results/Scripts/user_progress.gd" id="1_clmbw"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_bfrqg"]
+[ext_resource type="PackedScene" path="res://addons/easy_charts/control_charts/chart.tscn" id="2_pcn45"]
 
 [sub_resource type="CanvasTexture" id="CanvasTexture_c07w5"]
 

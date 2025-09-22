@@ -1,9 +1,9 @@
-[gd_scene load_steps=10 format=4 uid="uid://w7m2uhyqp1ir"]
+[gd_scene load_steps=10 format=4 uid="uid://rwnmmrgwf8ki"]
 
-[ext_resource type="Script" uid="uid://1l14fd3uxspq" path="res://Main_screen/Scripts/select_game.gd" id="1_td58v"]
-[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_crqup"]
-[ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="2_ghqbc"]
-[ext_resource type="Texture2D" uid="uid://c0dd1vgroj6v8" path="res://Assets/Background/2d.png" id="2_h1wm0"]
+[ext_resource type="Script" uid="uid://l80o1fuw3l58" path="res://Main_screen/Scripts/select_game.gd" id="1_td58v"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_crqup"]
+[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="2_ghqbc"]
+[ext_resource type="Texture2D" uid="uid://q3jbwkcjw30n" path="res://Assets/Background/2d.png" id="2_h1wm0"]
 
 [sub_resource type="Image" id="Image_mcliy"]
 data = {
@@ -333,6 +333,10 @@ cache/0/25/0/glyphs/753/offset = Vector2(-1, -20)
 cache/0/25/0/glyphs/753/size = Vector2(18, 21)
 cache/0/25/0/glyphs/753/uv_rect = Rect2(95, 1, 18, 21)
 cache/0/25/0/glyphs/753/texture_idx = 0
+cache/0/20/1/glyphs/1/offset = Vector2(0, 0)
+cache/0/20/1/glyphs/1/size = Vector2(0, 0)
+cache/0/20/1/glyphs/1/uv_rect = Rect2(0, 0, 0, 0)
+cache/0/20/1/glyphs/1/texture_idx = -1
 
 [node name="Control2" type="Control"]
 layout_mode = 3
@@ -521,10 +525,10 @@ text = "Right Hand"
 
 [node name="Switch_3D" type="CheckButton" parent="."]
 layout_mode = 0
-offset_left = 416.0
-offset_top = 467.0
-offset_right = 689.0
-offset_bottom = 517.0
+offset_left = 434.0
+offset_top = 110.0
+offset_right = 707.0
+offset_bottom = 160.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_crqup")
 theme_override_font_sizes/font_size = 20

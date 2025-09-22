@@ -12,7 +12,7 @@ config_version=5
 
 config/name="NOARKGames"
 run/main_scene="uid://vhx3bkgoif43"
-config/features=PackedStringArray("4.4", "Forward Plus")
+config/features=PackedStringArray("4.5", "Forward Plus")
 boot_splash/bg_color=Color(1, 1, 1, 1)
 boot_splash/fullsize=false
 boot_splash/image="uid://dliw4qk8oe66i"

@@ -1,8 +1,8 @@
-[gd_scene load_steps=7 format=3 uid="uid://dna3kovngiew3"]
+[gd_scene load_steps=7 format=3 ]
 
-[ext_resource type="Script" uid="uid://ijk2f8icluxg" path="res://Main_screen/Scripts/registry.gd" id="1_tjqgy"]
-[ext_resource type="Texture2D" uid="uid://duv8n7de6v1af" path="res://Assets/Background/Pink.png" id="2_tjqgy"]
-[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_m584y"]
+[ext_resource type="Script" path="res://Main_screen/Scripts/registry.gd" id="1_tjqgy"]
+[ext_resource type="Texture2D"  path="res://Assets/Background/Pink.png" id="2_tjqgy"]
+[ext_resource type="FontFile"  path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_m584y"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_5sax6"]
 bg_color = Color(0.22736, 0.641662, 0.870024, 1)
