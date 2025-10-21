@@ -140,6 +140,9 @@ func _process(_delta: float) -> void:
             thread_network.wait_to_finish()
             thread_python.wait_to_finish()
             get_tree().quit()
+        1.0:
+            # Reference frame captured (calibration complete)
+            print("Calibration successful - Reference frame captured")
         2.0:
             connected = true
         5.0:

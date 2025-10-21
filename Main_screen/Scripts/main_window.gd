@@ -42,7 +42,8 @@ func _on_patient_nf_ok_pressed() -> void:
 	patient_notfound.hide()
 
 func _on_calibrate_cam_pressed() -> void:
-	print("Calibrate Camera Pressed")
+	print("Calibrate Camera Pressed - Capturing reference frame")
+	GlobalScript._outgoing_message = "CAPTURE_REF"
 
 
 func _on_hosp_id_text_submitted(new_text: String) -> void:
