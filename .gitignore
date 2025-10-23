@@ -46,8 +46,8 @@ crash_handler_*.txt
 # *.csv
 # !**/example.csv
 
-# Debug settings (uncomment if you want to keep debug.json in version control)
-# debug.json
+# Debug settings
+debug.json
 
 # macOS specific
 .DS_Store
@@ -162,4 +162,4 @@ mono_crash.*.json
 *.mdb
 
 # Asset Store imports (if applicable)
-AssetStoreTools/
+AssetStoreTools/debug.json
