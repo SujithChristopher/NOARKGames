@@ -84,7 +84,7 @@ var scaled_network_position3D: Vector2 = Vector2.ZERO
 var quit_request:bool = false
 @export var delay_time = 0.1
 @onready var message_timer:Timer = Timer.new()
-var _outgoing_message = "CONNECTED"
+var _outgoing_message: String
 var _incoming_message: float
 
 @onready var debug:bool
@@ -116,7 +116,7 @@ func _ready():
 	get_tree().set_auto_accept_quit(false)
 	
 	if OS.get_name() == "Windows":
-		pyscript_path = "E:\\CMC\\pyprojects\\programs_rpi\\rpi_python\\stream_optimize_v2.py"
+		pyscript_path = "E:\\CMC\\pyprojects\\programs_rpi\\rpi_python\\stream_optimize_v3.py"
 		interpreter_path = "E:\\CMC\\py_env\\venv\\Scripts\\python.exe"
 	else:
 		pyscript_path = "/home/sujith/Documents/rpi_python/stream_optimize_v2.py"
@@ -132,9 +132,10 @@ func _process(_delta: float) -> void:
 		-99.0:
 			disconnected = true
 			endgame = true
-			# thread_network.wait_to_finish()
 			thread_python.wait_to_finish()
 			get_tree().quit()
+		0.0:
+			_outgoing_message = "START_TRACK"
 		1.0:
 			# Reference frame captured (calibration complete)
 			_outgoing_message = "START_TRACK"
@@ -168,6 +169,7 @@ func handle_udp_packet():
 	udp.put_packet(_outgoing_message.to_utf8_buffer())
 
 	_incoming_message = my_floats[0]
+	print(_incoming_message)
 	
 	raw_x = my_floats[1]
 	raw_y = my_floats[2]
