@@ -1,6 +1,4 @@
-[gd_resource type="Theme" load_steps=12 format=4 uid="uid://87b78edsvd4i"]
-
-[ext_resource type="Texture2D" uid="uid://dujqbu7mrjvjx" path="res://Assets/Background/button_icon-2.png" id="1_474iv"]
+[gd_resource type="Theme" load_steps=11 format=4 uid="uid://87b78edsvd4i"]
 
 [sub_resource type="Image" id="Image_qbdtb"]
 data = {
@@ -1263,15 +1261,12 @@ expand_margin_right = 2.0
 expand_margin_bottom = 2.0
 
 [sub_resource type="StyleBoxTexture" id="StyleBoxTexture_474iv"]
-texture = ExtResource("1_474iv")
 region_rect = Rect2(1073.68, 599.354, 764.45, 374.55)
 
 [sub_resource type="StyleBoxTexture" id="StyleBoxTexture_d44u3"]
-texture = ExtResource("1_474iv")
 region_rect = Rect2(1085.96, 1443.63, 752.169, 383.76)
 
 [sub_resource type="StyleBoxTexture" id="StyleBoxTexture_qbdtb"]
-texture = ExtResource("1_474iv")
 region_rect = Rect2(1064.47, 587.074, 789.01, 402.181)
 
 [resource]

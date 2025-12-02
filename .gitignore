@@ -163,3 +163,8 @@ mono_crash.*.json
 
 # Asset Store imports (if applicable)
 AssetStoreTools/
+captures_Photo
+yolov8n-pose.pt
+yolov8n-seg.pt
+yolov8n-cls.pt
+selected_colors.json

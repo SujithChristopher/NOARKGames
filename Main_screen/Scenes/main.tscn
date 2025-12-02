@@ -1,10 +1,10 @@
 [gd_scene load_steps=13 format=4 uid="uid://vhx3bkgoif43"]
 
 [ext_resource type="Texture2D" uid="uid://cn5bybhkdf35k" path="res://Assets/Background/動物イラスト｜無料イラスト・フリー素材なら「イラストAC」.png" id="1_54gjo"]
-[ext_resource type="VideoStream" uid="uid://8jyvye72a65e" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
-[ext_resource type="Script" uid="uid://dfesven8e7gry" path="res://Main_screen/Scripts/main_window.gd" id="3_54gjo"]
+[ext_resource type="VideoStream" uid="uid://dk7um74edvoju" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
+[ext_resource type="Script" uid="uid://hwtypbyv7x7x" path="res://Main_screen/Scripts/main_window.gd" id="3_54gjo"]
 [ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="3_oasjk"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="4_oasjk"]
+[ext_resource type="FontFile" uid="uid://butxdxf3eopiy" path="res://Assets/Fonts/Bungee-Regular.ttf" id="4_oasjk"]
 [ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="6_ln521"]
 [ext_resource type="FontFile" uid="uid://bjokva26isnj4" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="7_jo38k"]
 [ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="8_jo38k"]
