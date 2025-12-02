@@ -213,7 +213,8 @@ func change_patient():
 	_outgoing_message = 'USER:' + PatientDB.current_patient_id
 
 func send_dummy_packet():
-	 udp.put_packet(_outgoing_message.to_utf8_buffer())
+	udp.put_packet(_outgoing_message.to_utf8_buffer())
+	pass
 	
 
 func python_thread():
