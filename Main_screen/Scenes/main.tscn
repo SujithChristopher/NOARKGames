@@ -313,6 +313,16 @@ theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Play"
 script = ExtResource("3_54gjo")
 
+[node name="SetOriginButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 412.0
+offset_top = 390.0
+offset_right = 756.0
+offset_bottom = 455.0
+theme = ExtResource("3_oasjk")
+theme_override_fonts/font = SubResource("FontFile_o1ivk")
+text = "Set Origin"
+
 [node name="Logo" type="TextureRect" parent="."]
 layout_mode = 0
 offset_left = 364.0
@@ -420,6 +430,7 @@ theme_override_fonts/font = ExtResource("4_oasjk")
 theme_override_font_sizes/font_size = 22
 text = "DEPARTMENT OF BIOENGINEERING"
 
+[connection signal="pressed" from="SetOriginButton" to="PlayButton" method="_on_set_origin_pressed"]
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
 [connection signal="text_submitted" from="TextureRect/HospID" to="PlayButton" method="_on_hosp_id_text_submitted"]
 [connection signal="pressed" from="TextureRect/NewPatient" to="PlayButton" method="_on_new_patient_pressed"]

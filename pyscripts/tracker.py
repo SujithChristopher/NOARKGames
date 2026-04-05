@@ -95,7 +95,6 @@ class TrackerClass:
         self.picam2 = self.map1_rpi = self.map2_rpi = None
         self.video_frame  = None
         self.tvec_dist    = np.zeros(3)
-        self.first_frame  = True
         self.save_path    = None
         self.csv_writer   = None
         self.record       = False
@@ -185,17 +184,26 @@ class TrackerClass:
             return self.ble_streamer.get_command()
         return b""
 
-    def _send_coordinates(self, command: str, coords: np.ndarray) -> None:
-        """Map a string command to a float code and stream 4 floats to Godot."""
+    def _send_coordinates(
+        self,
+        command: str,
+        centroid: np.ndarray,
+        ref_rvec: np.ndarray,
+        ref_tvec: np.ndarray,
+        ref_id: int,
+    ) -> None:
+        """Stream 11 floats to Godot: [code, cx,cy,cz, rvx,rvy,rvz, tx,ty,tz, ref_id]."""
         code_map = {"STOP": -99.0, "START": 2.0, "RESET": 5.0}
         msg_code = code_map.get(command, 2.0)
-        data = np.append(msg_code, coords).flatten()
+        data = np.array(
+            [msg_code, *centroid, *ref_rvec, *ref_tvec, float(ref_id)],
+            dtype=np.float32,
+        )
 
         if self.stream_type == "udp" and self.addr is not None:
-            data_bytes = struct.pack("f" * len(data), *data)
-            self.udp_socket.sendto(data_bytes, self.addr)
+            self.udp_socket.sendto(struct.pack("f" * len(data), *data), self.addr)
         elif self.stream_type == "ble":
-            self.ble_streamer.send(msg_code, float(coords[0]), float(coords[1]), float(coords[2]))
+            self.ble_streamer.send(data.tolist())
 
     # ── pose estimation ───────────────────────────────────────────────────────
 
@@ -246,19 +254,6 @@ class TrackerClass:
                 ).T[0]
         return np.nanmean(transformed, axis=0).flatten()
 
-    def _get_local_coordinates(self, first_id, first_rvecs, first_tvecs, centroid) -> np.ndarray:
-        first_id    = np.array(first_id).flatten()
-        first_tvecs = np.array(first_tvecs).reshape(len(first_id), 3)
-        first_rvecs = np.array(first_rvecs).reshape(len(first_id), 3)
-
-        _id  = first_id[0]
-        _r   = cv2.Rodrigues(first_rvecs[0])[0]
-        _t   = first_tvecs[0]
-        _local_camera_t = (
-            _r @ self.marker_offsets[_id].reshape(3, 1) + _t.reshape(3, 1)
-        ).T[0]
-        return (_r.T @ (_local_camera_t - centroid).reshape(3, 1)).T[0]
-
     # ── CSV recording ─────────────────────────────────────────────────────────
 
     def _select_hospitalid(self) -> None:
@@ -304,43 +299,38 @@ class TrackerClass:
             self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners, ids)
             rvecs, tvecs = self.estimate_pose(corners)
 
-            if self.first_frame:
-                self.first_id   = ids
-                self.first_rvec = rvecs
-                self.first_tvec = tvecs
-                self.first_frame = False
-
             self._draw_axes(rvecs, tvecs)
-            centroid     = self._get_centroid(ids, rvecs, tvecs)
-            local_coords = self._get_local_coordinates(
-                self.first_id, self.first_rvec, self.first_tvec, centroid
-            )
-            local_coords = self.filter.update(local_coords)
+            centroid = self.filter.update(self._get_centroid(ids, rvecs, tvecs))
+
+            # First detected marker is the reference for Godot's set_origin()
+            ref_id   = int(np.array(ids).flatten()[0])
+            ref_rvec = rvecs[0]
+            ref_tvec = tvecs[0]
 
             # Dispatch command
             if self.received_message:
                 if self.received_message == b"STOP":
-                    self._send_coordinates("STOP", local_coords)
+                    self._send_coordinates("STOP", centroid, ref_rvec, ref_tvec, ref_id)
                 elif self.received_message.startswith(b"USER:"):
                     self._hid = self.received_message.decode().split(":")[1]
                     if self.save_path is None:
                         self._select_hospitalid()
-                    self._send_coordinates("START", local_coords)
+                    self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
                     self.record = True
                 elif self.received_message.startswith(b"CHANGE:"):
                     self.save_path = None
                     self._hid = self.received_message.decode().split(":")[1]
                     self._select_hospitalid()
-                    self._send_coordinates("START", local_coords)
+                    self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
                     self.record = True
                 elif self.received_message == b"RESET":
-                    self._send_coordinates("RESET", local_coords)
+                    self._send_coordinates("RESET", centroid, ref_rvec, ref_tvec, ref_id)
                 else:
-                    self._send_coordinates("START", local_coords)
+                    self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
 
                 if self.record and self.csv_writer:
                     self.csv_writer.writerow(
-                        [datetime.now().strftime("%d/%m/%Y %H:%M:%S"), *local_coords]
+                        [datetime.now().strftime("%d/%m/%Y %H:%M:%S"), *centroid]
                     )
 
         if self.display:

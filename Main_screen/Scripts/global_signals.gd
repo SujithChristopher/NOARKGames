@@ -1,6 +1,7 @@
 extends Node
 
 signal SignalBus
+signal origin_set
 
 @export var selected_training_hand: String = ""
 @export var affected_hand: String = ""

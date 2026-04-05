@@ -8,8 +8,8 @@ Service   : 4e4f4152-4b00-0000-0000-000000000000
 Position  : 4e4f4152-4b01-0000-0000-000000000000  (read + notify, Python → Godot)
 Command   : 4e4f4152-4b02-0000-0000-000000000000  (write,         Godot → Python)
 
-Wire format: 4 × float32 little-endian (16 bytes)
-  [msg_code, x, y, z]
+Wire format: 11 × float32 little-endian (44 bytes)
+  [msg_code, cx, cy, cz, rvx, rvy, rvz, tx, ty, tz, ref_id]
   msg_code: 2.0 = START, -99.0 = STOP, 5.0 = RESET
 """
 
@@ -29,7 +29,7 @@ SERVICE_UUID      = "4e4f4152-4b00-0000-0000-000000000000"
 POSITION_CHAR_UUID = "4e4f4152-4b01-0000-0000-000000000000"
 COMMAND_CHAR_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 
-_IDLE_PACKET = bytearray(struct.pack("ffff", 0.0, 0.0, 0.0, 0.0))
+_IDLE_PACKET = bytearray(struct.pack("f" * 11, *([0.0] * 11)))
 
 
 class BLEStreamer:
@@ -56,14 +56,14 @@ class BLEStreamer:
         if not self._ready.wait(timeout=10):
             raise RuntimeError("BLE server did not start within 10 seconds")
 
-    def send(self, msg_code: float, x: float, y: float, z: float) -> None:
-        """Notify connected central with a 4-float position packet."""
+    def send(self, data: list) -> None:
+        """Notify connected central with an 11-float position packet."""
         if not self._running or self._server is None:
             return
         if not self._streaming:
             self._streaming = True
             print("[BLE] Streaming position data")
-        data = bytearray(struct.pack("ffff", msg_code, x, y, z))
+        data = bytearray(struct.pack("f" * len(data), *data))
         char = self._server.get_characteristic(POSITION_CHAR_UUID)
         if char is None:
             return

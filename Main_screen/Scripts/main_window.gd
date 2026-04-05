@@ -36,6 +36,10 @@ func _on_new_patient_pressed() -> void:
     get_tree().change_scene_to_file("res://Main_screen/Scenes/registry.tscn") 
     
 
+func _on_set_origin_pressed() -> void:
+    GlobalScript.set_origin()
+
+
 func _on_assess_button_pressed() -> void:
     PatientDB.save_database()
 

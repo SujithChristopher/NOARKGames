@@ -30,6 +30,25 @@ var MAX_Y: int = int(screen_size.y - screen_size.y * .15)
 var clamp_vector_x = Vector2(MIN_X, MIN_Y)
 var clamp_vector_y = Vector2(MAX_X, MAX_Y)
 
+# ── marker offsets (must match pyscripts/tracker.py MARKER_OFFSETS) ──────────
+const MARKER_OFFSETS: Dictionary = {
+	4:  Vector3( 0.00,  0.1,    -0.069),
+	8:  Vector3( 0.00,  0.01,   -0.069),
+	12: Vector3( 0.00,  0.0,    -0.1075),
+	14: Vector3(-0.09,  0.0,    -0.069),
+	20: Vector3( 0.1,   0.0,    -0.069),
+}
+
+# ── origin / local-coordinate state ──────────────────────────────────────────
+var _origin_set:       bool   = false
+var _origin_basis:     Basis  = Basis.IDENTITY
+var _origin_ref_point: Vector3 = Vector3.ZERO
+
+# last ref-marker data received (used by set_origin())
+var _last_rvec:   Vector3 = Vector3.ZERO
+var _last_tvec:   Vector3 = Vector3.ZERO
+var _last_ref_id: int     = -1
+
 # ── transport settings ────────────────────────────────────────────────────────
 var stream_type: String = "udp"
 var ble_device_name: String = "NOARK_Tracker"
@@ -428,7 +447,7 @@ func _on_ble_characteristic_notified(char_uuid: String, data: PackedByteArray) -
 	if char_uuid.to_lower() != BLE_POSITION_UUID:
 		return
 
-	if data.size() < 16 or (data.size() % 4) != 0:
+	if data.size() < 44 or (data.size() % 4) != 0:
 		push_error("[BLE] Unexpected position payload size: %d" % data.size())
 		return
 
@@ -449,25 +468,53 @@ func _on_ble_operation_failed(operation: String, error: String) -> void:
 
 # ── shared position update (UDP + BLE) ───────────────────────────────────────
 
+func set_origin() -> void:
+	if _last_ref_id < 0:
+		push_error("set_origin: no marker data received yet")
+		return
+	if not MARKER_OFFSETS.has(_last_ref_id):
+		push_error("set_origin: unknown marker id %d" % _last_ref_id)
+		return
+	var angle := _last_rvec.length()
+	var axis  := _last_rvec.normalized() if angle > 0.0001 else Vector3.UP
+	_origin_basis     = Basis(axis, angle)
+	_origin_ref_point = _origin_basis * MARKER_OFFSETS[_last_ref_id] + _last_tvec
+	_origin_set       = true
+	GlobalSignals.origin_set.emit()
+
+
 func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	_incoming_message = my_floats[0]
 
-	raw_x = my_floats[1]
-	raw_y = my_floats[2]
-	raw_z = my_floats[3]
+	# Cache latest ref-marker data so set_origin() always has fresh values
+	_last_rvec   = Vector3(my_floats[4], my_floats[5], my_floats[6])
+	_last_tvec   = Vector3(my_floats[7], my_floats[8], my_floats[9])
+	_last_ref_id = int(my_floats[10])
 
-	net_x = my_floats[1] * PLAYER_POS_SCALER_X  + X_SCREEN_OFFSET
-	net_y = my_floats[2] * PLAYER3D_POS_SCALER_Y + Y_SCREEN_OFFSET3D
-	net_z = my_floats[3] * PLAYER_POS_SCALER_Z   + Y_SCREEN_OFFSET
-	net_a = my_floats[2] * PLAYER3D_POS_SCALER_Y + Y_SCREEN_OFFSET
+	# Compute local coordinates (rotation + translation relative to origin)
+	var centroid := Vector3(my_floats[1], my_floats[2], my_floats[3])
+	var local: Vector3
+	if _origin_set:
+		local = _origin_basis.transposed() * (_origin_ref_point - centroid)
+	else:
+		local = centroid
+
+	raw_x = local.x
+	raw_y = local.y
+	raw_z = local.z
+
+	net_x = local.x * PLAYER_POS_SCALER_X  + X_SCREEN_OFFSET
+	net_y = local.y * PLAYER3D_POS_SCALER_Y + Y_SCREEN_OFFSET3D
+	net_z = local.z * PLAYER_POS_SCALER_Z   + Y_SCREEN_OFFSET
+	net_a = local.y * PLAYER3D_POS_SCALER_Y + Y_SCREEN_OFFSET
 
 	network_position   = Vector2(net_x, net_z)
 	network_position3D = Vector2(net_x, net_y)
 	workspace          = Vector2(net_x, net_a)
 
-	scaled_x = my_floats[1] * PLAYER_POS_SCALER_X  * GlobalSignals.global_scalar_x + X_SCREEN_OFFSET
-	scaled_y = my_floats[2] * PLAYER3D_POS_SCALER_Y * GlobalSignals.global_scalar_y + Y_SCREEN_OFFSET3D
-	scaled_z = my_floats[3] * PLAYER_POS_SCALER_Z   * GlobalSignals.global_scalar_y + Y_SCREEN_OFFSET
+	scaled_x = local.x * PLAYER_POS_SCALER_X  * GlobalSignals.global_scalar_x + X_SCREEN_OFFSET
+	scaled_y = local.y * PLAYER3D_POS_SCALER_Y * GlobalSignals.global_scalar_y + Y_SCREEN_OFFSET3D
+	scaled_z = local.z * PLAYER_POS_SCALER_Z   * GlobalSignals.global_scalar_y + Y_SCREEN_OFFSET
 
 	scaled_network_position   = Vector2(scaled_x, scaled_z)
 	scaled_network_position3D = Vector2(scaled_x, scaled_y)
