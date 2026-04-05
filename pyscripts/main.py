@@ -1,11 +1,14 @@
 import csv
 import json
+import logging
 import os
 import platform
 import socket
 import struct
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import cv2
 import numpy as np
@@ -67,6 +70,7 @@ class MainClass:
         self.video_frame  = None
         self.tvec_dist    = np.zeros(3)
         self.save_path    = None
+        self._send_count  = 0
         self.csv_writer   = None
         self.record       = False
         self.received_message: bytes = b""
@@ -183,6 +187,7 @@ class MainClass:
             self.udp_socket.sendto(struct.pack("f" * len(data), *data), self.addr)
         elif self.stream_type == "ble":
             self.ble_streamer.send(data.tolist())
+        self._send_count += 1
 
     # ── pose estimation ───────────────────────────────────────────────────────
 
@@ -311,6 +316,7 @@ class MainClass:
         import time
 
         last_heartbeat = time.time()
+        last_rate_log  = time.time()
         use_heartbeat  = self.stream_type == "udp"
 
         try:
@@ -328,6 +334,14 @@ class MainClass:
                         break
                     raise
 
+                now = time.time()
+                elapsed = now - last_rate_log
+                if elapsed >= 5.0:
+                    logger.debug("[Rate] %.1f pkt/s  (%d packets in %.1fs)",
+                                 self._send_count / elapsed, self._send_count, elapsed)
+                    self._send_count = 0
+                    last_rate_log    = now
+
                 if self.received_message == b"STOP":
                     break
                 if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -340,6 +354,7 @@ class MainClass:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     settings = _load_settings()
 
     if platform.system() == "Linux":
