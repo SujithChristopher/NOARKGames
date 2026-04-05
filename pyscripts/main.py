@@ -354,7 +354,7 @@ class MainClass:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True)
     settings = _load_settings()
 
     if platform.system() == "Linux":
