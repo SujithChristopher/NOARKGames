@@ -25,5 +25,5 @@ var hit_player = Vector2.ZERO
 var hit_computer = Vector2.ZERO
 
 func enable_game_buttons(enable: bool) -> void:
-    for button in get_tree().get_nodes_in_group("GameButtons"):
-        button.disabled = not enable
+	for button in get_tree().get_nodes_in_group("GameButtons"):
+		button.disabled = not enable
