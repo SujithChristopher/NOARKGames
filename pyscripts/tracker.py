@@ -34,7 +34,7 @@ def _load_settings() -> dict:
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
-    return {"debug": False, "stream_type": "ble", "ble_device_name": "NOARK_Tracker"}
+    return {"debug": True, "stream_type": "ble", "ble_device_name": "NOARK_Tracker"}
 
 
 class TrackerClass:

@@ -1,5 +1,7 @@
 extends Control
 
+@onready var _label: Label = $StatusLabel
+
 var _color: Color = Color(0.45, 0.45, 0.45)
 var _pulse: float = 0.0
 
@@ -10,6 +12,14 @@ func _status_color(status: GlobalScript.BLEStatus) -> Color:
 		GlobalScript.BLEStatus.CONNECTING: return Color(1.00, 0.55, 0.00)
 		GlobalScript.BLEStatus.CONNECTED:  return Color(0.20, 0.85, 0.20)
 		_:                                 return Color(0.45, 0.45, 0.45)
+
+
+func _status_text(status: GlobalScript.BLEStatus) -> String:
+	match status:
+		GlobalScript.BLEStatus.SCANNING:   return "Scanning"
+		GlobalScript.BLEStatus.CONNECTING: return "Connecting"
+		GlobalScript.BLEStatus.CONNECTED:  return "Receiving"
+		_:                                 return "Idle"
 
 
 func _process(delta: float) -> void:
@@ -27,6 +37,8 @@ func _process(delta: float) -> void:
 	if draw_color != _color:
 		_color = draw_color
 		queue_redraw()
+		_label.text = _status_text(status)
+		_label.add_theme_color_override("font_color", base)
 
 
 func _draw() -> void:
