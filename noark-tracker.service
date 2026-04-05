@@ -1,0 +1,17 @@
+[Unit]
+Description=NOARK ArUco Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=sujith
+WorkingDirectory=/home/sujith/Documents/NOARKGames
+ExecStart=/home/sujith/.local/bin/uv run pyscripts/tracker.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=noark-tracker
+
+[Install]
+WantedBy=multi-user.target
