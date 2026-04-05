@@ -235,15 +235,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="BLEIndicator" type="Control" parent="."]
-layout_mode = 0
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 40.0
-offset_bottom = 40.0
-tooltip_text = "Connection status"
-script = ExtResource("9_blein")
-
 [node name="TextureRect" type="TextureRect" parent="."]
 texture_filter = 1
 layout_mode = 1
@@ -439,6 +430,15 @@ theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9764706)
 theme_override_fonts/font = ExtResource("4_oasjk")
 theme_override_font_sizes/font_size = 22
 text = "DEPARTMENT OF BIOENGINEERING"
+
+[node name="BLEIndicator" type="Control" parent="."]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 40.0
+offset_bottom = 40.0
+tooltip_text = "Connection status"
+script = ExtResource("9_blein")
 
 [connection signal="pressed" from="SetOriginButton" to="PlayButton" method="_on_set_origin_pressed"]
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
