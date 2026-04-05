@@ -168,7 +168,7 @@ func _update_top_score_display() -> void:
 	_ui_nodes.top_score_label.text = str(top_score)
 
 func _update_game_name() -> void:
-    """Update game name based on current mode for proper file saving"""
+	"""Update game name based on current mode for proper file saving"""
 	game_name = "FlyThrough3D" if is_3d_mode else "FlyThrough"
 
 # Global Timer Callbacks
@@ -219,8 +219,8 @@ func _setup_game_logging() -> void:
 	]))
 
 func _on_PauseButton_pressed() -> void:
-   _ui_nodes.Paused_screen.show()
-   _pause_game()
+	_ui_nodes.Paused_screen.show()
+	_pause_game()
 
 func _pause_game() -> void:
 	GlobalTimer.pause_timer()
@@ -380,14 +380,14 @@ func restart_game() -> void:
 	_ui_nodes.missed_label.text = "Missed 0"  # Reset missed label
 
 func _reset_health_display() -> void:
-    """Reset all hearts to show full health"""
+	"""Reset all hearts to show full health"""
 	for i in range(_health_nodes.heart_array.size()):
 		if _health_nodes.heart_array[i] != null:
 			_health_nodes.heart_array[i].animation = "default"
 			_health_nodes.heart_array[i].visible = true
 
 func _update_health_display() -> void:
-    """Update the visual representation of health"""
+	"""Update the visual representation of health"""
 	for i in range(_health_nodes.heart_array.size()):
 		if _health_nodes.heart_array[i] != null:
 			if i < health:
@@ -500,12 +500,12 @@ func _on_close_asses_pressed() -> void:
 
 
 func _on_home_pressed() -> void:
-   get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
 
 
 func _on_resume_pressed() -> void:
-  _ui_nodes.Paused_screen.hide()
-  _resume_game()
+	_ui_nodes.Paused_screen.hide()
+	_resume_game()
 
 
 func _on_restart_pressed() -> void:
