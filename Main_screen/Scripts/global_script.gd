@@ -118,6 +118,14 @@ var scaled_z: float
 var scaled_network_position: Vector2   = Vector2.ZERO
 var scaled_network_position3D: Vector2 = Vector2.ZERO
 
+# ── smoothed positions (lerped each frame — use these in games) ───────────────
+@export var smooth_factor: float = 0.25
+var smooth_network_position: Vector2   = Vector2.ZERO
+var smooth_network_position3D: Vector2 = Vector2.ZERO
+var smooth_workspace: Vector2          = Vector2.ZERO
+var smooth_scaled_network_position: Vector2   = Vector2.ZERO
+var smooth_scaled_network_position3D: Vector2 = Vector2.ZERO
+
 # ── messaging ─────────────────────────────────────────────────────────────────
 var quit_request: bool = false
 @export var delay_time = 0.1
@@ -561,6 +569,14 @@ func _process(_delta: float) -> void:
 	if stream_type == "udp" and not thread_python.is_alive() and not endgame and not debug:
 		thread_python = Thread.new()
 		thread_python.start(python_thread, Thread.PRIORITY_HIGH)
+
+	# Smooth raw network positions toward latest received value
+	var t := smooth_factor
+	smooth_network_position        = smooth_network_position.lerp(network_position, t)
+	smooth_network_position3D      = smooth_network_position3D.lerp(network_position3D, t)
+	smooth_workspace               = smooth_workspace.lerp(workspace, t)
+	smooth_scaled_network_position = smooth_scaled_network_position.lerp(scaled_network_position, t)
+	smooth_scaled_network_position3D = smooth_scaled_network_position3D.lerp(scaled_network_position3D, t)
 
 	match _incoming_message:
 		-99.0:
