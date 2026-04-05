@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=4 uid="uid://vhx3bkgoif43"]
+[gd_scene load_steps=14 format=4 uid="uid://vhx3bkgoif43"]
 
 [ext_resource type="Texture2D" uid="uid://cn5bybhkdf35k" path="res://Assets/Background/動物イラスト｜無料イラスト・フリー素材なら「イラストAC」.png" id="1_54gjo"]
 [ext_resource type="VideoStream" uid="uid://8jyvye72a65e" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="6_ln521"]
 [ext_resource type="FontFile" uid="uid://bjokva26isnj4" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="7_jo38k"]
 [ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="8_jo38k"]
+[ext_resource type="Script" path="res://Main_screen/Scripts/ble_indicator.gd" id="9_blein"]
 
 [sub_resource type="Image" id="Image_hwkvm"]
 data = {
@@ -233,6 +234,15 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+
+[node name="BLEIndicator" type="Control" parent="."]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 40.0
+offset_bottom = 40.0
+tooltip_text = "Connection status"
+script = ExtResource("9_blein")
 
 [node name="TextureRect" type="TextureRect" parent="."]
 texture_filter = 1

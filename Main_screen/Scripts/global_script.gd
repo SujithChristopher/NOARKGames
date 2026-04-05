@@ -30,6 +30,18 @@ var MAX_Y: int = int(screen_size.y - screen_size.y * .15)
 var clamp_vector_x = Vector2(MIN_X, MIN_Y)
 var clamp_vector_y = Vector2(MAX_X, MAX_Y)
 
+enum BLEStatus { IDLE, SCANNING, CONNECTING, CONNECTED }
+
+var ble_status: BLEStatus:
+	get:
+		if connected:
+			return BLEStatus.CONNECTED
+		if _ble_connecting:
+			return BLEStatus.CONNECTING
+		if _ble_scan_active:
+			return BLEStatus.SCANNING
+		return BLEStatus.IDLE
+
 # ── marker offsets (must match pyscripts/tracker.py MARKER_OFFSETS) ──────────
 const MARKER_OFFSETS: Dictionary = {
 	4:  Vector3( 0.00,  0.1,    -0.069),
