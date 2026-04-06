@@ -21,11 +21,11 @@ var path = "res://settings.json"
 @export var PLAYER3D_POS_SCALER_X: int = 20 * 100
 @export var PLAYER3D_POS_SCALER_Y: int = 30 * 100
 
-var screen_size = DisplayServer.screen_get_size()
+var screen_size: Vector2 = Vector2.ZERO
 var MIN_X: int = 10
-var MAX_X: int = int(screen_size.x - screen_size.x * .15)
+var MAX_X: int = 1900
 var MIN_Y: int = 10
-var MAX_Y: int = int(screen_size.y - screen_size.y * .15)
+var MAX_Y: int = 1060
 
 var clamp_vector_x = Vector2(MIN_X, MIN_Y)
 var clamp_vector_y = Vector2(MAX_X, MAX_Y)
@@ -145,8 +145,17 @@ func _ready() -> void:
 	current_date = get_date_string()
 	load_session_info()
 
-	X_SCREEN_OFFSET   = int(screen_size.x / 4)
-	Y_SCREEN_OFFSET   = int(screen_size.y / 4)
+	# Use the actual rendered viewport area — correct on all platforms including
+	# Android tablets where screen_get_size() can return physical pixels before
+	# DPI scaling, system UI (nav bar / status bar), and stretch mode are applied.
+	screen_size       = get_viewport().get_visible_rect().size
+	MAX_X             = int(screen_size.x - screen_size.x * 0.15)
+	MAX_Y             = int(screen_size.y - screen_size.y * 0.15)
+	clamp_vector_x    = Vector2(MIN_X, MIN_Y)
+	clamp_vector_y    = Vector2(MAX_X, MAX_Y)
+
+	X_SCREEN_OFFSET   = int(screen_size.x / 2)
+	Y_SCREEN_OFFSET   = int(screen_size.y / 2)
 	Y_SCREEN_OFFSET3D = int(screen_size.y / 1.75)
 
 	message_timer.autostart = true
