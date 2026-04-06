@@ -22,7 +22,13 @@ var is_collected: bool = false  # Flag to prevent multiple collections
 func _ready() -> void:
 	gem_count += 1
 	END_OF_SCREEN_Y = get_viewport_rect().end.y
-	
+
+	# Scale the whole gem (sprite + collider) proportionally to viewport width.
+	# The scene was authored at 1920px wide; on a tablet with a larger/higher-res
+	# screen this keeps the fruit a consistent fraction of the screen.
+	var vp_width = get_viewport_rect().size.x
+	scale = Vector2.ONE * (vp_width / 1920.0)
+
 	# Hide the animated sprite initially (show only the fruit sprite)
 	if animated_sprite:
 		animated_sprite.visible = false
