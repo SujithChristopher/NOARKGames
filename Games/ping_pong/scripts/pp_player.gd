@@ -10,6 +10,7 @@ const GAME_NAME: String = "PingPong"
 var network_position: Vector2 = Vector2.ZERO
 var zero_offset: Vector2 = Vector2.ZERO
 var centre: Vector2 = Vector2.ZERO
+var use_origin_offset: bool = true
 
 # Game state
 var game_started: bool = false
@@ -99,6 +100,7 @@ func _setup_ui() -> void:
 func _connect_signals() -> void:
     # Game control buttons
     _game_buttons.pause.pressed.connect(_on_pause_button_pressed)
+    GlobalSignals.origin_set.connect(_on_origin_set)
 
 func _initialize_game_state() -> void:
     game_started = false  # Changed to false - wait for timer selection
@@ -164,11 +166,15 @@ func _update_network_position() -> void:
     else:
         network_position = GlobalScript.network_position
 
+func _on_origin_set() -> void:
+    if use_origin_offset:
+        zero_offset = GlobalScript.network_position
+
 func _update_player_position() -> void:
     if network_position != Vector2.ZERO:
-        network_position = network_position - zero_offset + centre
-        position = position.lerp(network_position, POSITION_LERP_SPEED)
-    
+        var adjusted := network_position - (zero_offset if use_origin_offset else Vector2.ZERO) + centre
+        position = position.lerp(adjusted, POSITION_LERP_SPEED)
+
     position.y = PLAYER_Y_POSITION
 
 func _update_game_data() -> void:
