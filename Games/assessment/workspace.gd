@@ -145,10 +145,10 @@ func _process(delta: float) -> void:
 	if network_position != Vector2.ZERO and start_drawing:
 		_current_line.width = 5
 		_current_line.default_color = Color.RED
-		_current_line.add_point(network_position + Vector2(100,200) - player_offset)
+		_current_line.add_point(network_position)
 		
 	if network_position != Vector2.ZERO:
-		$Player.position = network_position  + Vector2(100,200) - player_offset
+		$Player.position = network_position
 		
 	if Input.is_action_just_released("mouse_left"):
 		mouse_current_first = false
