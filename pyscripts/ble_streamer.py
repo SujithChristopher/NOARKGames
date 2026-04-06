@@ -84,6 +84,14 @@ class BLEStreamer:
             self._latest_command = b""
         return cmd
 
+    def reset(self) -> None:
+        """Clear connection state so the server keeps advertising for a new central."""
+        self._connected = False
+        self._streaming = False
+        with self._cmd_lock:
+            self._latest_command = b""
+        print("[BLE] Waiting for reconnect — advertising continues")
+
     def stop(self) -> None:
         """Gracefully stop advertising and the asyncio loop."""
         if self._connected:
@@ -92,7 +100,10 @@ class BLEStreamer:
         self._connected = False
         self._streaming = False
         if self._loop and self._server:
-            asyncio.run_coroutine_threadsafe(self._server.stop(), self._loop)
+            try:
+                asyncio.run_coroutine_threadsafe(self._server.stop(), self._loop)
+            except Exception:
+                pass
 
     # ── asyncio server ────────────────────────────────────────────────────────
 

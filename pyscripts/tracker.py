@@ -316,6 +316,7 @@ class TrackerClass:
             if self.received_message:
                 if self.received_message == b"STOP":
                     self._send_coordinates("STOP", centroid, ref_rvec, ref_tvec, ref_id)
+                    self.received_message = b""
                 elif self.received_message.startswith(b"USER:"):
                     self._hid = self.received_message.decode().split(":")[1]
                     if self.save_path is None:
@@ -373,7 +374,14 @@ class TrackerClass:
                     last_rate_log    = now
 
                 if self.received_message == b"STOP":
-                    break
+                    if self.stream_type == "ble":
+                        self.received_message = b""
+                        self.record = False
+                        self.save_path = None
+                        if hasattr(self, "ble_streamer"):
+                            self.ble_streamer.reset()
+                    else:
+                        break
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
