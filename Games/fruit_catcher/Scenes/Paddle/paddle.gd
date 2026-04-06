@@ -8,7 +8,7 @@ const MOVEMENT_THRESHOLD: float = 2.0
 var network_position: Vector2 = Vector2.ZERO
 var last_network_position: Vector2 = Vector2.ZERO
 var zero_offset: Vector2 = Vector2.ZERO
-var centre: Vector2 = Vector2(120, 200)
+var centre: Vector2 = Vector2.ZERO
 
 # Boundaries
 var MIN_X_VALUE: float

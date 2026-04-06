@@ -1,6 +1,7 @@
 extends Control
 
 @onready var _label: Label = $StatusLabel
+@onready var _coord_label: Label = $CoordLabel
 
 var _color: Color = Color(0.45, 0.45, 0.45)
 var _pulse: float = 0.0
@@ -39,6 +40,8 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		_label.text = _status_text(status)
 		_label.add_theme_color_override("font_color", base)
+
+	_coord_label.text = "x:%.1f  y:%.1f  z:%.1f" % [GlobalScript.net_x, GlobalScript.net_y, GlobalScript.net_z]
 
 
 func _draw() -> void:

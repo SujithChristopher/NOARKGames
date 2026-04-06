@@ -449,6 +449,15 @@ offset_bottom = 24.0
 theme_override_font_sizes/font_size = 13
 text = "Idle"
 
+[node name="CoordLabel" type="Label" parent="BLEIndicator"]
+layout_mode = 0
+offset_left = 28.0
+offset_top = 20.0
+offset_right = 220.0
+offset_bottom = 44.0
+theme_override_font_sizes/font_size = 11
+text = "x:0  y:0  z:0"
+
 [connection signal="pressed" from="SetOriginButton" to="PlayButton" method="_on_set_origin_pressed"]
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
 [connection signal="text_submitted" from="TextureRect/HospID" to="PlayButton" method="_on_hosp_id_text_submitted"]

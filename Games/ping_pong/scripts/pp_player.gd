@@ -9,7 +9,7 @@ const GAME_NAME: String = "PingPong"
 # Movement and positioning
 var network_position: Vector2 = Vector2.ZERO
 var zero_offset: Vector2 = Vector2.ZERO
-var centre: Vector2 = Vector2(120, 200)
+var centre: Vector2 = Vector2.ZERO
 
 # Game state
 var game_started: bool = false
