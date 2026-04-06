@@ -361,6 +361,7 @@ func _on_enter_pressed() -> void:
 	var aabb = get_aabb(_current_line.points)
 	rect_points = aabb
 	active_workspace = Geometry2D.convex_hull(_current_line.points)
+	inflated_workspace = Geometry2D.convex_hull(inflate_polygon(active_workspace, -20))
 	var prom_size = get_aabb(inflated_workspace).size
 	GlobalSignals.global_scalar_x = get_viewport_rect().size.x /prom_size.x 
 	GlobalSignals.global_scalar_y = get_viewport_rect().size.y /prom_size.y
