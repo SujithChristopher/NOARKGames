@@ -7,11 +7,26 @@ signal gem_off_screen
 signal gem_collected  # Restored - might be needed for scoring/game logic
 static var gem_count: int = 0
 
-# Directory containing fruit images
-const FRUITS_DIR = "res://Games/fruit_catcher/assets/fruits/"
-# Cache for loaded textures to improve performance
-static var fruit_textures: Array[Texture2D] = []
-static var textures_loaded: bool = false
+# Preloaded fruit textures — DirAccess cannot enumerate res:// inside an APK,
+# so textures must be referenced explicitly to be included in the export.
+const FRUIT_TEXTURES_LIST: Array = [
+	preload("res://Games/fruit_catcher/assets/fruits/banana.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/black-berry-light.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/green-apple.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/green-grape.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/lemon.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/lime.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/orange.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/peach.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/pear.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/plum.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/raspberry.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/red-apple.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/red-cherry.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/red-grape.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/strawberry.png"),
+	preload("res://Games/fruit_catcher/assets/fruits/watermelon.png"),
+]
 
 # References to both nodes
 @onready var sprite: Sprite2D = get_node("Sprite2D")
@@ -23,62 +38,26 @@ func _ready() -> void:
 	gem_count += 1
 	END_OF_SCREEN_Y = get_viewport_rect().end.y
 
-	# Scale the whole gem (sprite + collider) proportionally to viewport width.
-	# The scene was authored at 1920px wide; on a tablet with a larger/higher-res
-	# screen this keeps the fruit a consistent fraction of the screen.
-	var vp_width = get_viewport_rect().size.x
-	scale = Vector2.ONE * (vp_width / 1920.0)
+	# Scale fruit to a fixed physical size (~25 mm) using the screen's actual DPI.
+	# This keeps the fruit the same real-world size on every device — high-DPI
+	# tablets (e.g. OnePlus Pad 3 at 315 PPI) and desktop monitors alike.
+	# Without a base resolution in project.godot, canvas_items does NOT auto-scale,
+	# so a viewport-pixel approach produces tiny fruits on high-DPI screens.
+	var dpi: float = float(DisplayServer.screen_get_dpi())
+	if dpi <= 0:
+		dpi = 96.0  # safe fallback for desktop/unknown
+	const TARGET_MM: float = 2.0  # desired fruit diameter in millimetres
+	var target_px: float = (TARGET_MM / 25.4) * dpi
+	var collision_base_size: float = 35.3553  # matches CollisionShape2D size
+	scale = Vector2.ONE * (target_px / collision_base_size)
 
 	# Hide the animated sprite initially (show only the fruit sprite)
 	if animated_sprite:
 		animated_sprite.visible = false
-	
-	# Load textures only once
-	if not textures_loaded:
-		load_fruit_textures()
-	
-	# Set random fruit texture
-	set_random_fruit_texture()
 
-func load_fruit_textures() -> void:
-	"""Load all fruit textures once and cache them"""
-	var fruit_files = get_fruit_files()
-	fruit_textures.clear()
-	
-	for file_name in fruit_files:
-		var texture_path = FRUITS_DIR + file_name
-		var texture = load(texture_path) as Texture2D
-		if texture:
-			fruit_textures.append(texture)
-	
-	textures_loaded = true
-
-func set_random_fruit_texture() -> void:
-	"""Set a random fruit texture from the cached textures"""
-	if fruit_textures.size() > 0:
-		if sprite:
-			var random_index = randi() % fruit_textures.size()
-			sprite.texture = fruit_textures[random_index]
-
-func get_fruit_files() -> Array[String]:
-	var fruit_files: Array[String] = []
-	var dir = DirAccess.open(FRUITS_DIR)
-	
-	if dir:
-		dir.list_dir_begin()
-		var file_name = dir.get_next()
-		
-		while file_name != "":
-			# Check if it's an image file
-			if file_name.ends_with(".jpg") or file_name.ends_with(".png") or file_name.ends_with(".jpeg"):
-				fruit_files.append(file_name)
-			file_name = dir.get_next()
-		
-		dir.list_dir_end()
-	else:
-		push_error("Failed to access directory: " + FRUITS_DIR)
-	
-	return fruit_files
+	# Pick a random fruit texture from the preloaded list
+	if sprite:
+		sprite.texture = FRUIT_TEXTURES_LIST[randi() % FRUIT_TEXTURES_LIST.size()]
 
 func die() -> void:
 	set_process(false)
