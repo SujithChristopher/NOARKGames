@@ -1,11 +1,11 @@
+import argparse
 import csv
 import json
 import logging
 import os
 import platform
-import socket
-import struct
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,10 @@ import toml
 from cv2 import aruco
 
 from filters import ExponentialMovingAverageFilter3D
+from udp_streamer import UDPStreamer
 
+
+_SCRIPT_DIR = Path(__file__).parent
 
 MARKER_OFFSETS = {
     4:  np.array([0.00,  0.1,    -0.069]),
@@ -29,22 +32,22 @@ MARKER_OFFSETS = {
 
 def _load_settings() -> dict:
     """Read settings.json from the project root (one level above pyscripts/)."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(script_dir, "..", "settings.json")
-    if os.path.exists(path):
+    path = _SCRIPT_DIR.parent / "settings.json"
+    if path.exists():
         with open(path) as f:
             return json.load(f)
     return {"debug": True, "stream_type": "ble", "ble_device_name": "NOARK_Tracker"}
 
 
 class TrackerClass:
-    def __init__(self, cam_calib_path: str, settings: Optional[dict] = None) -> None:
+    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None, camera_index: int = 0) -> None:
         if settings is None:
             settings = {}
 
         # ── A: transport settings ─────────────────────────────────────────────
         self.stream_type     = settings.get("stream_type", "ble")
         self.ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
+        self.camera_index    = camera_index
 
         # ── B: load calibration from good.toml ───────────────────────────────
         calib = toml.load(cam_calib_path)
@@ -95,7 +98,7 @@ class TrackerClass:
         self.detector = self._init_detector()
         self.board    = self._init_board()
 
-        self.picam2 = self.map1_rpi = self.map2_rpi = None
+        self.picam2       = None
         self.video_frame  = None
         self.tvec_dist    = np.zeros(3)
         self.save_path    = None
@@ -103,7 +106,6 @@ class TrackerClass:
         self.csv_writer   = None
         self.record       = False
         self.received_message: bytes = b""
-        self.addr         = None
 
         self._curr_session = os.path.join(
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
@@ -156,7 +158,7 @@ class TrackerClass:
         # Undistortion maps are already computed in __init__ — nothing to do here
 
     def _init_camera(self) -> None:
-        self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        self.camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  self.frame_size[0])
         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_size[1])
         self.camera.set(cv2.CAP_PROP_FPS, 30)
@@ -164,10 +166,8 @@ class TrackerClass:
     # ── transport init ────────────────────────────────────────────────────────
 
     def _init_udp_socket(self) -> None:
-        self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_socket.bind((self.udp_ip, self.udp_port))
-        self.udp_socket.setblocking(False)
-        print("UDP socket bound to", self.udp_socket.getsockname())
+        self.udp_streamer = UDPStreamer(ip=self.udp_ip, port=self.udp_port)
+        self.udp_streamer.start()
 
     def _init_ble(self) -> None:
         from ble_streamer import BLEStreamer
@@ -179,11 +179,7 @@ class TrackerClass:
     def _recv_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
         if self.stream_type == "udp":
-            try:
-                data, self.addr = self.udp_socket.recvfrom(30)
-                return data
-            except socket.error:
-                return b""
+            return self.udp_streamer.get_command()
         elif self.stream_type == "ble":
             return self.ble_streamer.get_command()
         return b""
@@ -204,8 +200,8 @@ class TrackerClass:
             dtype=np.float32,
         )
 
-        if self.stream_type == "udp" and self.addr is not None:
-            self.udp_socket.sendto(struct.pack("f" * len(data), *data), self.addr)
+        if self.stream_type == "udp":
+            self.udp_streamer.send(data.tolist())
         elif self.stream_type == "ble":
             self.ble_streamer.send(data.tolist())
         self._send_count += 1
@@ -385,6 +381,8 @@ class TrackerClass:
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
+            if self.stream_type == "udp" and hasattr(self, "udp_streamer"):
+                self.udp_streamer.stop()
             if self.stream_type == "ble" and hasattr(self, "ble_streamer"):
                 print("[BLE] Stopping BLE streamer")
                 self.ble_streamer.stop()
@@ -393,10 +391,14 @@ class TrackerClass:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--camera", type=int, default=0, help="Camera index (0, 1, …)")
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True)
     logging.getLogger(__name__).setLevel(logging.DEBUG)
     settings = _load_settings()
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    CALIB_PATH = os.path.join(script_dir, "calibration", "good.toml")
-    tracker = TrackerClass(cam_calib_path=CALIB_PATH, settings=settings)
+
+    CALIB_PATH = _SCRIPT_DIR / "calibration" / "good.toml"
+    tracker = TrackerClass(cam_calib_path=CALIB_PATH, settings=settings, camera_index=args.camera)
     tracker.run()
