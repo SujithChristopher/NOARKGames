@@ -6,6 +6,7 @@ import platform
 import socket
 import struct
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -17,18 +18,20 @@ from cv2 import aruco
 from filters import ExponentialMovingAverageFilter3D
 
 
+_SCRIPT_DIR = Path(__file__).parent
+
+
 def _load_settings() -> dict:
     """Read settings.json from the project root (one level above pyscripts/)."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(script_dir, "..", "settings.json")
-    if os.path.exists(path):
+    path = _SCRIPT_DIR.parent / "settings.json"
+    if path.exists():
         with open(path) as f:
             return json.load(f)
     return {"debug": False, "stream_type": "udp", "ble_device_name": "NOARK_Tracker"}
 
 
 class Config:
-    FRAME_SIZE = (1200, 800)
+    FRAME_SIZE = (1280, 800)
     MARKER_LENGTH = 0.05
     MARKER_SEPARATION = 0.01
     UDP_IP = "localhost"
@@ -45,7 +48,7 @@ class Config:
 
 
 class MainClass:
-    def __init__(self, cam_calib_path: str, settings: Optional[dict] = None) -> None:
+    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None) -> None:
         if settings is None:
             settings = {}
 
@@ -126,13 +129,13 @@ class MainClass:
         self.picam2.configure(config)
         self.picam2.start()
 
-        import toml
-        fish_params = toml.load("/home/sujith/Documents/Camera/rpi_python/undistort_best.toml")
-        fish_matrix = np.array(fish_params["calibration"]["camera_matrix"]).reshape(3, 3)
-        fish_dist   = np.array(fish_params["calibration"]["dist_coeffs"])
+        # Build undistort maps from the already-loaded fisheye calibration.
+        # After remap the frame is a pinhole image, so zero out distortion for solvePnP.
         self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
-            fish_matrix, fish_dist, np.eye(3), fish_matrix, self.frame_size, cv2.CV_16SC2
+            self.camera_matrix, self.distortion_coeff, np.eye(3),
+            self.camera_matrix, self.frame_size, cv2.CV_16SC2,
         )
+        self.distortion_coeff = np.zeros((4, 1))
 
     def _init_camera(self) -> None:
         self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -358,10 +361,7 @@ if __name__ == "__main__":
     logging.getLogger(__name__).setLevel(logging.DEBUG)
     settings = _load_settings()
 
-    if platform.system() == "Linux":
-        CAMERA_CALIB_PATH = "/home/sujith/Documents/Camera/rpi_python/old_calibration/calib_mono_faith.toml"
-    else:
-        CAMERA_CALIB_PATH = r"E:\CMC\pyprojects\programs_rpi\rpi_python\webcam_calib.toml"
+    CAMERA_CALIB_PATH = _SCRIPT_DIR / "calibration" / "good.toml"
 
     main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings)
     main.run()
