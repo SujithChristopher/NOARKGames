@@ -40,7 +40,7 @@ def _load_settings() -> dict:
 
 
 class TrackerClass:
-    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None, camera_index: int = 0, record_frames: bool = False, fps_value: int = 30) -> None:
+    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None, camera_index: int = 0, record_frames: bool = False, fps_value: int = 30, flip_frames: bool = True) -> None:
         if settings is None:
             settings = {}
 
@@ -50,6 +50,8 @@ class TrackerClass:
         self.camera_index    = camera_index
         self.record_frames   = record_frames
         self.fps_value       = fps_value
+        self.flip_frames     = flip_frames
+        self._calib_path     = cam_calib_path
 
         # ── B: load calibration from good.toml ───────────────────────────────
         calib = toml.load(cam_calib_path)
@@ -66,7 +68,9 @@ class TrackerClass:
         self.marker_separation = calib["aruco"]["marker_spacing"]
 
         res = calib["camera"]["resolution"]
-        self.frame_size = (res[0], res[1])  # (width, height)
+        self.frame_size      = (res[0], res[1])  # (width, height)
+        self._camera_model   = calib["camera"].get("model", "unknown")
+        self._camera_fov     = calib["camera"].get("fov", None)
 
         self.udp_ip   = settings.get("udp_ip",   calib["stream_data"]["ip"])
         self.udp_port = settings.get("udp_port", calib["stream_data"]["port"])
@@ -171,7 +175,6 @@ class TrackerClass:
                 cam_config, controls=cam_controls, transform=cam_transform,
             ))
             self.picam1.start()
-            self._open_rec_files()
         # Undistortion maps are already computed in __init__ — nothing to do here
 
     def _init_camera(self) -> None:
@@ -182,12 +185,24 @@ class TrackerClass:
 
     # ── dual-camera recording ─────────────────────────────────────────────────
 
-    def _open_rec_files(self) -> None:
-        rec_dir = (
-            Path.home() / "Documents" / "NOARK" / "recordings"
-            / datetime.now().strftime("rec_%Y-%m-%d_%H-%M-%S")
-        )
+    def _open_rec_files(self, base_path: str) -> None:
+        rec_dir = Path(base_path) / "recordings" / datetime.now().strftime("rec_%H-%M-%S")
         rec_dir.mkdir(parents=True, exist_ok=True)
+
+        metadata = {
+            "patient_id":   self._hid,
+            "session":      self._curr_session,
+            "start_time":   datetime.now().isoformat(timespec="seconds"),
+            "fps":          self.fps_value,
+            "flip":         self.flip_frames,
+            "resolution":   list(self.frame_size),
+            "camera_model": self._camera_model,
+            "fov":          self._camera_fov,
+            "calibration":  str(self._calib_path),
+        }
+        with open(rec_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
         self._rec_file0 = open(rec_dir / "cam0_frame.msgpack", "wb")
         self._rec_file1 = open(rec_dir / "cam1_frame.msgpack", "wb")
         self._ts_file0  = open(rec_dir / "cam0_timestamp.msgpack", "wb")
@@ -203,12 +218,12 @@ class TrackerClass:
         self._ts_file0.write(msgpack.packb(ts))
         self._ts_file1.write(msgpack.packb(ts))
 
-    def _close_rec_files(self) -> None:
+    def _close_rec_files(self, stop_camera: bool = False) -> None:
         for fh in (self._rec_file0, self._rec_file1, self._ts_file0, self._ts_file1):
             if fh:
                 fh.close()
         self._rec_file0 = self._rec_file1 = self._ts_file0 = self._ts_file1 = None
-        if self.picam1 is not None:
+        if stop_camera and self.picam1 is not None:
             self.picam1.stop()
             self.picam1 = None
         print("[REC] Recording closed")
@@ -322,15 +337,24 @@ class TrackerClass:
             self.csv_writer = csv.writer(open(csv_path, "w", newline=""))
             self.csv_writer.writerow(["Time", "X", "Y", "Z"])
 
+            if self.record_frames and self.picam1 is not None:
+                if self._rec_file0 is not None:
+                    self._close_rec_files(stop_camera=False)
+                self._open_rec_files(self.save_path)
+
     # ── main loop ─────────────────────────────────────────────────────────────
 
     def process_frame(self) -> None:
         # Capture
         h, w = self.frame_size[1], self.frame_size[0]
         if platform.system() == "Linux":
-            raw0 = cv2.flip(self.picam2.capture_array()[:h, :w], 1)
-            if self.record_frames and self.picam1 is not None:
-                raw1 = cv2.flip(self.picam1.capture_array()[:h, :w], 1)
+            raw0 = self.picam2.capture_array()[:h, :w]
+            if self.flip_frames:
+                raw0 = cv2.flip(raw0, 1)
+            if self.record_frames and self.picam1 is not None and self._rec_file0 is not None:
+                raw1 = self.picam1.capture_array()[:h, :w]
+                if self.flip_frames:
+                    raw1 = cv2.flip(raw1, 1)
                 self._write_frames(raw0, raw1)
             self.video_frame = cv2.remap(raw0, self.map1, self.map2, cv2.INTER_LINEAR)
         else:
@@ -431,7 +455,7 @@ class TrackerClass:
                     break
         finally:
             if self.record_frames:
-                self._close_rec_files()
+                self._close_rec_files(stop_camera=True)
             if self.stream_type == "udp" and hasattr(self, "udp_streamer"):
                 self.udp_streamer.stop()
             if self.stream_type == "ble" and hasattr(self, "ble_streamer"):
@@ -446,6 +470,7 @@ if __name__ == "__main__":
     parser.add_argument("--camera", type=int, default=0, help="Camera index for tracking (0, 1, …)")
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
     parser.add_argument("--fps", type=int, default=30, choices=[15, 30, 60], help="Camera FPS for capture and recording")
+    parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=True, help="Flip frames horizontally (default: on)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True)
@@ -459,5 +484,6 @@ if __name__ == "__main__":
         camera_index=args.camera,
         record_frames=args.record,
         fps_value=args.fps,
+        flip_frames=args.flip,
     )
     tracker.run()
