@@ -1,3 +1,4 @@
+import argparse
 import csv
 import json
 import logging
@@ -48,12 +49,13 @@ class Config:
 
 
 class MainClass:
-    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None) -> None:
+    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None, camera_index: int = 0) -> None:
         if settings is None:
             settings = {}
 
         self.stream_type     = settings.get("stream_type", "udp")
         self.ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
+        self.camera_index    = camera_index
 
         self.filter            = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
         self.default_ids       = Config.DEFAULT_IDS
@@ -138,7 +140,7 @@ class MainClass:
         self.distortion_coeff = np.zeros((4, 1))
 
     def _init_camera(self) -> None:
-        self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        self.camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         self.camera.set(cv2.CAP_PROP_FPS, 30)
@@ -357,11 +359,15 @@ class MainClass:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--camera", type=int, default=0, help="Camera index (0, 1, …)")
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True)
     logging.getLogger(__name__).setLevel(logging.DEBUG)
     settings = _load_settings()
 
     CAMERA_CALIB_PATH = _SCRIPT_DIR / "calibration" / "good.toml"
 
-    main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings)
+    main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings, camera_index=args.camera)
     main.run()
