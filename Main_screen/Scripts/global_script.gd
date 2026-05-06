@@ -167,14 +167,13 @@ func _ready() -> void:
 	GlobalSignals.SignalBus.connect(handle_quit_request)
 	get_tree().set_auto_accept_quit(false)
 
+	var root := _project_root()
 	if OS.get_name() == "Windows":
-		pyscript_path       = "E:\\CMC\\pyprojects\\programs_rpi\\rpi_python\\stream_optimize.py"
-		pypath_checker_path = "E:\\CMC\\pyprojects\\programs_rpi\\rpi_python\\file_integrity.py"
-		interpreter_path    = "E:\\CMC\\py_env\\venv\\Scripts\\python.exe"
+		interpreter_path = root.path_join(".venv/Scripts/python.exe")
 	else:
-		pyscript_path       = "/home/sujith/Documents/rpi_python/stream_optimize.py"
-		pypath_checker_path = "/home/sujith/Documents/rpi_python/file_integrity.py"
-		interpreter_path    = "/home/sujith/Documents/rpi_python/venv/bin/python"
+		interpreter_path = root.path_join(".venv/bin/python")
+	pyscript_path       = root.path_join("pyscripts/tracker.py")
+	pypath_checker_path = root.path_join("pyscripts/file_integrity.py")
 
 	match stream_type:
 		"udp":
@@ -655,6 +654,17 @@ func _notification(what: int) -> void:
 				if _ble_manager != null:
 					_ble_manager.stop_scan()
 		get_tree().quit()
+
+
+# ── path helpers ─────────────────────────────────────────────────────────────
+
+func _project_root() -> String:
+	# In the editor res:// maps to the project directory on disk.
+	# In an exported build it maps to the PCK, so we use the executable's
+	# directory instead — Python scripts must be deployed alongside the binary.
+	if OS.has_feature("editor"):
+		return ProjectSettings.globalize_path("res://")
+	return OS.get_executable_path().get_base_dir()
 
 
 # ── session helpers ───────────────────────────────────────────────────────────
