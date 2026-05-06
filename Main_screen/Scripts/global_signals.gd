@@ -13,7 +13,7 @@ signal origin_set
 @export var inflated_workspace: PackedVector2Array
 
 @export var current_patient_id:String = ""
-@export var data_path:String = (OS.get_user_data_dir() if OS.get_name() == "Android" else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS) + "//NOARK") + "//data"
+@export var data_path:String = (OS.get_user_data_dir() if OS.get_name() == "Android" else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS).path_join("NOARK")).path_join("data")
 
 
 @export var ball_position: Vector2

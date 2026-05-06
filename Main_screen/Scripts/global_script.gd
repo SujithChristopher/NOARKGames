@@ -64,6 +64,7 @@ var _last_ref_id: int     = -1
 # ── transport settings ────────────────────────────────────────────────────────
 var stream_type: String = "udp"
 var ble_device_name: String = "NOARK_Tracker"
+var udp_port: int = 8000
 
 const BLE_SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
 const BLE_POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
@@ -141,6 +142,7 @@ func _ready() -> void:
 	debug           = settings.get("debug", false)
 	stream_type     = settings.get("stream_type", "udp")
 	ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
+	udp_port        = settings.get("udp_port", 8000)
 
 	current_date = get_date_string()
 	load_session_info()
@@ -191,7 +193,7 @@ func _ready() -> void:
 # ── UDP ───────────────────────────────────────────────────────────────────────
 
 func _init_udp() -> void:
-	udp.connect_to_host("127.0.0.1", 8000)
+	udp.connect_to_host("127.0.0.1", udp_port)
 	thread_python.start(python_thread, Thread.PRIORITY_HIGH)
 	thread_network.start(network_thread)
 
