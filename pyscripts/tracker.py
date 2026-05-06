@@ -40,7 +40,7 @@ def _load_settings() -> dict:
 
 
 class TrackerClass:
-    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None, camera_index: int = 0) -> None:
+    def __init__(self, cam_calib_path: Path, settings: Optional[dict] = None, camera_index: int = 0, record_frames: bool = False, fps_value: int = 30) -> None:
         if settings is None:
             settings = {}
 
@@ -48,6 +48,8 @@ class TrackerClass:
         self.stream_type     = settings.get("stream_type", "ble")
         self.ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
         self.camera_index    = camera_index
+        self.record_frames   = record_frames
+        self.fps_value       = fps_value
 
         # ── B: load calibration from good.toml ───────────────────────────────
         calib = toml.load(cam_calib_path)
@@ -99,6 +101,7 @@ class TrackerClass:
         self.board    = self._init_board()
 
         self.picam2       = None
+        self.picam1       = None   # second camera, only used when record_frames=True
         self.video_frame  = None
         self.tvec_dist    = np.zeros(3)
         self.save_path    = None
@@ -106,6 +109,8 @@ class TrackerClass:
         self.csv_writer   = None
         self.record       = False
         self.received_message: bytes = b""
+        self._rec_file0 = self._rec_file1 = None
+        self._ts_file0  = self._ts_file1  = None
 
         self._curr_session = os.path.join(
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
@@ -147,21 +152,66 @@ class TrackerClass:
         from picamera2 import Picamera2
         import libcamera
 
-        self.picam2 = Picamera2()
-        config = self.picam2.create_video_configuration(
-            {"format": "YUV420", "size": self.frame_size},
-            controls={"FrameRate": 100, "ExposureTime": 5000},
-            transform=libcamera.Transform(vflip=1),
-        )
-        self.picam2.configure(config)
+        cam_config = {
+            "format": "YUV420",
+            "size": self.frame_size,
+        }
+        cam_controls = {"FrameRate": self.fps_value, "ExposureTime": 5000}
+        cam_transform = libcamera.Transform(vflip=1)
+
+        self.picam2 = Picamera2(camera_num=0)
+        self.picam2.configure(self.picam2.create_video_configuration(
+            cam_config, controls=cam_controls, transform=cam_transform,
+        ))
         self.picam2.start()
+
+        if self.record_frames:
+            self.picam1 = Picamera2(camera_num=1)
+            self.picam1.configure(self.picam1.create_video_configuration(
+                cam_config, controls=cam_controls, transform=cam_transform,
+            ))
+            self.picam1.start()
+            self._open_rec_files()
         # Undistortion maps are already computed in __init__ — nothing to do here
 
     def _init_camera(self) -> None:
         self.camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  self.frame_size[0])
         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_size[1])
-        self.camera.set(cv2.CAP_PROP_FPS, 30)
+        self.camera.set(cv2.CAP_PROP_FPS, self.fps_value)
+
+    # ── dual-camera recording ─────────────────────────────────────────────────
+
+    def _open_rec_files(self) -> None:
+        rec_dir = (
+            Path.home() / "Documents" / "NOARK" / "recordings"
+            / datetime.now().strftime("rec_%Y-%m-%d_%H-%M-%S")
+        )
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        self._rec_file0 = open(rec_dir / "cam0_frame.msgpack", "wb")
+        self._rec_file1 = open(rec_dir / "cam1_frame.msgpack", "wb")
+        self._ts_file0  = open(rec_dir / "cam0_timestamp.msgpack", "wb")
+        self._ts_file1  = open(rec_dir / "cam1_timestamp.msgpack", "wb")
+        print(f"[REC] Recording to {rec_dir}")
+
+    def _write_frames(self, frame0: np.ndarray, frame1: np.ndarray) -> None:
+        import msgpack
+        import msgpack_numpy as mpn
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        self._rec_file0.write(msgpack.packb(frame0, default=mpn.encode))
+        self._rec_file1.write(msgpack.packb(frame1, default=mpn.encode))
+        self._ts_file0.write(msgpack.packb(ts))
+        self._ts_file1.write(msgpack.packb(ts))
+
+    def _close_rec_files(self) -> None:
+        for fh in (self._rec_file0, self._rec_file1, self._ts_file0, self._ts_file1):
+            if fh:
+                fh.close()
+        self._rec_file0 = self._rec_file1 = self._ts_file0 = self._ts_file1 = None
+        if self.picam1 is not None:
+            self.picam1.stop()
+            self.picam1 = None
+        print("[REC] Recording closed")
 
     # ── transport init ────────────────────────────────────────────────────────
 
@@ -276,18 +326,17 @@ class TrackerClass:
 
     def process_frame(self) -> None:
         # Capture
+        h, w = self.frame_size[1], self.frame_size[0]
         if platform.system() == "Linux":
-            self.video_frame = self.picam2.capture_array()
-            self.video_frame = cv2.flip(self.video_frame, 1)  # flip before remap
+            raw0 = cv2.flip(self.picam2.capture_array()[:h, :w], 1)
+            if self.record_frames and self.picam1 is not None:
+                raw1 = cv2.flip(self.picam1.capture_array()[:h, :w], 1)
+                self._write_frames(raw0, raw1)
+            self.video_frame = cv2.remap(raw0, self.map1, self.map2, cv2.INTER_LINEAR)
         else:
             ret, self.video_frame = self.camera.read()
             if not ret or self.video_frame is None:
                 return
-
-        # Undistort — always applied on both platforms
-        self.video_frame = cv2.remap(
-            self.video_frame, self.map1, self.map2, cv2.INTER_LINEAR
-        )
 
         # Poll command from Godot
         cmd = self._recv_command()
@@ -381,6 +430,8 @@ class TrackerClass:
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
+            if self.record_frames:
+                self._close_rec_files()
             if self.stream_type == "udp" and hasattr(self, "udp_streamer"):
                 self.udp_streamer.stop()
             if self.stream_type == "ble" and hasattr(self, "ble_streamer"):
@@ -392,7 +443,9 @@ class TrackerClass:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--camera", type=int, default=0, help="Camera index (0, 1, …)")
+    parser.add_argument("--camera", type=int, default=0, help="Camera index for tracking (0, 1, …)")
+    parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
+    parser.add_argument("--fps", type=int, default=30, choices=[15, 30, 60], help="Camera FPS for capture and recording")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True)
@@ -400,5 +453,11 @@ if __name__ == "__main__":
     settings = _load_settings()
 
     CALIB_PATH = _SCRIPT_DIR / "calibration" / "good.toml"
-    tracker = TrackerClass(cam_calib_path=CALIB_PATH, settings=settings, camera_index=args.camera)
+    tracker = TrackerClass(
+        cam_calib_path=CALIB_PATH,
+        settings=settings,
+        camera_index=args.camera,
+        record_frames=args.record,
+        fps_value=args.fps,
+    )
     tracker.run()
