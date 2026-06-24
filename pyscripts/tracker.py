@@ -186,7 +186,7 @@ class TrackerClass:
         self._camera_fov       = ac["camera"].get("fov", 160)
 
         # ── Remaining state ───────────────────────────────────────────────────
-        self.filter         = ExponentialMovingAverageFilter3D(alpha=1)
+        self.filter         = ExponentialMovingAverageFilter3D(alpha=0.4)
         self.marker_offsets = MARKER_OFFSETS
 
         self.detector = self._init_detector()
@@ -402,14 +402,20 @@ class TrackerClass:
                     result_rvecs.append(rvec)
                     result_tvecs.append(tvec)
 
-        # Markers visible only in cam1 (not in cam0)
+        # Markers visible only in cam1 (not in cam0). _single_cam_pnp returns the
+        # pose in cam1's frame; transform it into cam0's frame so it is co-framed
+        # with the stereo and cam0-only poses (otherwise the centroid jumps by the
+        # stereo baseline whenever a marker drops to cam1-only).
         for mid, c1 in cam1_by_id.items():
             if mid not in result_ids:
-                rvec, tvec = _single_cam_pnp(c1, self.K1, self.D1)
-                if rvec is not None:
+                rvec1, tvec1 = _single_cam_pnp(c1, self.K1, self.D1)
+                if rvec1 is not None:
+                    R1   = cv2.Rodrigues(rvec1)[0]
+                    R_c0 = self.R_st.T @ R1
+                    t_c0 = self.R_st.T @ (tvec1.reshape(3, 1) - self.T_st)
                     result_ids.append(mid)
-                    result_rvecs.append(rvec)
-                    result_tvecs.append(tvec)
+                    result_rvecs.append(cv2.Rodrigues(R_c0)[0].flatten())
+                    result_tvecs.append(t_c0.flatten())
 
         return result_ids, result_rvecs, result_tvecs
 
