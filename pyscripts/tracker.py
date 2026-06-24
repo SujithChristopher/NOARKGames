@@ -17,6 +17,7 @@ import toml
 from cv2 import aruco
 from scipy.optimize import least_squares
 
+from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from udp_streamer import UDPStreamer
 
@@ -187,6 +188,9 @@ class TrackerClass:
 
         # ── Remaining state ───────────────────────────────────────────────────
         self.filter         = ExponentialMovingAverageFilter3D(alpha=0.4)
+        self.stabilizer     = CornerStabilizer(
+            threshold_px=settings.get("corner_deadband_px", 0.5)
+        )
         self.marker_offsets = MARKER_OFFSETS
 
         self.detector = self._init_detector()
@@ -384,40 +388,60 @@ class TrackerClass:
 
         result_ids, result_rvecs, result_tvecs = [], [], []
 
-        # Markers detected in cam0
+        # Markers detected in cam0. Each solve is routed through the stabilizer,
+        # which reuses the previous pose when the marker's corners are static.
         if ids0 is not None:
             for i, mid in enumerate(ids0_flat):
                 mid = int(mid)
                 c0 = corners0[i].reshape(4, 2).astype(np.float64)
                 if mid in cam1_by_id and allow_stereo:
-                    rvec, tvec = _stereo_pnp(
-                        c0, cam1_by_id[mid],
-                        self.K0, self.D0, self.K1, self.D1,
-                        self.R_st, self.T_st,
+                    c1 = cam1_by_id[mid]
+                    rvec, tvec = self.stabilizer.stabilize(
+                        mid, {"c0": c0, "c1": c1},
+                        lambda c0=c0, c1=c1: _stereo_pnp(
+                            c0, c1, self.K0, self.D0, self.K1, self.D1,
+                            self.R_st, self.T_st,
+                        ),
                     )
                 else:
-                    rvec, tvec = _single_cam_pnp(c0, self.K0, self.D0)
+                    rvec, tvec = self.stabilizer.stabilize(
+                        mid, {"c0": c0},
+                        lambda c0=c0: _single_cam_pnp(c0, self.K0, self.D0),
+                    )
                 if rvec is not None:
                     result_ids.append(mid)
                     result_rvecs.append(rvec)
                     result_tvecs.append(tvec)
 
-        # Markers visible only in cam1 (not in cam0). _single_cam_pnp returns the
-        # pose in cam1's frame; transform it into cam0's frame so it is co-framed
-        # with the stereo and cam0-only poses (otherwise the centroid jumps by the
-        # stereo baseline whenever a marker drops to cam1-only).
+        # Markers visible only in cam1 (not in cam0): solved in cam1 then
+        # transformed into cam0's frame (see _cam1_pose).
         for mid, c1 in cam1_by_id.items():
             if mid not in result_ids:
-                rvec1, tvec1 = _single_cam_pnp(c1, self.K1, self.D1)
-                if rvec1 is not None:
-                    R1   = cv2.Rodrigues(rvec1)[0]
-                    R_c0 = self.R_st.T @ R1
-                    t_c0 = self.R_st.T @ (tvec1.reshape(3, 1) - self.T_st)
+                rvec, tvec = self.stabilizer.stabilize(
+                    mid, {"c1": c1},
+                    lambda c1=c1: self._cam1_pose(c1),
+                )
+                if rvec is not None:
                     result_ids.append(mid)
-                    result_rvecs.append(cv2.Rodrigues(R_c0)[0].flatten())
-                    result_tvecs.append(t_c0.flatten())
+                    result_rvecs.append(rvec)
+                    result_tvecs.append(tvec)
 
         return result_ids, result_rvecs, result_tvecs
+
+    def _cam1_pose(self, c1: np.ndarray):
+        """Single-cam PnP on cam1, transformed into cam0's frame.
+
+        _single_cam_pnp returns the pose in cam1's frame; the stereo and
+        cam0-only poses live in cam0's frame, so this re-expresses it there
+        (otherwise the centroid jumps by the stereo baseline on cam1-only).
+        """
+        rvec1, tvec1 = _single_cam_pnp(c1, self.K1, self.D1)
+        if rvec1 is None:
+            return None, None
+        R1   = cv2.Rodrigues(rvec1)[0]
+        R_c0 = self.R_st.T @ R1
+        t_c0 = self.R_st.T @ (tvec1.reshape(3, 1) - self.T_st)
+        return cv2.Rodrigues(R_c0)[0].flatten(), t_c0.flatten()
 
     def _get_centroid(self, ids, rvecs, tvecs) -> np.ndarray:
         transformed = []
