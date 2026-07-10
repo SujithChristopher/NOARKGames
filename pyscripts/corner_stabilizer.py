@@ -15,7 +15,7 @@ import numpy as np
 
 
 class CornerStabilizer:
-    def __init__(self, threshold_px: float = 0.5):
+    def __init__(self, threshold_px: float = 0.25):
         # Max per-corner displacement (px) below which a marker counts as static.
         self.threshold_px = threshold_px
         # (marker_id, view_label) -> previous (4, 2) corner array

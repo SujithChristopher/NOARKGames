@@ -17,6 +17,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 config/name="NOARKGames"
 run/main_scene="uid://vhx3bkgoif43"
 config/features=PackedStringArray("4.7", "Forward Plus")
+run/max_fps=30
 boot_splash/bg_color=Color(1, 1, 1, 1)
 boot_splash/stretch_mode=0
 boot_splash/image="uid://dliw4qk8oe66i"
@@ -45,6 +46,7 @@ CircularTimer="*res://Games/random_reach/scenes/circular_timer.gd"
 window/size/mode=2
 window/stretch/mode="canvas_items"
 window/stretch/aspect="ignore"
+window/vsync/vsync_mode=0
 
 [dotnet]
 
@@ -53,10 +55,6 @@ project/assembly_name="Oskar Game v2"
 [editor]
 
 version_control/autoload_on_startup=true
-
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/GdAndroidBLE/plugin.cfg", "res://addons/easy_charts/plugin.cfg")
 
 [filesystem]
 

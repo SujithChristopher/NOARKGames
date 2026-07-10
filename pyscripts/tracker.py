@@ -188,9 +188,9 @@ class TrackerClass:
         self._camera_fov       = ac["camera"].get("fov", 160)
 
         # ── Remaining state ───────────────────────────────────────────────────
-        self.filter         = ExponentialMovingAverageFilter3D(alpha=0.4)
+        self.filter         = ExponentialMovingAverageFilter3D(alpha=1)
         self.stabilizer     = CornerStabilizer(
-            threshold_px=settings.get("corner_deadband_px", 0.5)
+            threshold_px=settings.get("corner_deadband_px", 0.25)
         )
         self.marker_offsets = MARKER_OFFSETS
 

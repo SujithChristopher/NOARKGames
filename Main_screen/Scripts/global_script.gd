@@ -202,6 +202,11 @@ func network_thread() -> void:
 	while true:
 		if udp.get_available_packet_count() > 0:
 			handle_udp_packet()
+		else:
+			# Idle-sleep instead of busy-spinning a full core while waiting for
+			# the next packet; camera frames arrive every ~16-33ms, so this is
+			# well under one frame period and doesn't add perceptible latency.
+			OS.delay_usec(500)
 		if disconnected:
 			break
 
