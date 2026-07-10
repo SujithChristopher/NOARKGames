@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import platform
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -196,8 +197,8 @@ class TrackerClass:
         self.detector = self._init_detector()
         self.board    = self._init_board()
 
-        self.picam2   = None   # cam0: primary (tracking + display)
-        self.picam1   = None   # cam1: stereo second view
+        self.cam0     = None   # primary (tracking + display)
+        self.cam1     = None   # stereo second view
         self._executor        = None
         self._frame_period_us = 1_000_000 / self.fps_value
         self._skew_baseline_us = 0.0   # measured cam0→cam1 sensor phase offset
@@ -216,9 +217,9 @@ class TrackerClass:
 
         # ── Cameras + transport ───────────────────────────────────────────────
         if platform.system() == "Linux":
-            self._init_rpi_cameras()
+            self._init_cameras()
         else:
-            raise RuntimeError("Stereo tracking requires RPi dual-camera hardware.")
+            raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
 
         self._init_udp_socket()
 
@@ -241,26 +242,28 @@ class TrackerClass:
 
     # ── Cameras ───────────────────────────────────────────────────────────────
 
-    def _init_rpi_cameras(self) -> None:
-        from picamera2 import Picamera2
-        import libcamera
+    def _init_cameras(self) -> None:
+        from rcam import Camera, list_cameras
 
-        cam_config    = {"format": "YUV420", "size": self.frame_size}
-        cam_controls  = {"FrameRate": self.fps_value, "ExposureTime": 5000}
-        # cam_transform = libcamera.Transform(vflip=1)
+        labels = list_cameras()
+        if len(labels) < 2:
+            raise RuntimeError(
+                f"Stereo tracking requires two OV9281 cameras; found {labels or 'none'} "
+                "(is the driver loaded? try: sudo modprobe ov9282)"
+            )
 
-        self.picam2 = Picamera2(camera_num=0)
-        self.picam2.configure(self.picam2.create_video_configuration(
-            cam_config, controls=cam_controls,
-        ))
-        self.picam2.start()
+        cam_controls = {"FrameRate": self.fps_value, "ExposureTime": 5000}
+
+        self.cam0 = Camera(labels[0])
+        self.cam0.configure(size=self.frame_size, bit_depth=8)
+        self.cam0.set_controls(cam_controls)
+        self.cam0.start()
 
         # cam1 is always active — used for stereo_pnp on every frame
-        self.picam1 = Picamera2(camera_num=1)
-        self.picam1.configure(self.picam1.create_video_configuration(
-            cam_config, controls=cam_controls,
-        ))
-        self.picam1.start()
+        self.cam1 = Camera(labels[1])
+        self.cam1.configure(size=self.frame_size, bit_depth=8)
+        self.cam1.set_controls(cam_controls)
+        self.cam1.start()
 
         # Concurrent grab: issue both captures in parallel so the inter-camera
         # gap collapses to the sensors' fixed phase offset (not a full frame).
@@ -269,27 +272,31 @@ class TrackerClass:
 
     @staticmethod
     def _grab(cam):
-        """Grab one frame + its sensor capture timestamp (ns)."""
-        req  = cam.capture_request()
-        arr  = req.make_array("main")          # copy — safe after release
-        ts   = req.get_metadata().get("SensorTimestamp", 0)
-        req.release()
+        """Grab one frame + a software capture timestamp (µs, monotonic).
+
+        rcam's V4L2 backend doesn't surface the kernel buffer timestamp to
+        Python, so unlike picamera2's SensorTimestamp this is measured after
+        the frame lands in userspace — good enough to catch a dropped/duplicated
+        frame (a near-full frame-period skew) against the loose gating below.
+        """
+        arr = cam.capture_array()
+        ts  = time.perf_counter_ns() // 1000
         return arr, ts
 
     def _capture_pair(self):
         """Grab both cameras concurrently; return (frame0, frame1, ts0, ts1)."""
-        f0 = self._executor.submit(self._grab, self.picam2)
-        f1 = self._executor.submit(self._grab, self.picam1)
+        f0 = self._executor.submit(self._grab, self.cam0)
+        f1 = self._executor.submit(self._grab, self.cam1)
         frame0, ts0 = f0.result()
         frame1, ts1 = f1.result()
         return frame0, frame1, ts0, ts1
 
     def _measure_phase_offset(self, n_frames: int) -> None:
-        """Establish the baseline cam0→cam1 sensor skew over n_frames."""
+        """Establish the baseline cam0→cam1 capture skew over n_frames."""
         skews = []
         for _ in range(max(1, n_frames)):
             _, _, ts0, ts1 = self._capture_pair()
-            skews.append((ts1 - ts0) / 1000.0)  # ns → µs
+            skews.append(ts1 - ts0)  # already µs
         self._skew_baseline_us = sum(skews) / len(skews)
         std = (sum((s - self._skew_baseline_us) ** 2 for s in skews) / len(skews)) ** 0.5
         pct = self._skew_baseline_us / self._frame_period_us * 100
@@ -477,12 +484,8 @@ class TrackerClass:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def process_frame(self) -> None:
-        h, w = self.frame_size[1], self.frame_size[0]
-
-        # Capture Y planes (grayscale) from both cameras concurrently
-        frame0, frame1, ts0, ts1 = self._capture_pair()
-        raw0 = frame0[:h, :w]
-        raw1 = frame1[:h, :w]
+        # Capture grayscale frames from both cameras concurrently
+        raw0, raw1, ts0, ts1 = self._capture_pair()
         if self.flip_frames:
             raw0 = cv2.flip(raw0, 1)
             raw1 = cv2.flip(raw1, 1)
@@ -557,8 +560,6 @@ class TrackerClass:
             cv2.imshow("frame", np.hstack([disp0, disp1]))
 
     def run(self) -> None:
-        import time
-
         last_heartbeat = time.time()
         last_rate_log  = time.time()
 
@@ -591,8 +592,10 @@ class TrackerClass:
         finally:
             if self.record_frames and self._rec_file0 is not None:
                 self._close_rec_files()
-            if self.picam1 is not None:
-                self.picam1.stop()
+            if self.cam0 is not None:
+                self.cam0.stop()
+            if self.cam1 is not None:
+                self.cam1.stop()
             if self._executor is not None:
                 self._executor.shutdown(wait=True)
             if hasattr(self, "udp_streamer"):
