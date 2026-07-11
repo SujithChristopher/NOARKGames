@@ -138,7 +138,7 @@ class TrackerClass:
         aruco_calib_path: Path,
         settings: Optional[dict] = None,
         record_frames: bool = False,
-        fps_value: int = 50,
+        fps_value: Optional[int] = None,
         flip_frames: bool = True,
     ) -> None:
         if settings is None:
@@ -189,7 +189,9 @@ class TrackerClass:
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
         self._executor        = None
-        self._frame_period_us = 1_000_000 / self.fps_value
+        # Placeholder — replaced with the actually-measured capture interval
+        # in _measure_phase_offset() once cameras are running.
+        self._frame_period_us = 0.0
         self._skew_baseline_us = 0.0   # measured cam0→cam1 sensor phase offset
         self.tvec_dist    = np.zeros(3)
         self.save_path    = None
@@ -244,7 +246,11 @@ class TrackerClass:
                 "(is the driver loaded? try: sudo modprobe ov9282)"
             )
 
-        cam_controls = {"FrameRate": self.fps_value, "ExposureTime": 5000}
+        # No FrameRate control means the sensor free-runs at whatever rate its
+        # current exposure/blanking allows — i.e. max achievable fps.
+        cam_controls = {"ExposureTime": 5000}
+        if self.fps_value is not None:
+            cam_controls["FrameRate"] = self.fps_value
 
         self.cam0 = Camera(labels[0])
         self.cam0.configure(size=self.frame_size, bit_depth=8)
@@ -260,7 +266,7 @@ class TrackerClass:
         # Concurrent grab: issue both captures in parallel so the inter-camera
         # gap collapses to the sensors' fixed phase offset (not a full frame).
         self._executor = ThreadPoolExecutor(max_workers=2)
-        self._measure_phase_offset(int(self.fps_value))  # ~1 s of frames
+        self._measure_phase_offset(60)  # fixed calibration sample, independent of target fps
 
     @staticmethod
     def _grab(cam):
@@ -284,11 +290,20 @@ class TrackerClass:
         return frame0, frame1, ts0, ts1
 
     def _measure_phase_offset(self, n_frames: int) -> None:
-        """Establish the baseline cam0→cam1 capture skew over n_frames."""
+        """Establish the baseline cam0→cam1 capture skew over n_frames.
+
+        Also measures the actual achieved capture interval, since with no
+        configured FrameRate target the real rate is whatever the sensor
+        free-runs at — the stereo-skew gating tolerance in process_frame()
+        must scale off that measured value, not a requested one.
+        """
         skews = []
+        t_start = time.perf_counter()
         for _ in range(max(1, n_frames)):
             _, _, ts0, ts1 = self._capture_pair()
             skews.append(ts1 - ts0)  # already µs
+        elapsed = time.perf_counter() - t_start
+        self._frame_period_us = elapsed / len(skews) * 1_000_000
         self._skew_baseline_us = sum(skews) / len(skews)
         std = (sum((s - self._skew_baseline_us) ** 2 for s in skews) / len(skews)) ** 0.5
         pct = self._skew_baseline_us / self._frame_period_us * 100
@@ -626,7 +641,8 @@ class TrackerClass:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
-    parser.add_argument("--fps", type=int, default=90, choices=[15, 30, 60, 90, 100])
+    parser.add_argument("--fps", type=int, default=None, choices=[15, 30, 60, 90, 100],
+                         help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
 
