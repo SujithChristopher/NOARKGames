@@ -26,7 +26,7 @@ from udp_streamer import UDPStreamer
 _SCRIPT_DIR = Path(__file__).parent
 
 MARKER_OFFSETS = {
-    4:  np.array([0.00,  0.1,    -0.069]),
+    4:  np.array([0.00,  0.01,    -0.069]),
     8:  np.array([0.00,  0.01,   -0.069]),
     12: np.array([0.00,  0.0,    -0.1075]),
     14: np.array([-0.09, 0.0,    -0.069]),
@@ -124,26 +124,11 @@ def _stereo_pnp(
             R_init, t_init = _kabsch(_MARKER_PTS[mask], pts3d[mask])
 
     rvec_init = cv2.Rodrigues(R_init)[0]      # (3, 1)
-    rvec_st   = cv2.Rodrigues(R_st)[0]        # (3, 1)
 
-    obj = _MARKER_PTS.reshape(-1, 1, 3)
-
-    def _residual(p: np.ndarray) -> np.ndarray:
-        rv = p[:3].reshape(3, 1)
-        tv = p[3:].reshape(3, 1)
-        # cam0: fisheye projection onto raw frame
-        proj0, _ = cv2.fisheye.projectPoints(obj, rv, tv, K0, D0)
-        # cam1: compose model→cam0 with stereo cam0→cam1
-        rv1, tv1, *_ = cv2.composeRT(rv, tv, rvec_st, T_st)
-        proj1, _ = cv2.fisheye.projectPoints(obj, rv1, tv1, K1, D1)
-        return np.concatenate([
-            (proj0.reshape(-1, 2) - c0).ravel(),
-            (proj1.reshape(-1, 2) - c1).ravel(),
-        ])
-
-    x0 = np.concatenate([rvec_init.flatten(), t_init.flatten()]).astype(np.float64)
-    sol = least_squares(_residual, x0, method="lm")
-    return sol.x[:3], sol.x[3:]
+    # EXPERIMENT: skip the least_squares (LM) reprojection refinement below and
+    # return the closed-form triangulation + Kabsch estimate directly, to
+    # measure its contribution to per-frame cost.
+    return rvec_init.flatten(), t_init.flatten()
 
 
 class TrackerClass:
@@ -153,7 +138,7 @@ class TrackerClass:
         aruco_calib_path: Path,
         settings: Optional[dict] = None,
         record_frames: bool = False,
-        fps_value: int = 30,
+        fps_value: int = 50,
         flip_frames: bool = True,
     ) -> None:
         if settings is None:
@@ -194,8 +179,12 @@ class TrackerClass:
         )
         self.marker_offsets = MARKER_OFFSETS
 
-        self.detector = self._init_detector()
-        self.board    = self._init_board()
+        # Separate detector instances per camera — run concurrently in
+        # process_frame(), and ArucoDetector isn't guaranteed thread-safe
+        # for two overlapping detectMarkers() calls on a shared instance.
+        self.detector0 = self._init_detector()
+        self.detector1 = self._init_detector()
+        self.board     = self._init_board()
 
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
@@ -205,9 +194,12 @@ class TrackerClass:
         self.tvec_dist    = np.zeros(3)
         self.save_path    = None
         self._send_count  = 0
+        self._frame_count = 0
+        self._stage_time  = {"capture": 0.0, "detect": 0.0, "refine": 0.0, "pose": 0.0}
         self.csv_writer   = None
         self.record       = False
         self.received_message: bytes = b""
+        self._stop_requested = False
         self._rec_file0 = self._rec_file1 = None
         self._ts_file0  = self._ts_file1  = None
 
@@ -228,7 +220,7 @@ class TrackerClass:
     def _init_detector(self):
         params = aruco.DetectorParameters()
         params.useAruco3Detection     = True
-        params.cornerRefinementMethod = aruco.CORNER_REFINE_CONTOUR
+        params.cornerRefinementMethod = aruco.CORNER_REFINE_NONE
         dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
         return aruco.ArucoDetector(dictionary, params)
 
@@ -237,7 +229,7 @@ class TrackerClass:
             size=(1, 1),
             markerLength=self.marker_length,
             markerSeparation=self.marker_separation,
-            dictionary=self.detector.getDictionary(),
+            dictionary=self.detector0.getDictionary(),
         )
 
     # ── Cameras ───────────────────────────────────────────────────────────────
@@ -485,36 +477,52 @@ class TrackerClass:
 
     def process_frame(self) -> None:
         # Capture grayscale frames from both cameras concurrently
+        t0 = time.perf_counter()
         raw0, raw1, ts0, ts1 = self._capture_pair()
+        self._frame_count += 1
         if self.flip_frames:
             raw0 = cv2.flip(raw0, 1)
             raw1 = cv2.flip(raw1, 1)
         if self.record_frames and self._rec_file0 is not None:
             self._write_frames(raw0, raw1, ts0, ts1)
+        t1 = time.perf_counter()
+        self._stage_time["capture"] += t1 - t0
 
         # Frames are stereo-usable only when this pair's skew matches the
         # measured baseline; a large deviation means a dropped/duplicated frame.
         skew_us = (ts1 - ts0) / 1000.0
         allow_stereo = abs(skew_us - self._skew_baseline_us) < 0.5 * self._frame_period_us
 
-        # Detect on raw fisheye frames (corner-undistort pipeline)
-        corners0, ids0, _ = self.detector.detectMarkers(raw0)
-        corners1, ids1, _ = self.detector.detectMarkers(raw1)
+        # Detect on raw fisheye frames (corner-undistort pipeline).
+        # Tried running these concurrently via the executor — measured
+        # slower, not faster (core contention / GIL not released cleanly for
+        # this call on this build), so kept sequential.
+        corners0, ids0, _ = self.detector0.detectMarkers(raw0)
+        corners1, ids1, _ = self.detector1.detectMarkers(raw1)
+        t2 = time.perf_counter()
+        self._stage_time["detect"] += t2 - t1
 
         if ids0 is not None:
             corners0 = _refine_corners(raw0, corners0)
         if ids1 is not None:
             corners1 = _refine_corners(raw1, corners1)
+        t3 = time.perf_counter()
+        self._stage_time["refine"] += t3 - t2
 
-        # Poll command from Godot
+        # Poll command from Godot. STOP is latched immediately, independent of
+        # marker visibility below — otherwise a STOP arriving while markers
+        # are in view gets acked-and-cleared before run()'s exit check sees it.
         cmd = self._recv_command()
         if cmd:
             self.received_message = cmd
+            if cmd == b"STOP":
+                self._stop_requested = True
 
         # Pose estimation: stereo_pnp where possible, single-cam fallback elsewhere
         ids, rvecs, tvecs = self._estimate_poses(
             corners0, ids0, corners1, ids1, allow_stereo=allow_stereo
         )
+        self._stage_time["pose"] += time.perf_counter() - t3
 
         if ids:
             centroid = self.filter.update(self._get_centroid(ids, rvecs, tvecs))
@@ -579,12 +587,23 @@ class TrackerClass:
                 now = time.time()
                 elapsed = now - last_rate_log
                 if elapsed >= 5.0:
-                    logger.debug("[Rate] %.1f pkt/s  (%d packets in %.1fs)",
-                                 self._send_count / elapsed, self._send_count, elapsed)
-                    self._send_count = 0
-                    last_rate_log    = now
+                    fps = self._frame_count / elapsed
+                    pkt_rate = self._send_count / elapsed
+                    n = max(self._frame_count, 1)
+                    stage_ms = {k: (v / n) * 1000.0 for k, v in self._stage_time.items()}
+                    print(f"[FPS] cam0: {fps:.1f}  cam1: {fps:.1f}  "
+                          f"({pkt_rate:.1f} pkt/s sent)")
+                    print(f"[STAGE ms/frame] capture: {stage_ms['capture']:.2f}  "
+                          f"detect: {stage_ms['detect']:.2f}  "
+                          f"refine: {stage_ms['refine']:.2f}  "
+                          f"pose: {stage_ms['pose']:.2f}")
+                    self._frame_count = 0
+                    self._send_count  = 0
+                    self._stage_time  = {k: 0.0 for k in self._stage_time}
+                    last_rate_log     = now
 
-                if self.received_message == b"STOP":
+                if self._stop_requested:
+                    print("STOP received from Godot, exiting…")
                     break
 
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
@@ -607,7 +626,7 @@ class TrackerClass:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
-    parser.add_argument("--fps", type=int, default=30, choices=[15, 30, 60])
+    parser.add_argument("--fps", type=int, default=90, choices=[15, 30, 60, 90, 100])
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
 

@@ -12,6 +12,7 @@ dependencies = [
 	"bleak>=3.0.1",
 	"simplepyble>=0.12.1",
 	"rcam",
+	"maturin>=1.14.1",
 ]
 
 [tool.uv.sources]
