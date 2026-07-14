@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 import cv2
 import numpy as np
+import rapidtag
 import toml
-from cv2 import aruco
 from scipy.optimize import least_squares
 
 from corner_stabilizer import CornerStabilizer
@@ -24,6 +24,8 @@ from udp_streamer import UDPStreamer
 
 
 _SCRIPT_DIR = Path(__file__).parent
+
+_APRILTAG_DICT = "DICT_APRILTAG_36h11"
 
 MARKER_OFFSETS = {
     4:  np.array([0.00,  0.01,    -0.069]),
@@ -68,13 +70,27 @@ def _kabsch(src: np.ndarray, dst: np.ndarray):
 
 
 def _refine_corners(gray: np.ndarray, corners: list) -> list:
-    """Sub-pixel corner refinement on raw-frame corner detections."""
+    """Sub-pixel corner refinement on raw-frame corner detections.
+
+    rapidtag doesn't do sub-pixel refinement itself (detection only, see its
+    README), so this still runs regardless of detector backend.
+    """
     refined = []
     for c in corners:
-        pts = c.reshape(-1, 1, 2).astype(np.float32)
+        pts = np.asarray(c, dtype=np.float32).reshape(-1, 1, 2)
         cv2.cornerSubPix(gray, pts, (5, 5), (-1, -1), _SUBPIX_CRITERIA)
         refined.append(pts.reshape(1, 4, 2))
     return refined
+
+
+def _draw_markers(img: np.ndarray, corners: list, ids: np.ndarray) -> np.ndarray:
+    """Minimal stand-in for cv2.aruco.drawDetectedMarkers (debug window only)."""
+    for c, mid in zip(corners, ids.flatten()):
+        pts = np.asarray(c, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(img, [pts], True, (0, 255, 0), 2)
+        cx, cy = pts.reshape(-1, 2).mean(axis=0).astype(int)
+        cv2.putText(img, str(int(mid)), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    return img
 
 
 def _single_cam_pnp(corners: np.ndarray, K: np.ndarray, D: np.ndarray):
@@ -162,10 +178,8 @@ class TrackerClass:
         res = sc["cam0"]["resolution"]
         self.frame_size = (res[0], res[1])  # (width, height)
 
-        # ── ArUco / stream / display settings ─────────────────────────────────
+        # ── marker / stream / display settings ────────────────────────────────
         ac = toml.load(aruco_calib_path)
-        self.marker_length     = ac["aruco"]["marker_length"]
-        self.marker_separation = ac["aruco"]["marker_spacing"]
         self.udp_ip            = settings.get("udp_ip",   ac["stream_data"]["ip"])
         self.udp_port          = settings.get("udp_port", ac["stream_data"]["port"])
         self.display           = settings.get("display",  ac["display"]["display"])
@@ -178,13 +192,6 @@ class TrackerClass:
             threshold_px=settings.get("corner_deadband_px", 0.25)
         )
         self.marker_offsets = MARKER_OFFSETS
-
-        # Separate detector instances per camera — run concurrently in
-        # process_frame(), and ArucoDetector isn't guaranteed thread-safe
-        # for two overlapping detectMarkers() calls on a shared instance.
-        self.detector0 = self._init_detector()
-        self.detector1 = self._init_detector()
-        self.board     = self._init_board()
 
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
@@ -216,23 +223,6 @@ class TrackerClass:
             raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
 
         self._init_udp_socket()
-
-    # ── Detector / board ──────────────────────────────────────────────────────
-
-    def _init_detector(self):
-        params = aruco.DetectorParameters()
-        params.useAruco3Detection     = True
-        params.cornerRefinementMethod = aruco.CORNER_REFINE_NONE
-        dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
-        return aruco.ArucoDetector(dictionary, params)
-
-    def _init_board(self):
-        return aruco.GridBoard(
-            size=(1, 1),
-            markerLength=self.marker_length,
-            markerSeparation=self.marker_separation,
-            dictionary=self.detector0.getDictionary(),
-        )
 
     # ── Cameras ───────────────────────────────────────────────────────────────
 
@@ -508,12 +498,15 @@ class TrackerClass:
         skew_us = (ts1 - ts0) / 1000.0
         allow_stereo = abs(skew_us - self._skew_baseline_us) < 0.5 * self._frame_period_us
 
-        # Detect on raw fisheye frames (corner-undistort pipeline).
-        # Tried running these concurrently via the executor — measured
-        # slower, not faster (core contention / GIL not released cleanly for
-        # this call on this build), so kept sequential.
-        corners0, ids0, _ = self.detector0.detectMarkers(raw0)
-        corners1, ids1, _ = self.detector1.detectMarkers(raw1)
+        # Detect on raw fisheye frames (corner-undistort pipeline). rapidtag's
+        # batch API applies flat (frame x scale) parallelism across cores when
+        # given every camera's frame at once — faster than a detector call per
+        # camera (see rcam/bench_rapidtag.py).
+        (corners0, ids0), (corners1, ids1) = rapidtag.detect_markers_batch(
+            [raw0, raw1], _APRILTAG_DICT
+        )
+        ids0 = np.array(ids0, dtype=int).reshape(-1, 1) if ids0 else None
+        ids1 = np.array(ids1, dtype=int).reshape(-1, 1) if ids1 else None
         t2 = time.perf_counter()
         self._stage_time["detect"] += t2 - t1
 
@@ -575,9 +568,9 @@ class TrackerClass:
             disp0 = cv2.cvtColor(raw0, cv2.COLOR_GRAY2BGR)
             disp1 = cv2.cvtColor(raw1, cv2.COLOR_GRAY2BGR)
             if ids0 is not None:
-                disp0 = aruco.drawDetectedMarkers(disp0, corners0, np.array(ids0))
+                disp0 = _draw_markers(disp0, corners0, ids0)
             if ids1 is not None:
-                disp1 = aruco.drawDetectedMarkers(disp1, corners1, np.array(ids1))
+                disp1 = _draw_markers(disp1, corners1, ids1)
             disp0 = cv2.resize(disp0, (350, 200))
             disp1 = cv2.resize(disp1, (350, 200))
             cv2.imshow("frame", np.hstack([disp0, disp1]))
