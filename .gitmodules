@@ -1,9 +1,0 @@
-[submodule "gdble_src"]
-	path = gdble_src
-	url = https://github.com/SujithChristopher/gdble.git
-[submodule "fantety_gdble"]
-	path = fantety_gdble
-	url = https://github.com/Fantety/GDBLE.git
-[submodule "GdAndroidBLE"]
-	path = GdAndroidBLE
-	url = https://github.com/SujithChristopher/GdAndroidBLE.git
