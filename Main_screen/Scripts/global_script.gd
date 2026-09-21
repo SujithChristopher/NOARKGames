@@ -119,6 +119,11 @@ var scaled_z: float
 var scaled_network_position: Vector2   = Vector2.ZERO
 var scaled_network_position3D: Vector2 = Vector2.ZERO
 
+# ── packet rate (position packets/sec, UDP + BLE) ──────────────────────────────
+var packets_per_second: int = 0
+var _packet_count: int = 0
+var _pps_accum_time: float = 0.0
+
 # ── smoothed positions (lerped each frame — use these in games) ───────────────
 @export var smooth_factor: float = 0.25
 var smooth_network_position: Vector2   = Vector2.ZERO
@@ -520,6 +525,7 @@ func set_origin() -> void:
 
 func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	_incoming_message = my_floats[0]
+	_packet_count += 1
 
 	# Cache latest ref-marker data so set_origin() always has fresh values
 	_last_rvec   = Vector3(my_floats[4], my_floats[5], my_floats[6])
@@ -584,6 +590,13 @@ func _process(_delta: float) -> void:
 	if stream_type == "udp" and not thread_python.is_alive() and not endgame and not debug:
 		thread_python = Thread.new()
 		thread_python.start(python_thread, Thread.PRIORITY_HIGH)
+
+	# Packet rate: tally the running counter into packets_per_second once a second
+	_pps_accum_time += _delta
+	if _pps_accum_time >= 1.0:
+		packets_per_second = _packet_count
+		_packet_count      = 0
+		_pps_accum_time   -= 1.0
 
 	# Smooth raw network positions toward latest received value
 	var t := smooth_factor

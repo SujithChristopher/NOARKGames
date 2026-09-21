@@ -1348,6 +1348,20 @@ theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 15
 text = "10s"
 
+[node name="PPSLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 937.9459
+offset_top = 90.0
+offset_right = 1111.9459
+offset_bottom = 115.0
+theme_override_colors/font_color = Color(0.93408, 0.93408, 0.93408, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_fonts/font = SubResource("FontFile_o1ivk")
+theme_override_font_sizes/font_size = 14
+text = "PPS: --"
+
 [node name="UDP_timer" type="Timer" parent="."]
 wait_time = 0.1
 autostart = true

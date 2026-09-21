@@ -27,7 +27,8 @@ const LOG_INTERVAL = 0.02
 	"bg_3d":$"../3DRR",
 	"current_score":$"../TileMap/CanvasLayer/ColorRect/CurrentScore",
 	"highscore":$"../TileMap/CanvasLayer/ColorRect/Highscore",
-	"Paused":$"../Paused"
+	"Paused":$"../Paused",
+	"pps_label": $"../PPSLabel"
 }
 
 @onready var _timer_nodes = {
@@ -196,6 +197,7 @@ func _physics_process(delta):
 	_update_sprite_direction()
 	_handle_apple_spawning()
 	_update_timer_display()
+	_update_pps_display()
 
 func _update_player_position() -> void:
 	if debug_mode:
@@ -246,6 +248,9 @@ func _update_position_tracking() -> void:
 			game_y = 0.0
 			game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Z * GlobalSignals.global_scalar_y)
 
+
+func _update_pps_display() -> void:
+	_ui_nodes.pps_label.text = "PPS: " + str(GlobalScript.packets_per_second)
 
 func _update_sprite_direction() -> void:
 	if current_apple != null:
