@@ -26,10 +26,12 @@ Usage:
 """
 
 import argparse
+import heapq
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -39,6 +41,7 @@ from scipy.optimize import least_squares
 from scipy.sparse import lil_matrix
 from scipy.spatial.transform import Rotation
 
+from rigid_body import TAG_SIZE_M, tag_corners
 from tracker import (
     _APRILTAG_DICT,
     _MARKER_PTS,
@@ -59,6 +62,40 @@ MIN_SAMPLES_PER_MARKER = 20
 # Fraction of the take used to solve; the remainder scores the result on frames
 # it never saw.
 CALIBRATION_FRACTION = 0.5
+# Fallback used only when calibration/device.toml is missing. The real device
+# description lives in that file so a rig is defined once and shared, rather
+# than re-typed on each command line.
+DEFAULT_TAG_IDS = tuple(range(1, 9))
+
+
+def load_device(path: Path) -> dict:
+    """The hand-authored description of the rig being calibrated.
+
+    Separate from the calibration this script writes: this says what the device
+    *is* (its tags, and where the tracked point sits on it), while rigidbody.toml
+    records what was *measured* about it.
+    """
+    if not path.exists():
+        print(f"[CALIB] No device file at {path}; using built-in defaults.")
+        return {
+            "name": "unnamed",
+            "tag_ids": list(DEFAULT_TAG_IDS),
+            "tag_size_m": TAG_SIZE_M,
+            "reference_id": None,
+            "tip_tag": None,
+            "tip": np.zeros(3),
+        }
+    data = toml.load(path)
+    device = data.get("device", {})
+    tip = data.get("tip", {})
+    return {
+        "name": device.get("name", "unnamed"),
+        "tag_ids": list(device.get("tag_ids", DEFAULT_TAG_IDS)),
+        "tag_size_m": float(device.get("tag_size_m", TAG_SIZE_M)),
+        "reference_id": device.get("reference_id"),
+        "tip_tag": tip.get("tag"),
+        "tip": np.asarray(tip.get("offset_m", [0.0, 0.0, 0.0]), dtype=np.float64),
+    }
 
 
 # ── Per-tag pose ──────────────────────────────────────────────────────────────
@@ -164,6 +201,15 @@ class CornerCollector:
 
     def add(self, name: str, detections: dict) -> None:
         self.frames[name].append(detections)
+
+    def keep_only(self, allowed) -> None:
+        """Drop every detection outside `allowed`, in place."""
+        allowed = set(allowed)
+        for name, frames in self.frames.items():
+            self.frames[name] = [
+                {mid: c for mid, c in frame.items() if mid in allowed}
+                for frame in frames
+            ]
 
     def counts(self) -> dict:
         counts: dict[int, int] = {}
@@ -292,28 +338,108 @@ def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
 
 # ── Solve ─────────────────────────────────────────────────────────────────────
 
-def _pairwise_transforms(collector, poses, cameras, reference_id, end_frame):
-    """Every same-frame observation of a tag alongside the reference tag."""
-    candidates: dict[int, list] = {}
+def _pairwise_transforms(collector, poses, end_frame):
+    """Relative transform samples for every co-visible *pair* of tags.
+
+    Not just pairs involving the reference: on a body whose tags wrap around it,
+    a far-side tag may never share a frame with the reference, and pairing only
+    against the reference would drop it. Every pair is measured here and the
+    chain back to the reference is found afterwards.
+    """
+    pairs: dict[tuple, list] = {}
     for name in collector.camera_names:
         for frame_index in range(min(end_frame, len(poses[name]))):
-            frame_poses = poses[name][frame_index]
-            reference = frame_poses.get(reference_id)
-            if reference is None or reference["rmse_px"] > MAX_POSE_RMSE_PX:
-                continue
-            for mid, pose in frame_poses.items():
-                if mid == reference_id or pose["rmse_px"] > MAX_POSE_RMSE_PX:
-                    continue
-                # A point in the tag's frame reaches the camera through the tag
-                # pose, and the camera reaches the reference frame through the
-                # inverse reference pose.
-                candidates.setdefault(mid, []).append(
-                    {
-                        "R": reference["R"].T @ pose["R"],
-                        "t": reference["R"].T @ (pose["t"] - reference["t"]),
-                    }
-                )
-    return candidates
+            good = {
+                mid: pose
+                for mid, pose in poses[name][frame_index].items()
+                if pose["rmse_px"] <= MAX_POSE_RMSE_PX
+            }
+            ids = sorted(good)
+            for i, a in enumerate(ids):
+                for b in ids[i + 1:]:
+                    # A point in b's frame reaches the camera through b's pose,
+                    # and the camera reaches a's frame through a's inverse pose.
+                    pairs.setdefault((a, b), []).append(
+                        {
+                            "R": good[a]["R"].T @ good[b]["R"],
+                            "t": good[a]["R"].T @ (good[b]["t"] - good[a]["t"]),
+                        }
+                    )
+    return pairs
+
+
+def _invert(transform: dict) -> dict:
+    R = transform["R"].T
+    return {**transform, "R": R, "t": -R @ transform["t"]}
+
+
+def _compose(outer: dict, inner: dict) -> dict:
+    """outer ∘ inner — inner's frame into outer's parent frame."""
+    return {
+        "R": outer["R"] @ inner["R"],
+        "t": outer["R"] @ inner["t"] + outer["t"],
+    }
+
+
+def _chain_transforms(pairs, reference_id):
+    """Every tag's transform into the reference frame, hopping where needed.
+
+    Grows out from the reference, always taking the *tightest* edge available —
+    a greedy spanning tree over co-visibility, ordered by how consistently each
+    pair was measured rather than by how often. Sample count is a poor guide:
+    two tags can share thousands of frames from one bad angle and still disagree
+    by centimetres, and every hop compounds, so the cheapest route by spread
+    beats the busiest one.
+
+    A tag that shares frames with the reference is one hop away; a tag on the
+    far side of the body reaches it through whichever tags bridge the two, which
+    is the only way it can be solved at all.
+    """
+    edges: dict[int, list] = {}
+    for (a, b), samples in pairs.items():
+        if len(samples) < MIN_SAMPLES_PER_MARKER:
+            continue
+        averaged = _robust_average_transform(samples)   # maps b's frame into a's
+        cost = averaged["translation_spread_mm"]
+        edges.setdefault(a, []).append((b, averaged, cost))
+        edges.setdefault(b, []).append((a, _invert(averaged), cost))
+
+    transforms = {
+        reference_id: {
+            "R": np.eye(3),
+            "t": np.zeros(3),
+            "sample_count": 0,
+            "used_count": 0,
+            "rotation_spread_deg": 0.0,
+            "translation_spread_mm": 0.0,
+            "hops": 0,
+            "via": [],
+        }
+    }
+    # Min-heap on edge spread, so a loose edge is only used when it is the sole
+    # way to reach a tag. `mid` breaks ties and keeps the dicts out of the
+    # comparison.
+    frontier = [
+        (cost, mid, reference_id, edge) for mid, edge, cost in edges.get(reference_id, [])
+    ]
+    heapq.heapify(frontier)
+    while frontier:
+        cost, mid, parent, edge = heapq.heappop(frontier)
+        if mid in transforms:
+            continue
+        chained = _compose(transforms[parent], edge)
+        transforms[mid] = {
+            **edge,
+            "R": chained["R"],
+            "t": chained["t"],
+            "hops": transforms[parent]["hops"] + 1,
+            "via": transforms[parent]["via"] + [parent],
+            "edge_spread_mm": cost,
+        }
+        for neighbour, next_edge, next_cost in edges.get(mid, []):
+            if neighbour not in transforms:
+                heapq.heappush(frontier, (next_cost, neighbour, mid, next_edge))
+    return transforms
 
 
 def _bundle_adjust(collector, poses, cameras, transforms, reference_id, end_frame):
@@ -332,22 +458,37 @@ def _bundle_adjust(collector, poses, cameras, transforms, reference_id, end_fram
     views = []
     for name in collector.camera_names:
         for frame_index in range(min(end_frame, len(poses[name]))):
-            reference = poses[name][frame_index].get(reference_id)
+            frame_poses = poses[name][frame_index]
             detections = collector.frames[name][frame_index]
             visible = [m for m in transforms if m in detections]
-            if (
-                reference is None
-                or reference["rmse_px"] > MAX_POSE_RMSE_PX
-                or len(visible) < 2
-            ):
+            if len(visible) < 2:
+                continue
+            # The view's own board pose is seeded from whichever visible tag
+            # fits its corners best, carried onto the board through that tag's
+            # transform. Requiring the *reference* tag here would throw away
+            # every frame showing only the far side of the body — exactly the
+            # frames that pin the far-side tags down.
+            seed = None
+            for mid in visible:
+                pose = frame_poses.get(mid)
+                if pose is None or pose["rmse_px"] > MAX_POSE_RMSE_PX:
+                    continue
+                if seed is None or pose["rmse_px"] < seed[0]:
+                    R_board = pose["R"] @ transforms[mid]["R"].T
+                    seed = (
+                        pose["rmse_px"],
+                        R_board,
+                        pose["t"] - R_board @ transforms[mid]["t"],
+                    )
+            if seed is None:
                 continue
             views.append(
                 {
                     "camera": name,
                     "visible": visible,
                     "detections": detections,
-                    "R": reference["R"],
-                    "t": reference["t"],
+                    "R": seed[1],
+                    "t": seed[2],
                 }
             )
     if not views:
@@ -469,7 +610,7 @@ def _validate(collector, cameras, transforms, start_frame) -> dict:
     }
 
 
-def solve(collector, cameras, reference_id, tip_ref) -> dict:
+def solve(collector, cameras, reference_id) -> dict:
     """Corners in, rigid body out."""
     poses = {}
     for name in collector.camera_names:
@@ -491,37 +632,37 @@ def solve(collector, cameras, reference_id, tip_ref) -> dict:
         f"validating on {frame_count - end_frame} held out."
     )
 
-    candidates = _pairwise_transforms(collector, poses, cameras, reference_id, end_frame)
-    transforms = {
-        reference_id: {
-            "R": np.eye(3),
-            "t": np.zeros(3),
-            "sample_count": 0,
-            "used_count": 0,
-            "rotation_spread_deg": 0.0,
-            "translation_spread_mm": 0.0,
-        }
-    }
-    for mid in sorted(candidates):
-        if len(candidates[mid]) < MIN_SAMPLES_PER_MARKER:
-            print(
-                f"  skipping tag {mid}: {len(candidates[mid])} co-visible views "
-                f"(need {MIN_SAMPLES_PER_MARKER})"
-            )
+    pairs = _pairwise_transforms(collector, poses, end_frame)
+    transforms = _chain_transforms(pairs, reference_id)
+    for mid in sorted(transforms):
+        if mid == reference_id:
             continue
-        transforms[mid] = _robust_average_transform(candidates[mid])
         item = transforms[mid]
+        route = (
+            "direct"
+            if item["hops"] == 1
+            else "via " + "->".join(str(v) for v in item["via"][1:] + [mid])
+        )
+        scope = "hop" if item["hops"] > 1 else "pair"
         print(
             f"  tag {mid:2d} -> tag {reference_id}: used "
             f"{item['used_count']}/{item['sample_count']}, "
-            f"t={np.round(1000 * item['t'], 1)} mm, spread "
+            f"t={np.round(1000 * item['t'], 1)} mm, {scope} spread "
             f"{item['translation_spread_mm']:.2f} mm / "
-            f"{item['rotation_spread_deg']:.2f}°"
+            f"{item['rotation_spread_deg']:.2f}°  ({route})"
+        )
+
+    unreached = sorted(set(collector.counts()) - set(transforms))
+    if unreached:
+        print(
+            f"  NOT solved: tags {unreached} — never seen often enough "
+            f"alongside any tag that reaches tag {reference_id}. Turn the device "
+            "so they share the view with a neighbour."
         )
     if len(transforms) < 2:
         raise RuntimeError(
-            "no tag was seen alongside the reference often enough; check that "
-            f"tag {reference_id} is visible and rotate the device more slowly"
+            f"no tag could be chained back to tag {reference_id}; check it is "
+            "visible and rotate the device more slowly"
         )
 
     bundle = _bundle_adjust(
@@ -602,6 +743,94 @@ def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames) 
         toml.dump(payload, stream)
 
 
+def tip_in_reference(transforms, tip_tag: int, tip) -> np.ndarray:
+    """Carry a tip measured in one tag's frame into the reference frame.
+
+    The tracked point is a physical spot on the device — where the patient's
+    hand sits — so it is measured against whichever tag is convenient. Keeping
+    that tag explicit means the measurement survives re-solving against a
+    different reference, instead of silently becoming a number in the wrong
+    frame.
+    """
+    if tip_tag not in transforms:
+        raise SystemExit(
+            f"[CALIB] Tip is measured against tag {tip_tag}, which this "
+            f"calibration does not contain (it has {sorted(transforms)})."
+        )
+    item = transforms[tip_tag]
+    return item["R"] @ np.asarray(tip, dtype=np.float64).reshape(3) + item["t"]
+
+
+def record_tip(path: Path, tip, tip_tag: Optional[int]) -> None:
+    """Write the measured tip back into the hand-authored device file.
+
+    Edited as text rather than re-dumped, so the comments explaining what the
+    numbers mean — which are most of that file's value — survive.
+    """
+    lines = path.read_text().splitlines()
+    in_tip = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_tip = stripped == "[tip]"
+            continue
+        if not in_tip:
+            continue
+        if stripped.startswith("offset_m"):
+            lines[index] = (
+                "offset_m = ["
+                + ", ".join(f"{float(v):.6g}" for v in tip)
+                + "]"
+            )
+        elif stripped.startswith("tag ") or stripped.startswith("tag="):
+            if tip_tag is not None:
+                lines[index] = f"tag = {int(tip_tag)}"
+    path.write_text("\n".join(lines) + "\n")
+    print(f"[CALIB] Recorded the tip in {path}")
+
+
+def retip(path: Path, tip, tip_tag: Optional[int]) -> None:
+    """Point an existing calibration at a different tip, in place.
+
+    The tip never enters the solve — it only converts the solved geometry into
+    the per-tag offsets the tracker consumes — so moving it is arithmetic on a
+    finished calibration rather than a reason to recapture.
+    """
+    data = toml.load(path)
+    transforms = {
+        int(mid): {
+            "R": np.asarray(item["rotation_marker_to_reference"], dtype=np.float64),
+            "t": np.asarray(item["translation_marker_to_reference_m"], dtype=np.float64),
+        }
+        for mid, item in data["markers"].items()
+    }
+    reference_id = int(data["meta"]["reference_id"])
+    if tip_tag is None:
+        tip_tag = reference_id
+    tip_ref = tip_in_reference(transforms, tip_tag, tip)
+    if tip_tag != reference_id:
+        print(
+            f"[CALIB] Tip measured in tag {tip_tag}'s frame "
+            f"({np.round(1000 * np.asarray(tip), 1)} mm) -> tag {reference_id}'s "
+            f"frame ({np.round(1000 * tip_ref, 1)} mm)"
+        )
+    data["meta"]["tip_in_reference_m"] = list(map(float, tip_ref))
+    data["meta"]["tip_measured_in_tag"] = int(tip_tag)
+    data["meta"]["tip_measured_m"] = list(map(float, np.asarray(tip, dtype=float)))
+    data["offsets"] = {
+        str(mid): offset.tolist()
+        for mid, offset in tip_offsets(transforms, tip_ref).items()
+    }
+    with path.open("w", encoding="utf-8") as stream:
+        toml.dump(data, stream)
+    print(
+        f"[CALIB] Tip set to {np.round(1000 * tip_ref, 1)} mm in tag "
+        f"{data['meta']['reference_id']}'s frame"
+    )
+    for mid, offset in sorted(data["offsets"].items(), key=lambda kv: int(kv[0])):
+        print(f"  tag {int(mid):2d}: {np.round(1000 * np.asarray(offset), 1)} mm")
+
+
 def report_against_hardcoded(transforms, tip_ref) -> None:
     """Print the solved offsets beside the hand-measured ones they replace."""
     offsets = tip_offsets(transforms, tip_ref)
@@ -640,12 +869,30 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--seconds", type=float, default=60.0,
                         help="How long to capture for (default: 60).")
-    parser.add_argument("--reference", type=int, default=4,
-                        help="Tag every other tag is expressed relative to "
-                             "(default: 4, the lowest id on the bracket).")
+    parser.add_argument("--device", type=Path,
+                        default=_SCRIPT_DIR / "calibration" / "device.toml",
+                        help="Description of the rig being calibrated: its tags, "
+                             "reference and tip. Every setting below defaults to "
+                             "what this file says.")
+    parser.add_argument("--reference", type=int, default=None,
+                        help="Override the device file's reference_id. Falls back "
+                             "to whichever tag is seen most in the take.")
+    parser.add_argument("--tags", type=int, nargs="+", default=None, metavar="ID",
+                        help="Override the device file's tag_ids. Anything else "
+                             "detected is discarded.")
     parser.add_argument("--tip", type=float, nargs=3, default=None, metavar=("X", "Y", "Z"),
-                        help="The device tip in the reference tag's frame, in metres. "
-                             "Defaults to that tag's existing MARKER_OFFSETS entry.")
+                        help="The device tip in the reference tag's frame, in metres: "
+                             "X right along the tag's top edge, Y up its left edge, Z "
+                             "out of the printed face (so the tip is normally negative "
+                             "Z). Overrides the device file's [tip] offset_m.")
+    parser.add_argument("--tip-tag", type=int, default=None, metavar="ID",
+                        help="The tag --tip is measured against. Overrides the "
+                             "device file's [tip] tag.")
+    parser.add_argument("--set-tip", type=float, nargs=3, default=None,
+                        metavar=("X", "Y", "Z"),
+                        help="Point an existing calibration (--out) at this tip and "
+                             "exit. No capture, no re-solve — the tip is not part of "
+                             "the geometry.")
     parser.add_argument("--out", type=Path,
                         default=_SCRIPT_DIR / "calibration" / "rigidbody.toml",
                         help="Where to write the calibration.")
@@ -656,23 +903,72 @@ if __name__ == "__main__":
                         help="Re-solve from a saved corner dump instead of capturing.")
     parser.add_argument("--display", action="store_true",
                         help="Show the detections while capturing.")
+    parser.add_argument("--list", action="store_true",
+                        help="Just report which tags the cameras can see, then "
+                             "exit. Use this first to find the ids on your "
+                             "device and pick a reference.")
     args = parser.parse_args()
+
+    device = load_device(args.device)
+    tag_ids = args.tags if args.tags is not None else device["tag_ids"]
+    print(f"[CALIB] Device '{device['name']}': tags {tag_ids}")
+
+    # A rig with differently sized tags needs its object-point model rebuilt;
+    # every solve below measures against this one array.
+    if abs(device["tag_size_m"] - TAG_SIZE_M) > 1e-9:
+        global _MARKER_PTS
+        _MARKER_PTS = tag_corners(device["tag_size_m"])
+        print(f"[CALIB] Tag size {device['tag_size_m'] * 1000:.0f} mm")
 
     cameras, frame_size = load_cameras(
         _SCRIPT_DIR / "calibration" / "sterio_calibration.toml"
     )
 
-    tip = args.tip
-    if tip is None:
-        if args.reference not in MARKER_OFFSETS:
-            parser.error(
-                f"tag {args.reference} has no hand-measured offset to fall back "
-                "on; pass --tip X Y Z (metres, in that tag's frame)"
+    if args.list:
+        seconds = 5.0 if args.seconds == 60.0 else args.seconds
+        seen = capture(seconds, frame_size, args.display)
+        counts = seen.counts()
+        expected = {mid: n for mid, n in counts.items() if mid in set(tag_ids)}
+        unexpected = {mid: n for mid, n in counts.items() if mid not in set(tag_ids)}
+        if unexpected:
+            print(f"        (ignoring tags outside --tags: {unexpected})")
+        counts = expected
+        if not counts:
+            print("[CALIB] No tags seen. Check the device is in view and lit.")
+        else:
+            print(f"[CALIB] Tags visible: {sorted(counts)}")
+            print(f"        observations each: {counts}")
+            print(
+                f"        Pick one as --reference (the most-seen is "
+                f"{max(counts, key=counts.get)}), measure the tip in its frame, "
+                "and pass it as --tip X Y Z."
             )
-        tip = MARKER_OFFSETS[args.reference]
-    tip = np.asarray(tip, dtype=np.float64)
-    print(f"[CALIB] Reference tag {args.reference}, tip at "
-          f"{np.round(1000 * tip, 1)} mm in its frame")
+        raise SystemExit(0)
+
+    if args.set_tip is not None:
+        tip_tag = args.tip_tag if args.tip_tag is not None else device["tip_tag"]
+        # Record it in the device file as well as the calibration: the
+        # measurement describes the rig, so it should survive the next
+        # recalibration rather than living only in the generated output.
+        if args.device.exists():
+            record_tip(args.device, args.set_tip, tip_tag)
+        if args.out.exists():
+            retip(args.out, args.set_tip, tip_tag)
+        else:
+            print(
+                f"[CALIB] No calibration at {args.out} yet — the tip is saved in "
+                f"{args.device.name} and will be used by the next calibration."
+            )
+        raise SystemExit(0)
+
+    # Deliberately no fallback to MARKER_OFFSETS: that table describes the
+    # previous 5-tag body and its ids 4 and 8 collide with the current bracket,
+    # so defaulting from it would quietly calibrate a new body against an old
+    # measurement. Zero is honest instead — it just means "the reference tag's
+    # centre", which is a real point, and the geometry is unaffected either way.
+    tip = device["tip"] if args.tip is None else np.asarray(args.tip, dtype=np.float64)
+    tip_tag = args.tip_tag if args.tip_tag is not None else device["tip_tag"]
+    tip_is_origin = not np.any(tip)
 
     if args.from_corners:
         collector = CornerCollector.load(args.from_corners)
@@ -683,14 +979,55 @@ if __name__ == "__main__":
             collector.save(args.save_corners)
             print(f"[CALIB] Saved corners -> {args.save_corners}")
 
-    frames = min(len(collector.frames[n]) for n in collector.camera_names)
-    print(f"[CALIB] {frames} frames per camera, detections: {collector.counts()}")
+    collector.keep_only(tag_ids)
+    counts = collector.counts()
+    if not counts:
+        raise SystemExit(
+            f"[CALIB] None of the expected tags {tag_ids} were seen. Check "
+            f"tag_ids in {args.device} against the ids on the device "
+            "(--list reports what the cameras can see)."
+        )
 
-    result = solve(collector, cameras, args.reference, tip)
+    reference = args.reference if args.reference is not None else device["reference_id"]
+    if reference is None:
+        reference = max(counts, key=counts.get)
+        print(f"[CALIB] Reference tag {reference} (seen most, {counts[reference]}x)")
+    elif reference not in counts:
+        raise SystemExit(
+            f"[CALIB] Reference tag {reference} was never seen; "
+            f"tags in this take: {sorted(counts)}"
+        )
+    if tip_tag is None:
+        tip_tag = reference
+    if tip_is_origin:
+        print(
+            f"[CALIB] Tip is unset in {args.device.name}: tracking tag {tip_tag}'s "
+            "centre. The geometry below is unaffected — measure the hand position "
+            "and apply it with --set-tip X Y Z, no recapture needed."
+        )
+    else:
+        print(
+            f"[CALIB] Tip at {np.round(1000 * tip, 1)} mm in tag {tip_tag}'s frame"
+        )
+
+    frames = min(len(collector.frames[n]) for n in collector.camera_names)
+    print(f"[CALIB] {frames} frames per camera, detections: {counts}")
+
+    result = solve(collector, cameras, reference)
+
+    # Only now can a tip measured against some other tag be expressed in the
+    # reference frame — that conversion is exactly what the solve produces.
+    tip_ref = tip_in_reference(result["transforms"], tip_tag, tip)
+    if tip_tag != reference and not tip_is_origin:
+        print(
+            f"[CALIB] Tip -> tag {reference}'s frame: "
+            f"{np.round(1000 * tip_ref, 1)} mm"
+        )
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     write_toml(
-        args.out, result, args.reference, tip,
+        args.out, result, reference, tip_ref,
         _SCRIPT_DIR / "calibration" / "sterio_calibration.toml", frames,
     )
-    report_against_hardcoded(result["transforms"], tip)
+    report_against_hardcoded(result["transforms"], tip_ref)
     print(f"\n[CALIB] Wrote {args.out}")

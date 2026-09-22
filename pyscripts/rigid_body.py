@@ -28,15 +28,21 @@ TAG_SIZE_M = 0.05
 
 # One tag's corners in its own frame, in the order the AprilTag detector reports
 # them: top-left, top-right, bottom-right, bottom-left.
-MARKER_PTS = np.array(
-    [
-        [-TAG_SIZE_M / 2,  TAG_SIZE_M / 2, 0.0],
-        [ TAG_SIZE_M / 2,  TAG_SIZE_M / 2, 0.0],
-        [ TAG_SIZE_M / 2, -TAG_SIZE_M / 2, 0.0],
-        [-TAG_SIZE_M / 2, -TAG_SIZE_M / 2, 0.0],
-    ],
-    dtype=np.float64,
-)
+def tag_corners(size_m: float) -> np.ndarray:
+    """One tag's corners in its own frame, for a given printed size."""
+    half = size_m / 2.0
+    return np.array(
+        [
+            [-half,  half, 0.0],
+            [ half,  half, 0.0],
+            [ half, -half, 0.0],
+            [-half, -half, 0.0],
+        ],
+        dtype=np.float64,
+    )
+
+
+MARKER_PTS = tag_corners(TAG_SIZE_M)
 
 
 class RigidBody:

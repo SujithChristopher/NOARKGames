@@ -61,7 +61,7 @@ for i in range(n_frames):
         collector.add(name, detections)
 
 print("detections:", collector.counts())
-result = rb.solve(collector, cameras, REFERENCE, TIP)
+result = rb.solve(collector, cameras, REFERENCE)
 
 print("\n=== recovery vs ground truth ===")
 worst_t, worst_r = 0.0, 0.0

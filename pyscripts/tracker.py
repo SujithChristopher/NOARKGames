@@ -30,11 +30,13 @@ _SCRIPT_DIR = Path(__file__).parent
 
 _APRILTAG_DICT = "DICT_APRILTAG_36h11"
 
-# Hand-measured fallback, used only when no rigidbody.toml has been produced
-# yet: each entry is the device tip expressed in that marker's own frame. These
-# were measured by hand and disagree with each other by centimetres, which is
-# what `rigidbody_calib.py` exists to replace — see MARKER_OFFSETS' use in
-# _get_centroid() versus the joint board solve in rigid_body.py.
+# The PREVIOUS 5-tag bracket, hand measured: each entry is the device tip in
+# that marker's own frame. Kept only so an uncalibrated rig still starts.
+#
+# It does not describe the current body, which carries tags 1-8 — and ids 4 and
+# 8 appear in both, so on today's hardware this table silently supplies stale
+# offsets for two tags and nothing for the rest. Run rigidbody_calib.py; the
+# calibrated geometry in rigid_body.py replaces this entirely.
 MARKER_OFFSETS = {
     4:  np.array([0.00,  0.01,    -0.069]),
     8:  np.array([0.00,  0.01,   -0.069]),
@@ -226,8 +228,10 @@ class TrackerClass:
             print(f"[RIG] Calibrated body: {self.rig.describe()}")
         else:
             print(
-                f"[RIG] No calibration at {rigidbody_path} — falling back to the "
-                "hand-measured MARKER_OFFSETS. Run pyscripts/rigidbody_calib.py."
+                f"[RIG] No calibration at {rigidbody_path} — falling back to "
+                f"MARKER_OFFSETS for tags {sorted(MARKER_OFFSETS)}. That table "
+                "describes the PREVIOUS bracket, so positions will be wrong on "
+                "the current 1-8 body. Run pyscripts/rigidbody_calib.py."
             )
 
         # ── Remaining state ───────────────────────────────────────────────────

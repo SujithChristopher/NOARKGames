@@ -1,0 +1,40 @@
+# The device the tracker follows: which tags are on it, and where the tracked
+# point sits on it.
+#
+# Hand-authored and shared with the repo, so a rig is described in one place
+# rather than in each person's command line. The *measured* geometry — where
+# every tag sits relative to the reference — is not here: that is produced by
+# rigidbody_calib.py and written to rigidbody.toml.
+
+[device]
+name = "NOARK hand rig"
+
+# Tag ids on the bracket. Anything else the detector reports during a
+# calibration take is discarded, so a tag from another rig in the room, or the
+# occasional false positive, never reaches the solve.
+tag_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+
+tag_size_m = 0.05
+
+# The frame the solved geometry is expressed in. Any tag on the body works —
+# tags that never share a view with it are chained back through their
+# neighbours — so this is a labelling choice, not an accuracy one.
+reference_id = 1
+
+[tip]
+# The point the tracker reports: where the patient's hand holds the device.
+#
+# Measured against tag `tag`, in metres, in that tag's own frame:
+#   X  right, along the tag's top edge
+#   Y  up, along the tag's left edge
+#   Z  out of the printed face  (so the tip is normally NEGATIVE)
+#
+# Keeping the tag explicit means the measurement stays valid if the body is
+# ever re-solved against a different reference_id.
+#
+# All zeros means "the centre of `tag`" — a real, usable point, and what the
+# tracker reports until the hand position has actually been measured. Replace
+# it with the measurement and re-run:
+#     uv run pyscripts/rigidbody_calib.py --set-tip X Y Z
+tag = 1
+offset_m = [0.00, 0.01, -0.069]
