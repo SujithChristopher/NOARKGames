@@ -1,0 +1,228 @@
+"""The calibrated marker rigid body, and the board poses solved from it.
+
+`rigidbody_calib.py` measures where every tag sits relative to a reference tag
+and writes it to a TOML; this loads that back and uses it to solve one pose for
+the whole cluster.
+
+The point of solving the cluster jointly is that a pose from four corners of one
+small square is weakly constrained in depth and out-of-plane tilt. Twenty corners
+spread over several faces are not, so a single PnP over every visible corner is
+far better conditioned than averaging a pose per tag — and averaging is what the
+tracker used to do, which is why its reported point stepped whenever the visible
+set changed.
+
+Lives in its own module so `tracker.py` (which consumes a calibration) and
+`rigidbody_calib.py` (which produces one) can share it without importing each
+other.
+"""
+
+from pathlib import Path
+from typing import Optional
+
+import cv2
+import numpy as np
+import toml
+from scipy.optimize import least_squares
+
+TAG_SIZE_M = 0.05
+
+# One tag's corners in its own frame, in the order the AprilTag detector reports
+# them: top-left, top-right, bottom-right, bottom-left.
+MARKER_PTS = np.array(
+    [
+        [-TAG_SIZE_M / 2,  TAG_SIZE_M / 2, 0.0],
+        [ TAG_SIZE_M / 2,  TAG_SIZE_M / 2, 0.0],
+        [ TAG_SIZE_M / 2, -TAG_SIZE_M / 2, 0.0],
+        [-TAG_SIZE_M / 2, -TAG_SIZE_M / 2, 0.0],
+    ],
+    dtype=np.float64,
+)
+
+
+class RigidBody:
+    """Every tag's corners in the reference tag's frame, as one point cloud."""
+
+    def __init__(self, reference_id: int, transforms: dict, tip_ref: np.ndarray, meta: dict):
+        self.reference_id = reference_id
+        self.tip_ref = np.asarray(tip_ref, dtype=np.float64).reshape(3)
+        self.meta = meta
+        # marker id -> (rotation, translation) mapping that tag's frame into the
+        # reference tag's frame.
+        self.transforms = transforms
+        self.corners_reference = {
+            mid: MARKER_PTS @ R.T + t for mid, (R, t) in transforms.items()
+        }
+        self.marker_ids = tuple(sorted(transforms))
+
+    # ── Loading ───────────────────────────────────────────────────────────────
+
+    @classmethod
+    def load(cls, path: Path) -> Optional["RigidBody"]:
+        """Read a calibration, or return None when there isn't one yet."""
+        path = Path(path)
+        if not path.exists():
+            return None
+        data = toml.load(path)
+        transforms = {
+            int(mid): (
+                np.asarray(item["rotation_marker_to_reference"], dtype=np.float64),
+                np.asarray(item["translation_marker_to_reference_m"], dtype=np.float64),
+            )
+            for mid, item in data["markers"].items()
+        }
+        return cls(
+            reference_id=int(data["meta"]["reference_id"]),
+            transforms=transforms,
+            tip_ref=np.asarray(data["meta"]["tip_in_reference_m"], dtype=np.float64),
+            meta=data["meta"],
+        )
+
+    def describe(self) -> str:
+        meta = self.meta
+        return (
+            f"tags {list(self.marker_ids)} about tag {self.reference_id}, "
+            f"bundle RMSE {meta.get('bundle_final_rmse_px', float('nan')):.3f} px, "
+            f"held-out median {meta.get('validation_median_px', float('nan')):.3f} px"
+        )
+
+    # ── Pose ──────────────────────────────────────────────────────────────────
+
+    def tip(self, rvec, tvec) -> np.ndarray:
+        """Where the device tip lands, given a board pose."""
+        R = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64).reshape(3, 1))[0]
+        return R @ self.tip_ref + np.asarray(tvec, dtype=np.float64).reshape(3)
+
+    def _stack(self, detections: dict):
+        """Every visible tag's corners as one board, object and image points."""
+        visible = [mid for mid in self.marker_ids if mid in detections]
+        if not visible:
+            return None
+        return (
+            np.concatenate([self.corners_reference[mid] for mid in visible]),
+            np.concatenate(
+                [np.asarray(detections[mid], dtype=np.float64).reshape(4, 2) for mid in visible]
+            ),
+            visible,
+        )
+
+    def _seed_pose(self, detections: dict, visible, K, D):
+        """Best single-tag board pose, to start the joint solve from.
+
+        A small tag cluster is nearly planar, and ITERATIVE PnP started cold can
+        settle into the mirrored solution. IPPE_SQUARE needs a square centred on
+        the origin, which only holds in a tag's *own* frame, so the seed is
+        solved there and carried onto the board through that tag's calibrated
+        transform — geometric initialisation, with no dependence on the previous
+        frame.
+        """
+        best = None
+        for mid in visible:
+            corners = np.asarray(detections[mid], dtype=np.float64).reshape(4, 2)
+            und = cv2.fisheye.undistortPoints(
+                corners.reshape(-1, 1, 2), K, D, P=K
+            ).reshape(4, 2)
+            solutions = cv2.solvePnPGeneric(
+                MARKER_PTS, und, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE
+            )
+            if not solutions[0]:
+                continue
+            R_marker, t_marker = self.transforms[mid]
+            for rvec_tag, tvec_tag in zip(solutions[1], solutions[2]):
+                tvec_tag = np.asarray(tvec_tag, dtype=np.float64).reshape(3)
+                if tvec_tag[2] <= 0:
+                    continue
+                # p_cam = R_tag p_local + t_tag and p_ref = R_m2r p_local + t_m2r,
+                # so the board pose is R_tag R_m2r' with the origin shifted.
+                R_board = cv2.Rodrigues(rvec_tag)[0] @ R_marker.T
+                t_board = tvec_tag - R_board @ t_marker
+                projected, _ = cv2.fisheye.projectPoints(
+                    self.corners_reference[mid].reshape(-1, 1, 3),
+                    cv2.Rodrigues(R_board)[0], t_board.reshape(3, 1), K, D,
+                )
+                residual = projected.reshape(4, 2) - corners
+                rmse = float(np.sqrt(np.mean(np.sum(residual**2, axis=1))))
+                if best is None or rmse < best[0]:
+                    best = (rmse, cv2.Rodrigues(R_board)[0], t_board.reshape(3, 1))
+        return None if best is None else (best[1], best[2])
+
+    def mono_pose(self, detections: dict, K, D):
+        """One joint PnP over every visible corner in a single camera."""
+        stacked = self._stack(detections)
+        if stacked is None:
+            return None, None
+        object_points, image_points_raw, visible = stacked
+        seed = self._seed_pose(detections, visible, K, D)
+        if seed is None:
+            return None, None
+        if len(visible) == 1:
+            return seed[0].flatten(), seed[1].flatten()
+
+        rvec, tvec = seed
+        undistorted = cv2.fisheye.undistortPoints(
+            image_points_raw.reshape(-1, 1, 2), K, D, P=K
+        ).reshape(-1, 2)
+        ok, rvec, tvec = cv2.solvePnP(
+            object_points, undistorted, K, None,
+            rvec.copy(), tvec.copy(), True, flags=cv2.SOLVEPNP_ITERATIVE,
+        )
+        if not ok or float(tvec.reshape(3)[2]) <= 0:
+            return None, None
+        return rvec.flatten(), tvec.flatten()
+
+    def stereo_pose(self, det0: dict, det1: dict, K0, D0, K1, D1, R_st, T_st):
+        """One pose minimising corner reprojection in both cameras at once.
+
+        The cross-baseline constraint is what tightens depth, so both images are
+        fitted together rather than averaging two independent single-camera
+        poses. Seeded from the cam0 solve.
+        """
+        stacked0 = self._stack(det0)
+        stacked1 = self._stack(det1)
+        if stacked0 is None or stacked1 is None:
+            return None, None
+        object0, image0, _ = stacked0
+        object1, image1, _ = stacked1
+
+        seed_rvec, seed_tvec = self.mono_pose(det0, K0, D0)
+        if seed_rvec is None:
+            return None, None
+
+        stereo_rvec = cv2.Rodrigues(R_st)[0]
+        stereo_tvec = np.asarray(T_st, dtype=np.float64).reshape(3, 1)
+
+        def residual(parameters):
+            rvec0 = parameters[:3].reshape(3, 1)
+            tvec0 = parameters[3:].reshape(3, 1)
+            projected0, _ = cv2.fisheye.projectPoints(
+                object0.reshape(-1, 1, 3), rvec0, tvec0, K0, D0
+            )
+            rvec1, tvec1 = cv2.composeRT(rvec0, tvec0, stereo_rvec, stereo_tvec)[:2]
+            projected1, _ = cv2.fisheye.projectPoints(
+                object1.reshape(-1, 1, 3), rvec1, tvec1, K1, D1
+            )
+            return np.concatenate(
+                [
+                    (projected0.reshape(-1, 2) - image0).ravel(),
+                    (projected1.reshape(-1, 2) - image1).ravel(),
+                ]
+            )
+
+        # Plain LM, no robust loss: the cam0 seed can carry a large cam1
+        # residual, and a robust loss would suppress exactly the cross-baseline
+        # measurements that tighten depth.
+        # 20 evaluations is ample: measured on real takes the solution stops
+        # moving after fewer than ten, and the cost here is dominated by the two
+        # fisheye projections per residual evaluation, not by the iteration cap.
+        result = least_squares(
+            residual, np.concatenate([seed_rvec, seed_tvec]), method="lm", max_nfev=20
+        )
+        if result.x[5] <= 0:
+            return None, None
+        return result.x[:3], result.x[3:]
+
+    def pose_in_cam1_frame(self, rvec, tvec, R_st, T_st):
+        """Carry a pose solved in cam1 into cam0's frame."""
+        R1 = cv2.Rodrigues(np.asarray(rvec).reshape(3, 1))[0]
+        R_c0 = R_st.T @ R1
+        t_c0 = R_st.T @ (np.asarray(tvec).reshape(3, 1) - np.asarray(T_st).reshape(3, 1))
+        return cv2.Rodrigues(R_c0)[0].flatten(), t_c0.flatten()

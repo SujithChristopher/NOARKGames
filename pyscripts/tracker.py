@@ -22,6 +22,7 @@ from scipy.optimize import least_squares
 
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
+from rigid_body import RigidBody
 from udp_streamer import UDPStreamer
 
 
@@ -29,6 +30,11 @@ _SCRIPT_DIR = Path(__file__).parent
 
 _APRILTAG_DICT = "DICT_APRILTAG_36h11"
 
+# Hand-measured fallback, used only when no rigidbody.toml has been produced
+# yet: each entry is the device tip expressed in that marker's own frame. These
+# were measured by hand and disagree with each other by centimetres, which is
+# what `rigidbody_calib.py` exists to replace — see MARKER_OFFSETS' use in
+# _get_centroid() versus the joint board solve in rigid_body.py.
 MARKER_OFFSETS = {
     4:  np.array([0.00,  0.01,    -0.069]),
     8:  np.array([0.00,  0.01,   -0.069]),
@@ -47,6 +53,9 @@ _MARKER_PTS = np.array([
 ], dtype=np.float64)
 
 _SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.01)
+
+# Stabilizer key for the whole-body pose, kept out of the marker-id space.
+_BOARD_KEY = -1
 
 
 def _load_settings() -> dict:
@@ -156,10 +165,12 @@ class TrackerClass:
         self,
         stereo_calib_path: Path,
         aruco_calib_path: Path,
+        rigidbody_path: Path,
         settings: Optional[dict] = None,
         record_frames: bool = False,
         fps_value: Optional[int] = None,
         flip_frames: bool = True,
+        stereo_refine: bool = True,
         frame_sync: bool = True,
         phase_tol_us: float = 200.0,
         resync_every_s: float = 5.0,
@@ -199,6 +210,25 @@ class TrackerClass:
         self.display           = settings.get("display",  ac["display"]["display"])
         self._camera_model     = ac["camera"].get("model", "OV9281")
         self._camera_fov       = ac["camera"].get("fov", 160)
+
+        # Refining the board pose across both cameras is the better estimator,
+        # but it runs in Python and costs roughly 5 ms a frame of pure compute
+        # plus the contention that brings — measured ~32 -> ~17 fps end to end.
+        # Turn it off to trade the cross-baseline depth constraint for rate.
+        self.stereo_refine = stereo_refine
+
+        # ── Rigid body ────────────────────────────────────────────────────────
+        # When the marker cluster has been calibrated, every visible tag feeds
+        # one joint PnP for the whole body; without a calibration we fall back
+        # to averaging each tag's hand-measured offset independently.
+        self.rig = RigidBody.load(rigidbody_path)
+        if self.rig is not None:
+            print(f"[RIG] Calibrated body: {self.rig.describe()}")
+        else:
+            print(
+                f"[RIG] No calibration at {rigidbody_path} — falling back to the "
+                "hand-measured MARKER_OFFSETS. Run pyscripts/rigidbody_calib.py."
+            )
 
         # ── Remaining state ───────────────────────────────────────────────────
         self.filter         = ExponentialMovingAverageFilter3D(alpha=1)
@@ -667,6 +697,58 @@ class TrackerClass:
         t_c0 = self.R_st.T @ (tvec1.reshape(3, 1) - self.T_st)
         return cv2.Rodrigues(R_c0)[0].flatten(), t_c0.flatten()
 
+    def _board_pose(self, corners0, ids0, corners1, ids1, allow_stereo=True):
+        """One pose for the whole marker cluster, from every visible corner.
+
+        Replaces the per-marker solve-and-average: the tags are one rigid body,
+        so fitting them together uses the constraint that averaging throws away.
+        Up to 40 corners across two cameras condition the pose far better than
+        any one tag's four.
+
+        Returns (rvec, tvec) in cam0's frame, or (None, None) when nothing that
+        belongs to the calibrated body is in view.
+        """
+        det0 = self._detections_by_id(corners0, ids0)
+        det1 = self._detections_by_id(corners1, ids1)
+        if not det0 and not det1:
+            return None, None
+
+        # Freeze the pose while every contributing corner is static: the solve
+        # is the expensive part of the frame, and a still device only produces
+        # PnP jitter. Keys are per view and per marker, so a marker appearing or
+        # leaving counts as movement and forces a fresh solve.
+        corner_sets = {f"c0_{mid}": c for mid, c in det0.items()}
+        corner_sets.update({f"c1_{mid}": c for mid, c in det1.items()})
+
+        def compute():
+            if det0 and det1 and allow_stereo and self.stereo_refine:
+                rvec, tvec = self.rig.stereo_pose(
+                    det0, det1, self.K0, self.D0, self.K1, self.D1,
+                    self.R_st, self.T_st,
+                )
+                if rvec is not None:
+                    return rvec, tvec
+            if det0:
+                return self.rig.mono_pose(det0, self.K0, self.D0)
+            rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1)
+            if rvec is None:
+                return None, None
+            # cam1-only: re-express in cam0's frame, or the point jumps by the
+            # stereo baseline whenever cam0 loses sight of the body.
+            return self.rig.pose_in_cam1_frame(rvec, tvec, self.R_st, self.T_st)
+
+        return self.stabilizer.stabilize(_BOARD_KEY, corner_sets, compute)
+
+    @staticmethod
+    def _detections_by_id(corners, ids) -> dict:
+        """{marker id: (4, 2) corners} for one camera's detections."""
+        if ids is None:
+            return {}
+        return {
+            int(mid): np.asarray(c, dtype=np.float64).reshape(4, 2)
+            for mid, c in zip(np.asarray(ids).flatten(), corners)
+        }
+
     def _get_centroid(self, ids, rvecs, tvecs) -> np.ndarray:
         transformed = []
         for mid, rvec, tvec in zip(ids, rvecs, tvecs):
@@ -750,17 +832,35 @@ class TrackerClass:
             if cmd == b"STOP":
                 self._stop_requested = True
 
-        # Pose estimation: stereo_pnp where possible, single-cam fallback elsewhere
-        ids, rvecs, tvecs = self._estimate_poses(
-            corners0, ids0, corners1, ids1, allow_stereo=allow_stereo
-        )
+        # Pose estimation. With a calibrated body it is one joint solve over
+        # every visible corner; without one, a pose per marker whose tip offsets
+        # are then averaged.
+        if self.rig is not None:
+            board_rvec, board_tvec = self._board_pose(
+                corners0, ids0, corners1, ids1, allow_stereo=allow_stereo
+            )
+            have_pose = board_rvec is not None
+        else:
+            ids, rvecs, tvecs = self._estimate_poses(
+                corners0, ids0, corners1, ids1, allow_stereo=allow_stereo
+            )
+            have_pose = bool(ids)
         self._stage_time["pose"] += time.perf_counter() - t3
 
-        if ids:
-            centroid = self.filter.update(self._get_centroid(ids, rvecs, tvecs))
-            ref_id   = ids[0]
-            ref_rvec = rvecs[0]
-            ref_tvec = tvecs[0]
+        if have_pose:
+            if self.rig is not None:
+                centroid = self.filter.update(self.rig.tip(board_rvec, board_tvec))
+                # The pose is already in the reference tag's frame, so Godot's
+                # set_origin() applies that one tag's tip offset and lands on
+                # exactly this centroid.
+                ref_id   = self.rig.reference_id
+                ref_rvec = board_rvec
+                ref_tvec = board_tvec
+            else:
+                centroid = self.filter.update(self._get_centroid(ids, rvecs, tvecs))
+                ref_id   = ids[0]
+                ref_rvec = rvecs[0]
+                ref_tvec = tvecs[0]
 
             if self.received_message:
                 if self.received_message == b"STOP":
@@ -881,6 +981,15 @@ if __name__ == "__main__":
     parser.add_argument("--fps", type=int, default=None, choices=[15, 30, 60, 90, 100],
                          help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--stereo-refine", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Refine the board pose across both cameras. Better "
+                             "depth, but costs roughly half the frame rate; "
+                             "--no-stereo-refine solves on cam0 alone.")
+    parser.add_argument("--rigidbody", type=Path,
+                        default=_SCRIPT_DIR / "calibration" / "rigidbody.toml",
+                        help="Calibrated marker geometry from rigidbody_calib.py. "
+                             "Without it the hand-measured MARKER_OFFSETS are used.")
     parser.add_argument("--frame-sync", action=argparse.BooleanOptionalAction, default=True,
                         help="Align the two sensors' frame phase before tracking, and top "
                              "the alignment up as the crystals drift apart. "
@@ -906,6 +1015,8 @@ if __name__ == "__main__":
     tracker = TrackerClass(
         stereo_calib_path=_SCRIPT_DIR / "calibration" / "sterio_calibration.toml",
         aruco_calib_path=_SCRIPT_DIR / "calibration" / "good.toml",
+        rigidbody_path=args.rigidbody,
+        stereo_refine=args.stereo_refine,
         settings=settings,
         record_frames=args.record,
         fps_value=args.fps,

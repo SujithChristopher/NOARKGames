@@ -81,3 +81,63 @@ Anything up to a few hundred µs of phase is normal. A phase that keeps climbing
 between nudges means the threshold is set too high for the drift; a re-pair
 count near the frame count means the sensors are producing far more frames than
 the loop consumes, which `--fps` can cap.
+
+## Rigid-body marker calibration
+
+The device carries several AprilTags on different faces. The tracker needs each
+one's offset to the device tip, and those offsets used to be hand measured
+(`tracker.py`'s `MARKER_OFFSETS`) — which is why each tag reported the tip in a
+slightly different place and the reported position stepped as the visible set
+changed.
+
+`rigidbody_calib.py` measures the body instead. Every frame in which two tags
+appear in the same camera constrains their relative pose; enough of those solve
+the whole cluster as one rigid body in a reference tag's frame. Only the tip
+offset stays hand measured, and only in the reference tag's frame — every other
+tag's offset follows from the solved geometry.
+
+Nothing but corners is stored: a 60 s take is ~1.2 MB, not gigabytes of frames.
+
+```bash
+# Close the Godot app first — it owns both cameras while it runs.
+.venv/bin/python pyscripts/rigidbody_calib.py --seconds 60 --reference 4 \
+    --save-corners /tmp/corners.npz
+
+# Re-solve a saved take without recapturing (e.g. with a different reference)
+.venv/bin/python pyscripts/rigidbody_calib.py --from /tmp/corners.npz --reference 8
+```
+
+**Rotate the device slowly through a wide range of angles during the take.** The
+solve needs each tag seen *together with the reference tag* from many
+orientations; a take from one viewpoint produces a poorly conditioned fit, which
+shows up as a high bundle RMSE and a large held-out reprojection error.
+
+Output is `pyscripts/calibration/rigidbody.toml`: each tag's transform into the
+reference frame, plus an `[offsets]` table giving the tip in every tag's own
+frame — the same shape the hand-measured `MARKER_OFFSETS` had. The script prints
+the two side by side so the disagreement being corrected is visible.
+
+### How the tracker uses it
+
+With a calibration present, `tracker.py` solves **one pose for the whole cluster**
+from every visible corner, instead of a pose per tag whose tip offsets are then
+averaged. Up to 40 corners across two cameras condition a pose far better than
+any one tag's four. Without a calibration it falls back to `MARKER_OFFSETS` and
+says so at startup.
+
+```bash
+.venv/bin/python pyscripts/tracker.py --no-stereo-refine   # cam0-only board PnP
+```
+
+`--stereo-refine` (the default) additionally fits the pose across both cameras,
+which is the better estimator but runs in Python. Measured on this board:
+
+| | pose stage | loop rate |
+|---|---|---|
+| per-marker averaging (old) | 7.1 ms | ~32 fps |
+| joint board PnP, cam0 only | 5.3 ms | ~30 fps |
+| joint board PnP + stereo refine | 26 ms | ~17 fps |
+
+A useful health check: if the cam0-only and stereo poses disagree by more than a
+few mm, either the rigid body or the stereo extrinsics are wrong — on a good
+calibration they agree closely.
