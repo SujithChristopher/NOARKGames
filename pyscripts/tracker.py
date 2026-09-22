@@ -23,6 +23,7 @@ from scipy.optimize import least_squares
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from rigid_body import RigidBody
+from stereo_capture import StereoCapture
 from udp_streamer import UDPStreamer
 
 
@@ -161,8 +162,6 @@ def _stereo_pnp(
 
 
 class TrackerClass:
-    PHASE_WINDOW = 90   # frames of timestamp history the phase/resync fit uses
-
     def __init__(
         self,
         stereo_calib_path: Path,
@@ -172,7 +171,7 @@ class TrackerClass:
         record_frames: bool = False,
         fps_value: Optional[int] = None,
         flip_frames: bool = True,
-        stereo_refine: bool = True,
+        stereo_refine: Optional[bool] = None,
         frame_sync: bool = True,
         phase_tol_us: float = 200.0,
         resync_every_s: float = 5.0,
@@ -201,31 +200,63 @@ class TrackerClass:
         self.D1 = np.array(sc["cam1"]["dist_coeffs"]).reshape(4, 1)
         self.R_st = np.array(sc["stereo"]["R"])
         self.T_st = np.array(sc["stereo"]["T"]).reshape(3, 1) / 1000.0  # mm → m
+        self._stereo_from_file = (self.R_st, self.T_st)
 
         res = sc["cam0"]["resolution"]
         self.frame_size = (res[0], res[1])  # (width, height)
 
         # ── marker / stream / display settings ────────────────────────────────
-        ac = toml.load(aruco_calib_path)
-        self.udp_ip            = settings.get("udp_ip",   ac["stream_data"]["ip"])
-        self.udp_port          = settings.get("udp_port", ac["stream_data"]["port"])
-        self.display           = settings.get("display",  ac["display"]["display"])
-        self._camera_model     = ac["camera"].get("model", "OV9281")
-        self._camera_fov       = ac["camera"].get("fov", 160)
+        # settings.json is the source of truth. The legacy single-camera aruco
+        # calibration is consulted only for keys it does not set, and only when
+        # it still exists: the stereo pipeline takes its intrinsics from
+        # sterio_calibration.toml, so that file is otherwise vestigial and its
+        # absence must not stop tracking.
+        ac = toml.load(aruco_calib_path) if Path(aruco_calib_path).exists() else {}
+        stream = ac.get("stream_data", {})
+        camera = ac.get("camera", {})
+        self.udp_ip            = settings.get("udp_ip",   stream.get("ip", "127.0.0.1"))
+        self.udp_port          = settings.get("udp_port", stream.get("port", 8000))
+        self.display           = settings.get(
+            "display", ac.get("display", {}).get("display", False)
+        )
+        self._camera_model     = camera.get("model", "OV9281")
+        self._camera_fov       = camera.get("fov", 160)
 
         # Refining the board pose across both cameras is the better estimator,
-        # but it runs in Python and costs roughly 5 ms a frame of pure compute
-        # plus the contention that brings — measured ~32 -> ~17 fps end to end.
-        # Turn it off to trade the cross-baseline depth constraint for rate.
-        self.stereo_refine = stereo_refine
+        # but only with an extrinsic that actually describes this pair, and it
+        # costs roughly half the frame rate (~32 -> ~17 fps end to end).
+        #
+        # Left unset it turns itself on only when the calibration carries a
+        # self-calibrated extrinsic. The checkerboard stereo file is not enough:
+        # it labels its own cam0/cam1, which need not match the order rcam
+        # enumerates the cameras in, and a mismatched extrinsic does not degrade
+        # gracefully — measured on this rig it put 370 mm of jitter on a static
+        # device, against 2.4 mm for one camera alone.
+        self._stereo_requested = stereo_refine
 
         # ── Rigid body ────────────────────────────────────────────────────────
         # When the marker cluster has been calibrated, every visible tag feeds
         # one joint PnP for the whole body; without a calibration we fall back
         # to averaging each tag's hand-measured offset independently.
         self.rig = RigidBody.load(rigidbody_path)
+        have_refit = self.rig is not None and self.rig.stereo is not None
+        self.stereo_refine = have_refit if stereo_refine is None else stereo_refine
+        if self.rig is not None and self.rig.stereo is not None:
+            # Measured against this rig, with these cameras, in this order.
+            self.R_st, self.T_st = self.rig.stereo
         if self.rig is not None:
             print(f"[RIG] Calibrated body: {self.rig.describe()}")
+            if self.stereo_refine and not have_refit:
+                print(
+                    "[RIG] WARNING: stereo refinement forced on without a "
+                    "self-calibrated extrinsic — verify it before trusting the "
+                    "output."
+                )
+            elif not self.stereo_refine:
+                print(
+                    "[RIG] Solving on cam0 alone. Re-run rigidbody_calib.py to "
+                    "refit the stereo extrinsic and this turns itself on."
+                )
         else:
             print(
                 f"[RIG] No calibration at {rigidbody_path} — falling back to "
@@ -244,23 +275,6 @@ class TrackerClass:
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
         self._executor        = None
-        # Placeholder — replaced with the sensor's true frame period once the
-        # cameras are running (from rcam.FrameSync, or measured in
-        # _measure_phase_offset() when frame sync is unavailable).
-        self._frame_period_us = 0.0
-        self._skew_baseline_us = 0.0   # measured cam0→cam1 sensor phase offset
-        self._frame_sync   = None      # rcam.FrameSync once both cameras are up
-        self._resync_busy  = threading.Event()
-        # Sensor timestamps the resync/phase report work off. Appended from
-        # process_frame, snapshotted elsewhere — a deque with maxlen is the
-        # whole synchronisation, no lock needed.
-        self._recent_ns    = (
-            collections.deque(maxlen=self.PHASE_WINDOW),
-            collections.deque(maxlen=self.PHASE_WINDOW),
-        )
-        self._last_seq     = [None, None]
-        self._dropped      = [0, 0]    # frames the sensors made that never arrived
-        self._repairs      = 0         # times the capture queues had to be re-paired
         self.tvec_dist    = np.zeros(3)
         self.save_path    = None
         self._send_count  = 0
@@ -277,281 +291,39 @@ class TrackerClass:
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
         )
 
-        # ── Cameras + transport ───────────────────────────────────────────────
+        # ── Transport + cameras ───────────────────────────────────────────────
+        # Bind before bringing the cameras up, not after. Frame-sync alignment
+        # takes tens of seconds, and Godot starts heartbeating the moment it
+        # spawns us: with nothing listening yet those datagrams hit a closed
+        # port, and Godot's socket is a *connected* one, so Linux bounces an
+        # ICMP port-unreachable that can leave it erroring. The tracker would
+        # then see no heartbeat, exit on its 3 s timeout as soon as the loop
+        # started, and be respawned by Godot's watchdog into the same long wait
+        # — a silent crash loop that looks exactly like "no UDP position".
+        #
+        # Binding first costs nothing: nothing reads the socket until the loop
+        # starts, and the kernel buffers whatever arrives meanwhile.
+        self._init_udp_socket()
+
         if platform.system() == "Linux":
             self._init_cameras()
         else:
             raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
 
-        self._init_udp_socket()
-
     # ── Cameras ───────────────────────────────────────────────────────────────
+    # Phase alignment, queue pairing and drift resync all live in
+    # StereoCapture, shared with rigidbody_calib.py so both see the same frames.
 
     def _init_cameras(self) -> None:
-        from rcam import Camera, list_cameras
-
-        labels = list_cameras()
-        if len(labels) < 2:
-            raise RuntimeError(
-                f"Stereo tracking requires two OV9281 cameras; found {labels or 'none'} "
-                "(is the driver loaded? try: sudo modprobe ov9282)"
-            )
-
-        # No FrameRate control means the sensor free-runs at whatever rate its
-        # current exposure/blanking allows — i.e. max achievable fps.
-        cam_controls = {"ExposureTime": 5000}
-        if self.fps_value is not None:
-            cam_controls["FrameRate"] = self.fps_value
-
-        self.cam0 = Camera(labels[0])
-        self.cam0.configure(size=self.frame_size, bit_depth=8)
-        self.cam0.set_controls(cam_controls)
-        self.cam0.start()
-
-        # cam1 is always active — used for stereo_pnp on every frame
-        self.cam1 = Camera(labels[1])
-        self.cam1.configure(size=self.frame_size, bit_depth=8)
-        self.cam1.set_controls(cam_controls)
-        self.cam1.start()
-
-        # Concurrent grab: issue both captures in parallel so the inter-camera
-        # gap collapses to the sensors' fixed phase offset (not a full frame).
-        self._executor = ThreadPoolExecutor(max_workers=2)
-
-        self._init_frame_sync()
-        self._align_pairing()
-        self._measure_phase_offset(60)  # fixed calibration sample, independent of target fps
-
-    # ── Frame synchronisation ─────────────────────────────────────────────────
-
-    def _init_frame_sync(self) -> None:
-        """Bring cam1's frame phase onto cam0's before tracking starts.
-
-        The two sensors self-clock off separate 24 MHz crystals with no FSIN
-        wiring between them, so they free-run at an arbitrary phase — cold, that
-        can be most of a frame period. Stereo triangulation of a *moving* marker
-        then fuses two different instants, which shows up as a position error
-        proportional to hand speed (half a frame at 90 fps is ~5.5 ms).
-
-        rcam.FrameSync walks cam1 onto cam0 by briefly stretching its vertical
-        blanking, which lands the pair inside ~100 µs. The crystals still differ
-        by ~50 ppm (~3 ms/minute), so run() tops the alignment up from the
-        sensor timestamps as they arrive — see _resync().
-        """
-        from rcam import FrameSync
-
-        try:
-            self._frame_sync = FrameSync(self.cam0, self.cam1)
-        except RuntimeError as exc:
-            # The v4l2-ctl fallback backend exposes no buffer timestamps, so
-            # there is nothing to measure a phase from. Tracking still works;
-            # the sensors just free-run and the skew gating falls back to
-            # software arrival times.
-            print(f"[SYNC] Frame sync unavailable: {exc}")
-            self._frame_sync = None
-            return
-
-        self._frame_period_us = self._frame_sync.period_us
-        if not self.frame_sync_enabled:
-            print("[SYNC] Frame sync disabled (--no-frame-sync); sensors free-run.")
-            return
-
-        print(
-            f"[SYNC] Aligning cam1 → cam0 "
-            f"({self._frame_period_us / 1000:.2f} ms frame period, "
-            f"{self._frame_sync.line_time_us:.2f} µs/line):"
+        self.capture = StereoCapture(
+            frame_size=self.frame_size,
+            fps_value=self.fps_value,
+            frame_sync=self.frame_sync_enabled,
+            phase_tol_us=self.phase_tol_us,
+            resync_threshold_us=self.resync_threshold_us,
         )
-        self._frame_sync.align(tol_us=self.phase_tol_us)
-
-    def _drain(self, cam, n: int) -> None:
-        """Discard n queued frames from one camera without copying pixels out."""
-        for _ in range(n):
-            try:
-                cam.capture_meta()
-            except RuntimeError:       # v4l2-ctl fallback has no capture_meta
-                cam.capture_buffer()
-
-    def _pair_slip(self, n_pairs: int = 15) -> float:
-        """Median cam0→cam1 skew over n_pairs, in µs."""
-        skews = sorted((ts1 - ts0) / 1000.0
-                       for _, _, ts0, ts1 in
-                       (self._capture_pair() for _ in range(max(1, n_pairs))))
-        return skews[len(skews) // 2]
-
-    def _align_pairing(self, max_iters: int = 4) -> None:
-        """Pair the two capture queues on the same frame, not just the same phase.
-
-        Aligning the sensors puts both exposures at the same instant, but each
-        camera has its own V4L2 buffer queue and capture_array_meta() returns
-        the *oldest* one. cam0 starts streaming while cam1 is still being
-        configured, so it banks several frames the other never had — measured
-        cold, three. Draining both in step preserves that offset forever (which
-        is why it survived every flush), and software arrival timestamps cannot
-        see it at all: both grabs return "now" in userspace whether the buffer
-        is fresh or 50 ms stale.
-
-        The sensor timestamps make it visible as a skew of whole frame periods,
-        and the fix is asymmetric: drop exactly that many frames from whichever
-        camera is behind.
-        """
-        if not self._frame_period_us:
-            return
-        for _ in range(max_iters):
-            skew_us = self._pair_slip()
-            slip = int(round(skew_us / self._frame_period_us))
-            if slip == 0:
-                return
-            # skew > 0 means cam1's frame is the newer one, i.e. cam0 is the
-            # camera handing back stale buffers.
-            lagging, count = (self.cam0, slip) if slip > 0 else (self.cam1, -slip)
-            print(f"[SYNC] Capture queues {slip:+d} frames apart "
-                  f"({skew_us / 1000:+.1f} ms) — dropping {count} stale frame(s)")
-            self._drain(lagging, min(count, 8))
-
-    def _catch_up(self, raw0, raw1, ts0: int, ts1: int, max_iters: int = 3):
-        """Pull the lagging camera forward until the pair is simultaneous again.
-
-        With the sensors free-running faster than this loop can consume them,
-        the driver drops whichever frames don't fit in a camera's queue — and it
-        doesn't drop the same ones on both, so the pairing slips a frame every
-        few hundred frames and then stays slipped. Jitter is ~100 µs against a
-        half-period of several ms, so a whole-frame slip is never noise.
-
-        Re-grabbing (rather than only draining) keeps the frame usable: the
-        lagging camera's newer frames are already sitting in its queue, so this
-        returns without waiting on the sensor, and the pair can still be
-        triangulated instead of falling back to two single-camera poses.
-        """
-        for _ in range(max_iters):
-            skew_us = (ts1 - ts0) / 1000.0
-            slip = int(round((skew_us - self._skew_baseline_us) / self._frame_period_us))
-            if slip == 0:
-                break
-            count = min(abs(slip), 8)
-            if slip > 0:   # cam1's frame is the newer one, so cam0 is behind
-                self._drain(self.cam0, count - 1)
-                raw0, ts0, seq = self._grab(self.cam0)
-                self._note_meta(0, ts0, seq)
-            else:
-                self._drain(self.cam1, count - 1)
-                raw1, ts1, seq = self._grab(self.cam1)
-                self._note_meta(1, ts1, seq)
-            self._repairs += 1
-        return raw0, raw1, ts0, ts1
-
-    def _phase_now(self):
-        """Inter-camera phase from the timestamps process_frame already kept.
-
-        Pure arithmetic over the two deques — it takes no frames of its own, so
-        it is safe to call from the reporting path mid-capture.
-        """
-        if self._frame_sync is None:
-            return None
-        from rcam import phase_from_timestamps
-
-        stamps = [list(d) for d in self._recent_ns]
-        if min(len(x) for x in stamps) < 10:
-            return None
-        return phase_from_timestamps(stamps[0], stamps[1], self._frame_sync.period_us)
-
-    def _resync(self) -> None:
-        """Top up the alignment against the ~50 ppm drift between the crystals.
-
-        Runs on its own thread: a nudge is two v4l2-ctl calls around a sleep of
-        roughly a frame period, and doing that inline would stall tracking for
-        as long. The measurement itself takes no frames — it reuses the
-        timestamps already collected — and the one stretched frame interval a
-        nudge produces is absorbed by _catch_up() on the next pair.
-        """
-        if self._frame_sync is None or self._resync_busy.is_set():
-            return
-        stamps = [list(d) for d in self._recent_ns]
-        if min(len(x) for x in stamps) < 30:
-            return
-        self._resync_busy.set()
-
-        def work():
-            try:
-                report = self._frame_sync.resync_if_needed(
-                    stamps[0], stamps[1], self.resync_threshold_us
-                )
-                if report is not None:
-                    print(f"[SYNC] Phase was {report.phase_us:+.0f} µs — nudged")
-            except Exception as exc:  # a failed nudge must not end the session
-                print(f"[SYNC] Resync failed: {exc!r}")
-            finally:
-                self._resync_busy.clear()
-
-        threading.Thread(target=work, name="resync", daemon=True).start()
-
-    @staticmethod
-    def _grab(cam):
-        """Grab one frame plus the kernel's frame timestamp (ns) and sequence.
-
-        The timestamp is CLOCK_MONOTONIC as stamped by CAMSS in its frame-done
-        interrupt, so it carries ~100 µs of jitter rather than the 1–2 ms a
-        userspace arrival time picks up. That is what lets the skew gate below
-        tell a genuinely simultaneous pair from one that slipped a frame.
-        `sequence` is the driver's frame counter: a gap in it means the sensor
-        produced a frame that never reached us, which a timestamp gap alone
-        cannot separate from this thread being descheduled.
-
-        Both are None on rcam's v4l2-ctl fallback backend, where the buffer
-        header isn't reachable — fall back to a software stamp there.
-        """
-        arr, ts_ns, seq = cam.capture_array_meta()
-        if ts_ns is None:
-            ts_ns = time.perf_counter_ns()
-        return arr, ts_ns, seq
-
-    def _note_meta(self, i: int, ts: int, seq: Optional[int]) -> None:
-        """Record one camera's frame timestamp and account for skipped frames."""
-        self._recent_ns[i].append(ts)
-        if seq is not None:
-            last = self._last_seq[i]
-            if last is not None and seq - last > 1:
-                self._dropped[i] += seq - last - 1
-            self._last_seq[i] = seq
-
-    def _capture_pair(self):
-        """Grab both cameras concurrently; return (frame0, frame1, ts0, ts1) in ns."""
-        f0 = self._executor.submit(self._grab, self.cam0)
-        f1 = self._executor.submit(self._grab, self.cam1)
-        frame0, ts0, seq0 = f0.result()
-        frame1, ts1, seq1 = f1.result()
-        self._note_meta(0, ts0, seq0)
-        self._note_meta(1, ts1, seq1)
-        return frame0, frame1, ts0, ts1
-
-    def _measure_phase_offset(self, n_frames: int) -> None:
-        """Establish the baseline cam0→cam1 capture skew over n_frames.
-
-        With frame sync applied this lands near zero and the gating in
-        process_frame() is effectively "this pair is simultaneous"; with
-        --no-frame-sync (or on the fallback backend) it is whatever phase the
-        sensors happened to free-run into, and the gate still catches a pair
-        that slipped a frame relative to that baseline.
-
-        When no FrameSync is available the frame period isn't readable from the
-        sensor either, so it is measured here — with no configured FrameRate
-        target the real rate is whatever the sensor free-runs at, and the gating
-        tolerance must scale off that, not off a requested value.
-        """
-        skews = []
-        t_start = time.perf_counter()
-        for _ in range(max(1, n_frames)):
-            _, _, ts0, ts1 = self._capture_pair()
-            skews.append((ts1 - ts0) / 1000.0)  # ns → µs
-        if not self._frame_period_us:
-            elapsed = time.perf_counter() - t_start
-            self._frame_period_us = elapsed / len(skews) * 1_000_000
-        self._skew_baseline_us = sum(skews) / len(skews)
-        std = (sum((s - self._skew_baseline_us) ** 2 for s in skews) / len(skews)) ** 0.5
-        pct = self._skew_baseline_us / self._frame_period_us * 100
-        print(
-            f"[SYNC] Phase offset: {self._skew_baseline_us:.0f} µs ± {std:.0f} µs "
-            f"({pct:.1f}% of frame period). Stereo gated on deviation from baseline."
-        )
+        self.cam0 = self.capture.cam0
+        self.cam1 = self.capture.cam1
 
     # ── Recording ─────────────────────────────────────────────────────────────
 
@@ -789,9 +561,7 @@ class TrackerClass:
     def process_frame(self) -> None:
         # Capture grayscale frames from both cameras concurrently
         t0 = time.perf_counter()
-        raw0, raw1, ts0, ts1 = self._capture_pair()
-        if abs((ts1 - ts0) / 1000.0 - self._skew_baseline_us) >= 0.5 * self._frame_period_us:
-            raw0, raw1, ts0, ts1 = self._catch_up(raw0, raw1, ts0, ts1)
+        raw0, raw1, ts0, ts1, allow_stereo = self.capture.next_pair()
         self._frame_count += 1
         if self.flip_frames:
             raw0 = cv2.flip(raw0, 1)
@@ -800,13 +570,6 @@ class TrackerClass:
             self._write_frames(raw0, raw1, ts0, ts1)
         t1 = time.perf_counter()
         self._stage_time["capture"] += t1 - t0
-
-        # Frames are stereo-usable only when this pair's skew matches the
-        # measured baseline; a large deviation means the pair slipped a frame
-        # (a drop, or a phase nudge stretching one interval), so triangulating
-        # it would fuse two different instants.
-        skew_us = (ts1 - ts0) / 1000.0  # ns → µs
-        allow_stereo = abs(skew_us - self._skew_baseline_us) < 0.5 * self._frame_period_us
 
         # Detect on raw fisheye frames (corner-undistort pipeline). rapidtag's
         # batch API applies flat (frame x scale) parallelism across cores when
@@ -922,14 +685,9 @@ class TrackerClass:
                     break
 
                 now = time.time()
-                if (
-                    self._frame_sync is not None
-                    and self.frame_sync_enabled
-                    and self.resync_every_s > 0
-                    and now - last_resync >= self.resync_every_s
-                ):
+                if self.resync_every_s > 0 and now - last_resync >= self.resync_every_s:
                     last_resync = now
-                    self._resync()
+                    self.capture.maybe_resync()
 
                 elapsed = now - last_rate_log
                 if elapsed >= 5.0:
@@ -939,22 +697,21 @@ class TrackerClass:
                     stage_ms = {k: (v / n) * 1000.0 for k, v in self._stage_time.items()}
                     print(f"[FPS] cam0: {fps:.1f}  cam1: {fps:.1f}  "
                           f"({pkt_rate:.1f} pkt/s sent, "
-                          f"{self._dropped} sensor frames skipped)")
-                    report = self._phase_now()
+                          f"{self.capture.dropped} sensor frames skipped)")
+                    report = self.capture.phase_report()
                     if report is not None:
                         print(f"[SYNC] phase: {report.phase_us:+.0f} µs  "
                               f"jitter: {report.jitter_us:.0f} µs  "
                               f"drift: {report.drift_ppm:+.0f} ppm  "
-                              f"({abs(report.phase_us) / self._frame_period_us * 100:.2f}% "
-                              f"of a frame)  re-paired: {self._repairs}")
+                              f"({abs(report.phase_us) / self.capture.frame_period_us * 100:.2f}% "
+                              f"of a frame)  re-paired: {self.capture.repairs}")
                     print(f"[STAGE ms/frame] capture: {stage_ms['capture']:.2f}  "
                           f"detect: {stage_ms['detect']:.2f}  "
                           f"refine: {stage_ms['refine']:.2f}  "
                           f"pose: {stage_ms['pose']:.2f}")
                     self._frame_count = 0
                     self._send_count  = 0
-                    self._dropped     = [0, 0]
-                    self._repairs     = 0
+                    self.capture.reset_counters()
                     self._stage_time  = {k: 0.0 for k in self._stage_time}
                     last_rate_log     = now
 
@@ -967,12 +724,8 @@ class TrackerClass:
         finally:
             if self.record_frames and self._rec_file0 is not None:
                 self._close_rec_files()
-            if self.cam0 is not None:
-                self.cam0.stop()
-            if self.cam1 is not None:
-                self.cam1.stop()
-            if self._executor is not None:
-                self._executor.shutdown(wait=True)
+            if getattr(self, "capture", None) is not None:
+                self.capture.close()
             if hasattr(self, "udp_streamer"):
                 self.udp_streamer.stop()
             if self.display:
@@ -986,10 +739,11 @@ if __name__ == "__main__":
                          help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--stereo-refine", action=argparse.BooleanOptionalAction,
-                        default=True,
-                        help="Refine the board pose across both cameras. Better "
-                             "depth, but costs roughly half the frame rate; "
-                             "--no-stereo-refine solves on cam0 alone.")
+                        default=None,
+                        help="Refine the board pose across both cameras. Defaults "
+                             "to on only when the calibration carries a "
+                             "self-calibrated stereo extrinsic, since a wrong one "
+                             "is far worse than using a single camera.")
     parser.add_argument("--rigidbody", type=Path,
                         default=_SCRIPT_DIR / "calibration" / "rigidbody.toml",
                         help="Calibrated marker geometry from rigidbody_calib.py. "

@@ -48,8 +48,14 @@ MARKER_PTS = tag_corners(TAG_SIZE_M)
 class RigidBody:
     """Every tag's corners in the reference tag's frame, as one point cloud."""
 
-    def __init__(self, reference_id: int, transforms: dict, tip_ref: np.ndarray, meta: dict):
+    def __init__(self, reference_id: int, transforms: dict, tip_ref: np.ndarray,
+                 meta: dict, stereo: Optional[tuple] = None):
         self.reference_id = reference_id
+        # (R, T) cam0 -> cam1 measured against this very rig, when the
+        # calibration refit it. Preferred over the checkerboard stereo
+        # calibration, which describes whichever cameras were plugged in the
+        # day it was made and in whatever order that tool labelled them.
+        self.stereo = stereo
         self.tip_ref = np.asarray(tip_ref, dtype=np.float64).reshape(3)
         self.meta = meta
         # marker id -> (rotation, translation) mapping that tag's frame into the
@@ -76,16 +82,26 @@ class RigidBody:
             )
             for mid, item in data["markers"].items()
         }
+        stereo = None
+        if "stereo_refined" in data:
+            refined = data["stereo_refined"]
+            stereo = (
+                np.asarray(refined["rotation_cam0_to_cam1"], dtype=np.float64),
+                np.asarray(refined["translation_cam0_to_cam1_m"], dtype=np.float64).reshape(3, 1),
+            )
         return cls(
             reference_id=int(data["meta"]["reference_id"]),
             transforms=transforms,
             tip_ref=np.asarray(data["meta"]["tip_in_reference_m"], dtype=np.float64),
             meta=data["meta"],
+            stereo=stereo,
         )
 
     def describe(self) -> str:
         meta = self.meta
+        stereo = "self-calibrated stereo" if self.stereo is not None else "no stereo refit"
         return (
+            f"{stereo}, " +
             f"tags {list(self.marker_ids)} about tag {self.reference_id}, "
             f"bundle RMSE {meta.get('bundle_final_rmse_px', float('nan')):.3f} px, "
             f"held-out median {meta.get('validation_median_px', float('nan')):.3f} px"

@@ -42,6 +42,7 @@ from scipy.sparse import lil_matrix
 from scipy.spatial.transform import Rotation
 
 from rigid_body import TAG_SIZE_M, tag_corners
+from stereo_capture import StereoCapture
 from tracker import (
     _APRILTAG_DICT,
     _MARKER_PTS,
@@ -198,9 +199,19 @@ class CornerCollector:
     def __init__(self, camera_names=("cam0", "cam1")):
         self.camera_names = camera_names
         self.frames = {name: [] for name in camera_names}
+        # Whether each frame index holds a genuinely simultaneous pair. The
+        # rigid body itself is solved from same-camera pairings and does not
+        # care, but anything cross-camera — refitting the stereo extrinsic —
+        # must use only the frames where this is true.
+        self.paired: list = []
 
     def add(self, name: str, detections: dict) -> None:
         self.frames[name].append(detections)
+
+    def add_pair(self, det0: dict, det1: dict, paired: bool) -> None:
+        self.frames[self.camera_names[0]].append(det0)
+        self.frames[self.camera_names[1]].append(det1)
+        self.paired.append(bool(paired))
 
     def keep_only(self, allowed) -> None:
         """Drop every detection outside `allowed`, in place."""
@@ -241,6 +252,7 @@ class CornerCollector:
             frame_counts=np.asarray(
                 [len(self.frames[n]) for n in self.camera_names], dtype=np.int64
             ),
+            paired=np.asarray(self.paired, dtype=bool),
         )
 
     @classmethod
@@ -256,55 +268,58 @@ class CornerCollector:
             collector.frames[names[cam_index]][frame_index][int(mid)] = corner.reshape(
                 4, 2
             )
+        if "paired" in data:
+            collector.paired = [bool(x) for x in data["paired"]]
+        else:
+            # Takes recorded before the capture was synchronised: the frames
+            # were paired by index with no check, and measured on this board
+            # that put them nearly three frame periods apart.
+            collector.paired = [False] * max(
+                len(collector.frames[n]) for n in names
+            )
         return collector
 
 
 def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
-    """Detect tags in both cameras for `seconds`, keeping only the corners."""
-    from rcam import Camera, list_cameras
+    """Detect tags in both cameras for `seconds`, keeping only the corners.
 
-    labels = list_cameras()
-    if len(labels) < 2:
-        raise RuntimeError(
-            f"stereo calibration needs two cameras; found {labels or 'none'}"
-        )
-
-    cameras = []
-    for label in labels[:2]:
-        cam = Camera(label)
-        cam.configure(size=frame_size, bit_depth=8)
-        cam.set_controls({"ExposureTime": 5000})
-        cam.start()
-        cameras.append(cam)
-
+    Captures through StereoCapture, the same synchronised source the tracker
+    uses. The rigid body is solved from tags sharing one camera's frame and so
+    is indifferent to cross-camera timing, but the stereo extrinsic refit is
+    not — and an unsynchronised loop pairs frames nearly three frame periods
+    apart on this board while looking perfectly healthy from userspace. Each
+    frame therefore records whether its pair was genuinely simultaneous.
+    """
+    capture_source = StereoCapture(frame_size=frame_size)
     collector = CornerCollector()
-    executor = ThreadPoolExecutor(max_workers=2)
     print(
         f"[CALIB] Capturing {seconds:.0f}s. Rotate the device slowly so every "
-        "marker is seen together with the reference, from a range of angles."
+        "marker is seen together with its neighbours, from a range of angles."
     )
     deadline = time.perf_counter() + seconds
     last_report = time.perf_counter()
     try:
         while time.perf_counter() < deadline:
-            futures = [executor.submit(cam.capture_array) for cam in cameras]
-            frames = [f.result() for f in futures]
-            detected = rapidtag.detect_markers_batch(frames, _APRILTAG_DICT)
+            raw0, raw1, _ts0, _ts1, paired = capture_source.next_pair()
+            frames = (raw0, raw1)
+            detected = rapidtag.detect_markers_batch(list(frames), _APRILTAG_DICT)
 
-            for name, frame, (corners, ids) in zip(
-                collector.camera_names, frames, detected
-            ):
+            per_camera = []
+            for frame, (corners, ids) in zip(frames, detected):
                 detections = {}
                 if ids:
                     # Sub-pixel refinement matters more here than in tracking:
-                    # this error is baked into the calibration every later frame
-                    # inherits, rather than averaging out over time.
+                    # this error is baked into the calibration that every later
+                    # frame inherits, rather than averaging out over time.
                     refined = _refine_corners(frame, corners)
                     for mid, c in zip(np.asarray(ids).flatten(), refined):
-                        detections[int(mid)] = np.asarray(c, dtype=np.float64).reshape(
-                            4, 2
-                        )
-                collector.add(name, detections)
+                        detections[int(mid)] = np.asarray(
+                            c, dtype=np.float64
+                        ).reshape(4, 2)
+                per_camera.append(detections)
+            collector.add_pair(per_camera[0], per_camera[1], paired)
+
+            capture_source.maybe_resync()
 
             if display:
                 tiles = []
@@ -322,17 +337,19 @@ def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
             now = time.perf_counter()
             if now - last_report >= 5.0:
                 last_report = now
-                remaining = deadline - now
+                paired_pct = 100.0 * np.mean(collector.paired)
                 print(
-                    f"  {len(collector.frames['cam0'])} frames, "
-                    f"{remaining:.0f}s left, seen: {collector.counts()}"
+                    f"  {len(collector.paired)} frames, "
+                    f"{deadline - now:.0f}s left, {paired_pct:.0f}% paired, "
+                    f"seen: {collector.counts()}"
                 )
     finally:
-        executor.shutdown(wait=True)
-        for cam in cameras:
-            cam.stop()
+        capture_source.close()
         if display:
             cv2.destroyAllWindows()
+
+    paired_pct = 100.0 * np.mean(collector.paired) if collector.paired else 0.0
+    print(f"[CALIB] {paired_pct:.0f}% of frames were a simultaneous pair")
     return collector
 
 
