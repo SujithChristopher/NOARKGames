@@ -26,6 +26,9 @@ from scipy.optimize import least_squares
 
 TAG_SIZE_M = 0.05
 
+# Fallback used only when calibration/device.toml is missing.
+DEFAULT_TAG_IDS = tuple(range(1, 9))
+
 # One tag's corners in its own frame, in the order the AprilTag detector reports
 # them: top-left, top-right, bottom-right, bottom-left.
 def tag_corners(size_m: float) -> np.ndarray:
@@ -43,6 +46,79 @@ def tag_corners(size_m: float) -> np.ndarray:
 
 
 MARKER_PTS = tag_corners(TAG_SIZE_M)
+
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+
+def load_device(path: Path) -> dict:
+    """The hand-authored description of the rig being calibrated.
+
+    Separate from the calibration this script writes: this says what the device
+    *is* (its tags, and where the tracked point sits on it), while rigidbody.toml
+    records what was *measured* about it.
+    """
+    if not path.exists():
+        print(f"[CALIB] No device file at {path}; using built-in defaults.")
+        return {
+            "name": "unnamed",
+            "tag_ids": list(DEFAULT_TAG_IDS),
+            "tag_size_m": TAG_SIZE_M,
+            "reference_id": None,
+            "tip_tag": None,
+            "tip": np.zeros(3),
+            "camera_order": ("cam0", "cam1"),
+        }
+    data = toml.load(path)
+    device = data.get("device", {})
+    tip = data.get("tip", {})
+    cameras = data.get("cameras", {})
+    return {
+        "camera_order": (
+            cameras.get("stream0", "cam0"),
+            cameras.get("stream1", "cam1"),
+        ),
+        "name": device.get("name", "unnamed"),
+        "tag_ids": list(device.get("tag_ids", DEFAULT_TAG_IDS)),
+        "tag_size_m": float(device.get("tag_size_m", TAG_SIZE_M)),
+        "reference_id": device.get("reference_id"),
+        "tip_tag": tip.get("tag"),
+        "tip": np.asarray(tip.get("offset_m", [0.0, 0.0, 0.0]), dtype=np.float64),
+    }
+
+
+def load_cameras(path: Path, order=("cam0", "cam1")) -> tuple[dict, tuple]:
+    """Intrinsics for each camera stream, plus the resolution to configure at.
+
+    `order` maps the streams rcam enumerates onto the sections of the stereo
+    calibration, because the calibration tool's idea of cam0/cam1 need not match
+    the order the cameras come up in. The returned dict is keyed by *stream*.
+    """
+    sc = toml.load(path)
+    cameras = {
+        f"cam{index}": (
+            np.array(sc[section]["camera_matrix"]),
+            np.array(sc[section]["dist_coeffs"]).reshape(4, 1),
+        )
+        for index, section in enumerate(order)
+    }
+    resolution = sc[order[0]]["resolution"]
+    return cameras, (resolution[0], resolution[1])
+
+
+def stereo_extrinsic(path: Path, order=("cam0", "cam1")):
+    """Rotation and translation from stream0 to stream1, in metres.
+
+    Stored as cam0 -> cam1 in the calibration's own labelling, so when the
+    streams map onto those sections the other way round, what is wanted is the
+    inverse transform.
+    """
+    sc = toml.load(path)
+    R = np.array(sc["stereo"]["R"])
+    T = np.array(sc["stereo"]["T"]).reshape(3, 1) / 1000.0  # mm -> m
+    if tuple(order) == ("cam1", "cam0"):
+        R = R.T
+        T = -R @ T
+    return R, T
 
 
 class RigidBody:

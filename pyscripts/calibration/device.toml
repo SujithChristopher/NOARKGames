@@ -38,3 +38,16 @@ reference_id = 1
 #     uv run pyscripts/rigidbody_calib.py --set-tip X Y Z
 tag = 1
 offset_m = [0.00, 0.01, -0.069]
+
+[cameras]
+# Which section of sterio_calibration.toml describes each camera, in the order
+# rcam enumerates them. The stereo calibration tool labels its own cam0/cam1,
+# and that need not match the order the cameras come up in here — on this rig
+# it does not.
+#
+# Getting it wrong is not a small error: a mismatched extrinsic put 370 mm of
+# jitter on a static device, against 2.4 mm for a single camera. Verify with
+#     uv run pyscripts/rigidbody_calib.py --check-cameras
+# which solves the same tag in both views and reports which mapping agrees.
+stream0 = "cam1"
+stream1 = "cam0"

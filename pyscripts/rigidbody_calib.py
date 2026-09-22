@@ -41,7 +41,14 @@ from scipy.optimize import least_squares
 from scipy.sparse import lil_matrix
 from scipy.spatial.transform import Rotation
 
-from rigid_body import TAG_SIZE_M, tag_corners
+from rigid_body import (
+    DEFAULT_TAG_IDS,
+    TAG_SIZE_M,
+    load_cameras,
+    load_device,
+    stereo_extrinsic,
+    tag_corners,
+)
 from stereo_capture import StereoCapture
 from tracker import (
     _APRILTAG_DICT,
@@ -63,42 +70,6 @@ MIN_SAMPLES_PER_MARKER = 20
 # Fraction of the take used to solve; the remainder scores the result on frames
 # it never saw.
 CALIBRATION_FRACTION = 0.5
-# Fallback used only when calibration/device.toml is missing. The real device
-# description lives in that file so a rig is defined once and shared, rather
-# than re-typed on each command line.
-DEFAULT_TAG_IDS = tuple(range(1, 9))
-
-
-def load_device(path: Path) -> dict:
-    """The hand-authored description of the rig being calibrated.
-
-    Separate from the calibration this script writes: this says what the device
-    *is* (its tags, and where the tracked point sits on it), while rigidbody.toml
-    records what was *measured* about it.
-    """
-    if not path.exists():
-        print(f"[CALIB] No device file at {path}; using built-in defaults.")
-        return {
-            "name": "unnamed",
-            "tag_ids": list(DEFAULT_TAG_IDS),
-            "tag_size_m": TAG_SIZE_M,
-            "reference_id": None,
-            "tip_tag": None,
-            "tip": np.zeros(3),
-        }
-    data = toml.load(path)
-    device = data.get("device", {})
-    tip = data.get("tip", {})
-    return {
-        "name": device.get("name", "unnamed"),
-        "tag_ids": list(device.get("tag_ids", DEFAULT_TAG_IDS)),
-        "tag_size_m": float(device.get("tag_size_m", TAG_SIZE_M)),
-        "reference_id": device.get("reference_id"),
-        "tip_tag": tip.get("tag"),
-        "tip": np.asarray(tip.get("offset_m", [0.0, 0.0, 0.0]), dtype=np.float64),
-    }
-
-
 # ── Per-tag pose ──────────────────────────────────────────────────────────────
 
 def _marker_pose(corners: np.ndarray, K: np.ndarray, D: np.ndarray):
@@ -868,20 +839,6 @@ def report_against_hardcoded(transforms, tip_ref) -> None:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def load_cameras(path: Path) -> tuple[dict, tuple]:
-    """Intrinsics per camera, plus the resolution to configure the sensors at."""
-    sc = toml.load(path)
-    cameras = {
-        name: (
-            np.array(sc[name]["camera_matrix"]),
-            np.array(sc[name]["dist_coeffs"]).reshape(4, 1),
-        )
-        for name in ("cam0", "cam1")
-    }
-    resolution = sc["cam0"]["resolution"]
-    return cameras, (resolution[0], resolution[1])
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--seconds", type=float, default=60.0,
@@ -938,8 +895,12 @@ if __name__ == "__main__":
         print(f"[CALIB] Tag size {device['tag_size_m'] * 1000:.0f} mm")
 
     cameras, frame_size = load_cameras(
-        _SCRIPT_DIR / "calibration" / "sterio_calibration.toml"
+        _SCRIPT_DIR / "calibration" / "sterio_calibration.toml",
+        device["camera_order"],
     )
+    if tuple(device["camera_order"]) != ("cam0", "cam1"):
+        print(f"[CALIB] Camera streams mapped {device['camera_order']} "
+              "(per device.toml [cameras])")
 
     if args.list:
         seconds = 5.0 if args.seconds == 60.0 else args.seconds
