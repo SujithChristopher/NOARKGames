@@ -24,7 +24,7 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Debug mode** — edit `debug.json`:
+**Debug mode** — edit `settings.json` (a `debug.json` also exists but nothing reads it):
 ```json
 {"debug": true}   // patient ID = 'vvv', skips authentication
 {"debug": false}  // production mode
@@ -128,6 +128,26 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 5. Close the file handle on game end
 6. For 2D/3D support: set `game_name` dynamically via an `is_3d_mode` flag
 
+### Marker Geometry (Rigid Body)
+
+The device's tags are **measured, not hand-entered**. `pyscripts/rigidbody_calib.py`
+solves every tag's pose relative to a reference tag from live detections and
+writes `pyscripts/calibration/rigidbody.toml`; `tracker.py` loads it and solves
+one joint PnP over every visible corner, rather than averaging a pose per tag.
+
+- `pyscripts/calibration/device.toml` describes the rig — tag ids, reference
+  tag, the tip offset, and which stereo-calibration section maps to which camera
+  stream. That last one is not cosmetic: the calibration tool's cam0/cam1 need
+  not match rcam's enumeration order, and on this rig they do not.
+- `MARKER_OFFSETS` in `tracker.py` is the previous 5-tag bracket, kept only so an
+  uncalibrated rig still starts. GDScript no longer carries a copy — `set_origin()`
+  uses the tracked point from the packet.
+- Stereo refinement is off unless the calibration carries a self-calibrated
+  extrinsic: with a multi-tag board it measured no better than one camera
+  (1.19 mm vs 1.02 mm jitter) at four times the cost.
+
+See `pyscripts/README.md` for the calibration workflow.
+
 ### Network Position (UDP Input)
 - `GlobalScript` listens on `127.0.0.1:8000`, receives `net_x, net_y, net_z, net_a`
 - 2D scalers: `PLAYER_POS_SCALER_X`, `PLAYER_POS_SCALER_Z`
@@ -136,7 +156,7 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 
 ### Modifying Autoloads
 - Order in `project.godot` matters — `PatientDB`, `Manager`, `GlobalSignals` must initialize before any game scene
-- Debug mode is read from `debug.json` in `_ready()` of both `Manager` and `GlobalScript`
+- Debug mode is read from `settings.json` in `_ready()` of both `Manager` and `GlobalScript`
 
 ### Patient Data Access
 ```gdscript

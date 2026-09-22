@@ -42,24 +42,15 @@ var ble_status: BLEStatus:
 			return BLEStatus.SCANNING
 		return BLEStatus.IDLE
 
-# ── marker offsets (must match pyscripts/tracker.py MARKER_OFFSETS) ──────────
-const MARKER_OFFSETS: Dictionary = {
-	4:  Vector3( 0.00,  0.1,    -0.069),
-	8:  Vector3( 0.00,  0.01,   -0.069),
-	12: Vector3( 0.00,  0.0,    -0.1075),
-	14: Vector3(-0.09,  0.0,    -0.069),
-	20: Vector3( 0.1,   0.0,    -0.069),
-}
-
 # ── origin / local-coordinate state ──────────────────────────────────────────
 var _origin_set:       bool   = false
 var _origin_basis:     Basis  = Basis.IDENTITY
 var _origin_ref_point: Vector3 = Vector3.ZERO
 
 # last ref-marker data received (used by set_origin())
-var _last_rvec:   Vector3 = Vector3.ZERO
-var _last_tvec:   Vector3 = Vector3.ZERO
-var _last_ref_id: int     = -1
+var _last_rvec:     Vector3 = Vector3.ZERO
+var _last_centroid: Vector3 = Vector3.ZERO
+var _last_ref_id:   int     = -1
 
 # ── transport settings ────────────────────────────────────────────────────────
 var stream_type: String = "udp"
@@ -509,16 +500,21 @@ func _on_ble_operation_failed(operation: String, error: String) -> void:
 # ── shared position update (UDP + BLE) ───────────────────────────────────────
 
 func set_origin() -> void:
+	# The tracked point is taken straight from the packet rather than rebuilt
+	# from a marker-offset table on this side.
+	#
+	# That table had to be kept in step with Python's by hand, and it had
+	# already drifted (tag 4 differed by 9 cm) before the rigid body was
+	# calibrated at all. Since the pose now arrives in the reference tag's
+	# frame, rebuilding the point here would just recompute what Python already
+	# sent in floats 1-3 — and get it wrong for any marker the table predates.
 	if _last_ref_id < 0:
 		push_error("set_origin: no marker data received yet")
-		return
-	if not MARKER_OFFSETS.has(_last_ref_id):
-		push_error("set_origin: unknown marker id %d" % _last_ref_id)
 		return
 	var angle := _last_rvec.length()
 	var axis  := _last_rvec.normalized() if angle > 0.0001 else Vector3.UP
 	_origin_basis     = Basis(axis, angle)
-	_origin_ref_point = _origin_basis * MARKER_OFFSETS[_last_ref_id] + _last_tvec
+	_origin_ref_point = _last_centroid
 	_origin_set       = true
 	GlobalSignals.origin_set.emit()
 
@@ -527,13 +523,15 @@ func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	_incoming_message = my_floats[0]
 	_packet_count += 1
 
-	# Cache latest ref-marker data so set_origin() always has fresh values
+	# Cache what set_origin() needs: the board orientation, and the id that
+	# says a packet has been seen at all. The board translation in floats 7-9
+	# is not cached — the tracked point itself arrives in floats 1-3.
 	_last_rvec   = Vector3(my_floats[4], my_floats[5], my_floats[6])
-	_last_tvec   = Vector3(my_floats[7], my_floats[8], my_floats[9])
 	_last_ref_id = int(my_floats[10])
 
 	# Compute local coordinates (rotation + translation relative to origin)
 	var centroid := Vector3(my_floats[1], my_floats[2], my_floats[3])
+	_last_centroid = centroid
 	var local: Vector3
 	if _origin_set:
 		local = _origin_basis.transposed() * (_origin_ref_point - centroid)
