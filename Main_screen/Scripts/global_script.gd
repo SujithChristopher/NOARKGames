@@ -139,6 +139,7 @@ func _ready() -> void:
 	stream_type     = settings.get("stream_type", "udp")
 	ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
 	udp_port        = settings.get("udp_port", 8000)
+	_pin_to_cpus(settings.get("game_cpus", ""))
 
 	current_date = get_date_string()
 	load_session_info()
@@ -675,6 +676,27 @@ func _notification(what: int) -> void:
 
 
 # ── path helpers ─────────────────────────────────────────────────────────────
+
+func _pin_to_cpus(spec: String) -> void:
+	# Keep the game off the cores the tracker needs. This board is 4+3+1:
+	# cpu0-3 are the little cores, cpu4-6 the big ones and cpu7 the prime, and
+	# left alone the scheduler will happily put marker detection on a little
+	# core while the game holds a big one.
+	#
+	# Godot exposes no affinity call, so this goes through taskset. -a covers
+	# every thread, not just the main one, since the rendering and audio
+	# threads are the point. Done before the tracker is spawned, and the
+	# tracker sets its own mask, so it does not inherit this one.
+	if spec.is_empty() or OS.get_name() != "Linux":
+		return
+	var output := []
+	var code := OS.execute("taskset", ["-a", "-pc", spec, str(OS.get_process_id())],
+		output, true)
+	if code == 0:
+		print("[CPU] Game pinned to cores %s" % spec)
+	else:
+		push_warning("[CPU] Could not pin the game to %s: %s" % [spec, output])
+
 
 func _project_root() -> String:
 	# In the editor res:// maps to the project directory on disk.

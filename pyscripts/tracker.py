@@ -4,6 +4,7 @@ import csv
 import json
 import logging
 import os
+import sys
 import platform
 import threading
 import time
@@ -59,6 +60,67 @@ _SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.01
 
 # Stabilizer key for the whole-body pose, kept out of the marker-id space.
 _BOARD_KEY = -1
+
+
+def _parse_cpus(spec: str) -> set:
+    """Turn "4-7" or "0,2,5" into a set of core numbers."""
+    cores = set()
+    for part in str(spec).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            cores.update(range(int(lo), int(hi) + 1))
+        else:
+            cores.add(int(part))
+    return cores
+
+
+def _pin_to_cpus(spec) -> None:
+    """Confine this process to `spec`, re-executing under taskset to do it.
+
+    The board is 4+3+1: cpu0-3 are the little cores at capacity 382, cpu4-6 the
+    big ones at 889, cpu7 the prime at 1024. Left alone the scheduler is free to
+    run marker detection on a little core while the game holds a big one, and
+    detection is the longest stage in the loop.
+
+    os.sched_setaffinity() is not enough on its own. It binds the calling thread
+    and whatever is spawned afterwards, but OpenCV and rapidtag build their
+    thread pools while their modules are imported — before any of our code runs
+    — so those threads keep the wide mask. Measured: 5 threads confined and 21
+    still free to roam. Under taskset every thread starts confined, 14 of 14,
+    and the pools size themselves to the cores they can actually see instead of
+    oversubscribing eight.
+
+    Re-executing costs one interpreter startup and means the setting works the
+    same whether Godot, a terminal or systemd started us.
+    """
+    if not spec:
+        return
+    cores = _parse_cpus(spec) & set(range(os.cpu_count() or 1))
+    if not cores:
+        print(f"[CPU] No usable cores in {spec!r}; leaving affinity alone.")
+        return
+    try:
+        if os.sched_getaffinity(0) == cores:
+            print(f"[CPU] Running on cores {sorted(cores)}")
+            return
+    except (AttributeError, OSError):
+        return                                    # not Linux; nothing to do
+
+    spec = ",".join(str(core) for core in sorted(cores))
+    try:
+        print(f"[CPU] Re-executing on cores {spec}", flush=True)
+        os.execvp("taskset", ["taskset", "-c", spec, sys.executable, *sys.argv])
+    except OSError as exc:
+        # No taskset: bind what we can and say what that leaves behind.
+        print(f"[CPU] taskset unavailable ({exc}); pinning this thread only — "
+              "detector threads already started will stay unpinned.")
+        try:
+            os.sched_setaffinity(0, cores)
+        except OSError as inner:
+            print(f"[CPU] Could not pin: {inner}")
 
 
 def _load_settings() -> dict:
@@ -806,6 +868,10 @@ if __name__ == "__main__":
     parser.add_argument("--fps", type=int, default=60, choices=[15, 30, 60, 90, 100],
                          help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--cpus", default=None, metavar="LIST",
+                        help="Cores to run on, e.g. 4-7, overriding "
+                             "settings.json tracker_cpus. On this board 0-3 are "
+                             "the little cores and 4-7 the big ones.")
     parser.add_argument("--stereo-refine", action=argparse.BooleanOptionalAction,
                         default=None,
                         help="Refine the board pose across both cameras. Defaults "
@@ -837,6 +903,9 @@ if __name__ == "__main__":
     )
     logging.getLogger(__name__).setLevel(logging.DEBUG)
     settings = _load_settings()
+
+    # Before anything spawns a thread.
+    _pin_to_cpus(args.cpus if args.cpus is not None else settings.get("tracker_cpus"))
 
     try:
         tracker = TrackerClass(
