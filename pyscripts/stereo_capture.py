@@ -52,6 +52,7 @@ class StereoCapture:
         exposure_us: int = 10000,
         gain: float = 1.0,
         isp: Optional[str] = None,
+        on_stage=None,
     ) -> None:
         self.frame_size          = frame_size
         self.fps_value           = fps_value
@@ -64,6 +65,10 @@ class StereoCapture:
         # gain and the ov9281_mono gamma curve, folded into the unpack LUT.
         # "pisp" (Pi 5 curve) or "vc4" (Pi 4), or None for the raw high byte.
         self.isp                 = isp
+        # Called between bring-up stages. Raising from it aborts startup and
+        # releases the cameras — which is how a quit arriving during the tens of
+        # seconds of phase alignment gets honoured instead of ignored.
+        self._on_stage           = on_stage or (lambda: None)
 
         self.cam0 = None   # primary (tracking + display)
         self.cam1 = None   # stereo second view
@@ -188,9 +193,18 @@ class StereoCapture:
         # gap collapses to the sensors' fixed phase offset (not a full frame).
         self._executor = ThreadPoolExecutor(max_workers=2)
 
-        self._init_frame_sync()
-        self._align_pairing()
-        self._measure_phase_offset(60)  # fixed calibration sample, independent of target fps
+        try:
+            self._on_stage()
+            self._init_frame_sync()
+            self._on_stage()
+            self._align_pairing()
+            self._on_stage()
+            self._measure_phase_offset(60)  # fixed sample, independent of target fps
+        except BaseException:
+            # Half-configured cameras still hold the video nodes, and the next
+            # run would find them busy.
+            self.close()
+            raise
 
     # ── Frame synchronisation ─────────────────────────────────────────────────
 

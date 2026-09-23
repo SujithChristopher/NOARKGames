@@ -161,6 +161,10 @@ def _stereo_pnp(
     return rvec_init.flatten(), t_init.flatten()
 
 
+class StartupAborted(Exception):
+    """Godot asked to quit while the cameras were still coming up."""
+
+
 class TrackerClass:
     def __init__(
         self,
@@ -301,6 +305,13 @@ class TrackerClass:
         self.csv_writer   = None
         self.record       = False
         self.received_message: bytes = b""
+        # When a command last actually arrived. Distinct from received_message,
+        # which is sticky: it is only cleared on the STOP path, and that path is
+        # inside the marker-visible branch. Keying the watchdog off the field
+        # meant that after the very first packet it was refreshed every frame
+        # forever, so a Godot that died without sending STOP left this process
+        # running indefinitely, holding both cameras.
+        self._last_command_at = 0.0
         self._stop_requested = False
         self._rec_file0 = self._rec_file1 = None
         self._ts_file0  = self._ts_file1  = None
@@ -322,6 +333,7 @@ class TrackerClass:
         # Binding first costs nothing: nothing reads the socket until the loop
         # starts, and the kernel buffers whatever arrives meanwhile.
         self._init_udp_socket()
+        self._watch_for_stop()
 
         if platform.system() == "Linux":
             self._init_cameras()
@@ -331,6 +343,36 @@ class TrackerClass:
     # ── Cameras ───────────────────────────────────────────────────────────────
     # Phase alignment, queue pairing and drift resync all live in
     # StereoCapture, shared with rigidbody_calib.py so both see the same frames.
+
+    def _watch_for_stop(self) -> None:
+        """Notice a quit while the cameras are still coming up.
+
+        Godot sends STOP once, stops its heartbeat, then blocks in
+        wait_to_finish() until this process exits. Bringing the pair up takes
+        tens of seconds of phase alignment during which nothing read the socket,
+        so quitting early left the app hung until the whole alignment had run —
+        the tracker was not stuck, it simply had not looked yet.
+        """
+        def watch():
+            while not self._startup_done.is_set():
+                cmd = self._recv_command()
+                if cmd:
+                    # Kept, not dropped: the loop treats any traffic as the
+                    # heartbeat, and this is also how the streamer learns
+                    # Godot's address.
+                    self.received_message = cmd
+                    self._last_command_at = time.time()
+                    if cmd == b"STOP":
+                        self._stop_requested = True
+                        return
+                time.sleep(0.05)
+
+        self._startup_done = threading.Event()
+        threading.Thread(target=watch, name="stop-watch", daemon=True).start()
+
+    def _stage_check(self) -> None:
+        if self._stop_requested:
+            raise StartupAborted()
 
     def _init_cameras(self) -> None:
         self.capture = StereoCapture(
@@ -342,6 +384,7 @@ class TrackerClass:
             exposure_us=self._exposure_us,
             gain=self._gain,
             isp=self._isp,
+            on_stage=self._stage_check,
         )
         self.cam0 = self.capture.cam0
         self.cam1 = self.capture.cam1
@@ -617,6 +660,7 @@ class TrackerClass:
         cmd = self._recv_command()
         if cmd:
             self.received_message = cmd
+            self._last_command_at = time.time()
             if cmd == b"STOP":
                 self._stop_requested = True
 
@@ -688,7 +732,12 @@ class TrackerClass:
             cv2.imshow("frame", np.hstack([disp0, disp1]))
 
     def run(self) -> None:
-        last_heartbeat = time.time()
+        # The watcher hands the socket back now that the loop will read it.
+        self._startup_done.set()
+        if self._stop_requested:
+            print("STOP received during startup, exiting…")
+            return
+        self._last_command_at = time.time()
         last_rate_log  = time.time()
         last_resync    = time.time()
 
@@ -696,9 +745,7 @@ class TrackerClass:
             while True:
                 try:
                     self.process_frame()
-                    if self.received_message:
-                        last_heartbeat = time.time()
-                    if time.time() - last_heartbeat > 3.0:
+                    if time.time() - self._last_command_at > 3.0:
                         print("Lost connection to Godot, exiting…")
                         break
                 except Exception as exc:
@@ -756,7 +803,7 @@ class TrackerClass:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
-    parser.add_argument("--fps", type=int, default=None, choices=[15, 30, 60, 90, 100],
+    parser.add_argument("--fps", type=int, default=60, choices=[15, 30, 60, 90, 100],
                          help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--stereo-refine", action=argparse.BooleanOptionalAction,
@@ -791,19 +838,23 @@ if __name__ == "__main__":
     logging.getLogger(__name__).setLevel(logging.DEBUG)
     settings = _load_settings()
 
-    tracker = TrackerClass(
-        stereo_calib_path=_SCRIPT_DIR / "calibration" / "sterio_calibration.toml",
-        aruco_calib_path=_SCRIPT_DIR / "calibration" / "good.toml",
-        rigidbody_path=args.rigidbody,
-        device_path=_SCRIPT_DIR / "calibration" / "device.toml",
-        stereo_refine=args.stereo_refine,
-        settings=settings,
-        record_frames=args.record,
-        fps_value=args.fps,
-        flip_frames=args.flip,
-        frame_sync=args.frame_sync,
-        phase_tol_us=args.phase_tol,
-        resync_every_s=args.resync_every,
-        resync_threshold_us=args.resync_threshold,
-    )
+    try:
+        tracker = TrackerClass(
+            stereo_calib_path=_SCRIPT_DIR / "calibration" / "sterio_calibration.toml",
+            aruco_calib_path=_SCRIPT_DIR / "calibration" / "good.toml",
+            rigidbody_path=args.rigidbody,
+            device_path=_SCRIPT_DIR / "calibration" / "device.toml",
+            stereo_refine=args.stereo_refine,
+            settings=settings,
+            record_frames=args.record,
+            fps_value=args.fps,
+            flip_frames=args.flip,
+            frame_sync=args.frame_sync,
+            phase_tol_us=args.phase_tol,
+            resync_every_s=args.resync_every,
+            resync_threshold_us=args.resync_threshold,
+        )
+    except StartupAborted:
+        print("STOP received while the cameras were starting, exiting…")
+        raise SystemExit(0)
     tracker.run()
