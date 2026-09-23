@@ -274,3 +274,84 @@ which is the better estimator but runs in Python. Measured on this board:
 A useful health check: if the cam0-only and stereo poses disagree by more than a
 few mm, either the rigid body or the stereo extrinsics are wrong — on a good
 calibration they agree closely.
+
+## Session recording
+
+With `"recording": true` in `settings.json` the tracker also writes both
+cameras' frames for the session, in the same format as NOARK_backbone's
+`dual_recorder_rcam.py`:
+
+```
+{DOCUMENTS}/NOARK/data/{patient}/Session-{date}/Video/rec_HH-MM-SS/
+  cam{0,1}_frame.msgpack      raw HxW uint8, msgpack-numpy packed
+  cam{0,1}_timestamp.msgpack  [sync, wall_iso, monotonic_ns, sensor_ns, sequence]
+  sync_events.msgpack         [timestamp_ns, value, line_seqno] per GPIO edge
+  metadata.json
+```
+
+**Pair frames across cameras on `sensor_ns`, never on frame index.** It is
+CLOCK_MONOTONIC as stamped by CAMSS in its frame-done interrupt, and the GPIO
+edges carry the same clock, so a trigger pulse and a frame exposure sit on one
+timeline with no clock fitting. Measured cross-camera skew on a recording:
+median 125 µs, max 388 µs.
+
+### Why raw rather than encoded
+
+FFV1 compresses these frames 2.18x but costs ~26 ms of CPU per pair, and the
+tracking loop is already what competes for the big cores. Packing raw costs
+1.2 ms and the writes release the GIL. The cost lands on disk instead:
+
+| | |
+|---|---|
+| raw, 30 Hz, both cameras | 61 MB/s, **37 GB per 10 min** |
+| encoding instead | ~10-25x the CPU, ~17 GB per 10 min |
+
+Storage is the thing to plan around here, not CPU. Budget accordingly.
+
+### Rate
+
+The sensor is left free-running so tracking gets every frame it can. The
+recorder decimates to `recording_fps` (default 30) on **elapsed sensor time**,
+not by counting frames — so the rate does not depend on the capture rate
+dividing evenly. At ~57 Hz in, keeping every other pair measures 29.9 Hz.
+
+A consequence worth knowing when reading the data: the `sequence` column jumps,
+because the skipped sensor frames are genuinely absent. That is how you tell
+which frames were kept.
+
+### Sync line
+
+The mocap trigger is read from the 40-pin header — `gpiochip4`, `PIN_11`
+(TLMM line 29), the same physical hole the Pi used for GPIO17, configurable via
+`sync_chip` / `sync_pin`. Header pin N is *not* TLMM line N; names come from the
+device tree.
+
+Two things are recorded. The per-frame `sync` column is a level sampled once per
+frame, so a pulse shorter than the frame period is usually missed and one that
+is caught is located only to within a frame. A latch thread therefore also
+records every transition with the kernel's own CLOCK_MONOTONIC timestamp, giving
+pulse edges at interrupt accuracy and keeping edges that fall between
+recordings.
+
+Missing `gpiod`, a claimed line, or a kernel that refuses edge detection each
+degrade a step rather than failing, ending at a constant 0 so a session without
+the trigger box still records. Startup says which you got:
+
+```
+[SYNC] GPIO on gpiochip4 line 29 (PIN_11) (level + edge timestamps), idle level 0
+```
+
+### Backpressure
+
+Each camera has a bounded queue feeding a writer thread. If a flush stalls, the
+pair is dropped and counted rather than blocking capture — capture also feeds
+tracking, and a stutter in the game is worse than a gap in the recording. The
+status line reports it:
+
+```
+[REC] 90 pairs at 29.9 Hz (skipped 81), written [90, 90], dropped [0, 0],
+      backlog [0, 0], sync edges 0
+```
+
+`skipped` is deliberate decimation; `dropped` is the queue overflowing and
+should stay at zero.

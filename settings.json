@@ -3,5 +3,9 @@
     "udp_port": 8000,
     "display": false,
     "tracker_cpus": "4-7",
-    "game_cpus": "0-3"
+    "game_cpus": "0-3",
+    "recording": true,
+    "sync_chip": "gpiochip4",
+    "sync_pin": "PIN_11",
+    "recording_fps": 30
 }

@@ -82,6 +82,10 @@ class StereoCapture:
             collections.deque(maxlen=self.PHASE_WINDOW),
         )
         self._last_seq = [None, None]
+        # The driver's frame counter for the pair next_pair() just returned.
+        # Kept here rather than widened into the return tuple, which every
+        # caller would have to change; the recorder reads it straight after.
+        self.last_sequence = [None, None]
         self._dropped  = [0, 0]    # frames the sensors made that never arrived
         self._repairs  = 0         # times the capture queues had to be re-paired
 
@@ -315,10 +319,12 @@ class StereoCapture:
             if slip > 0:   # cam1's frame is the newer one, so cam0 is behind
                 self._drain(self.cam0, count - 1)
                 raw0, ts0, seq = self._grab(self.cam0)
+                self.last_sequence[0] = seq
                 self._note_meta(0, ts0, seq)
             else:
                 self._drain(self.cam1, count - 1)
                 raw1, ts1, seq = self._grab(self.cam1)
+                self.last_sequence[1] = seq
                 self._note_meta(1, ts1, seq)
             self._repairs += 1
         return raw0, raw1, ts0, ts1
@@ -403,6 +409,7 @@ class StereoCapture:
         f1 = self._executor.submit(self._grab, self.cam1)
         frame0, ts0, seq0 = f0.result()
         frame1, ts1, seq1 = f1.result()
+        self.last_sequence = [seq0, seq1]
         self._note_meta(0, ts0, seq0)
         self._note_meta(1, ts1, seq1)
         return frame0, frame1, ts0, ts1

@@ -23,6 +23,7 @@ from scipy.optimize import least_squares
 
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
+from frame_recorder import FrameRecorder
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
 from stereo_capture import StereoCapture
 from udp_streamer import UDPStreamer
@@ -269,6 +270,7 @@ class TrackerClass:
         self._exposure_us = device["exposure_us"]
         self._gain = device["gain"]
         self._isp = device["isp"]
+        self._rigidbody_path = rigidbody_path
         cameras, self.frame_size = load_cameras(stereo_calib_path, self._camera_order)
         (self.K0, self.D0) = cameras["cam0"]
         (self.K1, self.D1) = cameras["cam1"]
@@ -367,6 +369,16 @@ class TrackerClass:
         self.csv_writer   = None
         self.record       = False
         self.received_message: bytes = b""
+        # Frames for this session, written raw alongside tracking when
+        # settings.json asks. Costs ~1.2 ms a pair and 61 MB/s of disk.
+        self.record_session = bool(settings.get("recording", False))
+        # The sensor is left free-running: tracking wants every frame it can
+        # get. The recorder decimates to its own rate instead, so the two are
+        # independent.
+        self.recording_hz = float(settings.get("recording_fps", 30))
+        self.recorder: Optional[FrameRecorder] = None
+        self._sync_chip = settings.get("sync_chip", "gpiochip4")
+        self._sync_pin = settings.get("sync_pin", "PIN_11")
         # When a command last actually arrived. Distinct from received_message,
         # which is sticky: it is only cleared on the STOP path, and that path is
         # inside the marker-visible branch. Keying the watchdog off the field
@@ -681,6 +693,41 @@ class TrackerClass:
                 self._close_rec_files()
             if self.record_frames:
                 self._open_rec_files(self.save_path)
+            self._start_session_recording()
+
+    def _start_session_recording(self) -> None:
+        """Begin recording this session's frames, if settings.json asks for it.
+
+        Started here rather than at launch because the patient id is what names
+        the directory, and that only arrives with the USER: command.
+        """
+        if not self.record_session or self.recorder is not None:
+            return
+        out_dir = (
+            Path(self.save_path).parent / "Video"
+            / datetime.now().strftime("rec_%H-%M-%S")
+        )
+        self.recorder = FrameRecorder(
+            out_dir,
+            metadata={
+                "patient_id": self._hid,
+                "session": self._curr_session,
+                "resolution": list(self.frame_size),
+                "camera_order": list(self._camera_order),
+                "exposure_us": self._exposure_us,
+                "gain": self._gain,
+                "isp": self._isp or "raw",
+                "rigidbody": str(self._rigidbody_path),
+            },
+            sync_chip=self._sync_chip,
+            sync_pin=self._sync_pin,
+            target_hz=self.recording_hz,
+        )
+
+    def _stop_session_recording(self) -> None:
+        if self.recorder is not None:
+            self.recorder.close()
+            self.recorder = None
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -688,6 +735,9 @@ class TrackerClass:
         # Capture grayscale frames from both cameras concurrently
         t0 = time.perf_counter()
         raw0, raw1, ts0, ts1, allow_stereo = self.capture.next_pair()
+        if self.recorder is not None:
+            # Before the flip: what is written should be what the sensor saw.
+            self.recorder.add(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._frame_count += 1
         if self.flip_frames:
             raw0 = cv2.flip(raw0, 1)
@@ -725,6 +775,17 @@ class TrackerClass:
             self._last_command_at = time.time()
             if cmd == b"STOP":
                 self._stop_requested = True
+            # Opening the session is latched here too, for the same reason STOP
+            # is: it used to live in the marker-visible branch below, so a
+            # session with nothing in view opened no log and started no
+            # recording. Recording in particular must not depend on tracking
+            # succeeding — that is the case it exists to capture.
+            elif cmd.startswith(b"USER:") or cmd.startswith(b"CHANGE:"):
+                if cmd.startswith(b"CHANGE:"):
+                    self.save_path = None
+                self._hid = cmd.decode().split(":", 1)[1]
+                self._select_hospitalid()
+                self.record = True
 
         # Pose estimation. With a calibrated body it is one joint solve over
         # every visible corner; without one, a pose per marker whose tip offsets
@@ -760,18 +821,9 @@ class TrackerClass:
                 if self.received_message == b"STOP":
                     self._send_coordinates("STOP", centroid, ref_rvec, ref_tvec, ref_id)
                     self.received_message = b""
-                elif self.received_message.startswith(b"USER:"):
-                    self._hid = self.received_message.decode().split(":")[1]
-                    if self.save_path is None:
-                        self._select_hospitalid()
+                elif self.received_message.startswith((b"USER:", b"CHANGE:")):
+                    # The session was already opened when the command arrived.
                     self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
-                    self.record = True
-                elif self.received_message.startswith(b"CHANGE:"):
-                    self.save_path = None
-                    self._hid = self.received_message.decode().split(":")[1]
-                    self._select_hospitalid()
-                    self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
-                    self.record = True
                 elif self.received_message == b"RESET":
                     self._send_coordinates("RESET", centroid, ref_rvec, ref_tvec, ref_id)
                 else:
@@ -835,6 +887,8 @@ class TrackerClass:
                               f"drift: {report.drift_ppm:+.0f} ppm  "
                               f"({abs(report.phase_us) / self.capture.frame_period_us * 100:.2f}% "
                               f"of a frame)  re-paired: {self.capture.repairs}")
+                    if self.recorder is not None:
+                        print(f"[REC] {self.recorder.status}")
                     print(f"[STAGE ms/frame] capture: {stage_ms['capture']:.2f}  "
                           f"detect: {stage_ms['detect']:.2f}  "
                           f"refine: {stage_ms['refine']:.2f}  "
@@ -854,6 +908,7 @@ class TrackerClass:
         finally:
             if self.record_frames and self._rec_file0 is not None:
                 self._close_rec_files()
+            self._stop_session_recording()
             if getattr(self, "capture", None) is not None:
                 self.capture.close()
             if hasattr(self, "udp_streamer"):
