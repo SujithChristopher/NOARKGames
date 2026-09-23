@@ -86,3 +86,17 @@ gain = 1.0
 # to be calibrated in the same mode it is tracked in, or the geometry and the
 # tracking disagree by that offset.
 isp = "pisp"
+
+# Solve the pose across both cameras rather than cam0 alone.
+#
+# Only worth it with an extrinsic that describes this pair: a mismatched one
+# put 370 mm of jitter on a static device. The [cameras] stream mapping above
+# is what makes it trustworthy, and --check-cameras re-verifies it.
+#
+# Measured before the ISP change, with a multi-tag body:
+#   cam0 alone   1.02 mm jitter   0.92 ms/frame
+#   both         1.19 mm jitter   3.46 ms/frame
+# A multi-tag board is already well conditioned in depth, so the 78 mm baseline
+# adds little - the gain is largest for a single tag. Left true to be measured
+# in the game; set false to fall back to one camera.
+stereo_pose = true

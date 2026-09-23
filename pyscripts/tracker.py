@@ -242,8 +242,16 @@ class TrackerClass:
         # one joint PnP for the whole body; without a calibration we fall back
         # to averaging each tag's hand-measured offset independently.
         self.rig = RigidBody.load(rigidbody_path)
+        # Precedence: the command line, then device.toml, then "only when the
+        # calibration brought its own extrinsic".
         have_refit = self.rig is not None and self.rig.stereo is not None
-        self.stereo_refine = have_refit if stereo_refine is None else stereo_refine
+        configured = device["stereo_pose"]
+        if stereo_refine is not None:
+            self.stereo_refine = stereo_refine
+        elif configured is not None:
+            self.stereo_refine = bool(configured)
+        else:
+            self.stereo_refine = have_refit
         if self.rig is not None and self.rig.stereo is not None:
             # Measured against this rig, with these cameras, in this order.
             self.R_st, self.T_st = self.rig.stereo
@@ -254,10 +262,12 @@ class TrackerClass:
             print(f"[RIG] Calibrated body: {self.rig.describe()}")
             if self.stereo_refine and not have_refit:
                 print(
-                    "[RIG] WARNING: stereo refinement forced on without a "
-                    "self-calibrated extrinsic — verify it before trusting the "
-                    "output."
+                    "[RIG] Stereo pose from the calibration file's extrinsic "
+                    "(no self-calibrated refit). Verified mapping "
+                    f"{tuple(self._camera_order)}."
                 )
+            elif self.stereo_refine:
+                print("[RIG] Stereo pose from the self-calibrated extrinsic.")
             elif not self.stereo_refine:
                 # Not a limitation being worked around: measured on this rig a
                 # joint solve over one camera's tags jitters 1.02 mm against
