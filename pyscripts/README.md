@@ -319,6 +319,33 @@ A consequence worth knowing when reading the data: the `sequence` column jumps,
 because the skipped sensor frames are genuinely absent. That is how you tell
 which frames were kept.
 
+### Chunking
+
+An hour at 30 Hz is 110 GB per camera in one file — awkward to copy, painful to
+resume, unopenable by anything that wants to seek. Output rotates every
+`recording_chunk_frames` (default 900 = 30 s ≈ 0.9 GB per camera; 0 disables):
+
+```
+cam0_frame_0000.msgpack      cam0_timestamp_0000.msgpack
+cam0_frame_0001.msgpack      cam0_timestamp_0001.msgpack
+chunks.json
+```
+
+Frames and their timestamps rotate on the same boundary, so **each chunk stands
+alone** and can be copied or processed by itself. `chunks.json` records each
+chunk's frame count and `sensor_ns` span, so the chunk holding a given moment is
+found without opening any of them:
+
+```json
+{"cam0": [{"chunk": 0, "frames": 900,
+           "first_sensor_ns": 19201358090000, "last_sensor_ns": 19203326449000,
+           "frame_file": "cam0_frame_0000.msgpack",
+           "timestamp_file": "cam0_timestamp_0000.msgpack"}]}
+```
+
+Reading chunks in order reconstructs the timeline exactly — measured across a
+boundary, the interval was 33.26 ms, indistinguishable from any other frame.
+
 ### Sync line
 
 The mocap trigger is read from the 40-pin header — `gpiochip4`, `PIN_11`

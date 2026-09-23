@@ -198,16 +198,23 @@ class _CameraWriter(threading.Thread):
     feeds tracking — a stutter in the game is worse than a gap in the recording.
     So the queue is bounded and overflow drops the pair, counted and reported,
     rather than blocking.
+
+    Output is rotated every `chunk_frames` frames. An hour at 30 Hz is 110 GB
+    per camera in one file, which is awkward to copy, painful to resume and
+    unopenable in anything that wants to seek. Both the frames and their
+    timestamps rotate together on the same boundary, so each chunk stands alone
+    and can be moved or processed on its own.
     """
 
-    def __init__(self, index: int, out_dir: Path):
+    def __init__(self, index: int, out_dir: Path, chunk_frames: int = 0):
         super().__init__(name=f"rec-cam{index}", daemon=True)
         self.index = index
         self.written = 0
         self.dropped = 0
+        self.chunks: list = []
+        self._chunk_frames = max(0, int(chunk_frames))
+        self._out_dir = Path(out_dir)
         self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_DEPTH)
-        self._frame_path = Path(out_dir) / f"cam{index}_frame.msgpack"
-        self._stamp_path = Path(out_dir) / f"cam{index}_timestamp.msgpack"
 
     def offer(self, frame: np.ndarray, record: list) -> bool:
         try:
@@ -217,9 +224,20 @@ class _CameraWriter(threading.Thread):
             self.dropped += 1
             return False
 
+    def _paths(self, chunk: int):
+        """Chunk 0 keeps the unsuffixed names, so a short take looks unchanged."""
+        suffix = "" if self._chunk_frames == 0 else f"_{chunk:04d}"
+        return (self._out_dir / f"cam{self.index}_frame{suffix}.msgpack",
+                self._out_dir / f"cam{self.index}_timestamp{suffix}.msgpack")
+
     def run(self) -> None:
-        with open(self._frame_path, "wb") as fh_frame, \
-             open(self._stamp_path, "wb") as fh_stamp:
+        chunk = 0
+        in_chunk = 0
+        first_ns = last_ns = None
+        frame_path, stamp_path = self._paths(chunk)
+        fh_frame = open(frame_path, "wb")
+        fh_stamp = open(stamp_path, "wb")
+        try:
             while True:
                 item = self._queue.get()
                 if item is None:                  # sentinel: recording finished
@@ -228,6 +246,40 @@ class _CameraWriter(threading.Thread):
                 fh_frame.write(msgpack.packb(frame, default=mpn.encode))
                 fh_stamp.write(msgpack.packb(record))
                 self.written += 1
+                in_chunk += 1
+                sensor_ns = record[3]
+                first_ns = sensor_ns if first_ns is None else first_ns
+                last_ns = sensor_ns
+
+                if self._chunk_frames and in_chunk >= self._chunk_frames:
+                    fh_frame.close(); fh_stamp.close()
+                    self.chunks.append({
+                        "chunk": chunk, "frames": in_chunk,
+                        "first_sensor_ns": first_ns, "last_sensor_ns": last_ns,
+                        "frame_file": frame_path.name,
+                        "timestamp_file": stamp_path.name,
+                    })
+                    chunk += 1
+                    in_chunk = 0
+                    first_ns = last_ns = None
+                    frame_path, stamp_path = self._paths(chunk)
+                    fh_frame = open(frame_path, "wb")
+                    fh_stamp = open(stamp_path, "wb")
+        finally:
+            fh_frame.close(); fh_stamp.close()
+            if in_chunk:
+                self.chunks.append({
+                    "chunk": chunk, "frames": in_chunk,
+                    "first_sensor_ns": first_ns, "last_sensor_ns": last_ns,
+                    "frame_file": frame_path.name,
+                    "timestamp_file": stamp_path.name,
+                })
+            elif self._chunk_frames:
+                # Rotated exactly on the last frame: remove the empty files
+                # rather than leave a reader to trip over them.
+                for path in (frame_path, stamp_path):
+                    if path.exists() and path.stat().st_size == 0:
+                        path.unlink()
 
     def finish(self) -> None:
         self._queue.put(None)
@@ -243,11 +295,11 @@ class FrameRecorder:
 
     def __init__(self, out_dir: Path, metadata: Optional[dict] = None,
                  sync_chip: str = "gpiochip4", sync_pin="PIN_11",
-                 target_hz: float = 30.0):
+                 target_hz: float = 30.0, chunk_frames: int = 900):
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.sync = SyncLine(sync_chip, sync_pin)
-        self._writers = [_CameraWriter(0, self.out_dir), _CameraWriter(1, self.out_dir)]
+        self._writers = [_CameraWriter(i, self.out_dir, chunk_frames) for i in (0, 1)]
         for writer in self._writers:
             writer.start()
         self.frames = 0
@@ -268,6 +320,7 @@ class FrameRecorder:
             "timestamp_columns": ["sync", "wall_clock_iso", "monotonic_ns",
                                   "sensor_ns", "sequence"],
             "target_hz": target_hz,
+            "chunk_frames": chunk_frames,
             "sync_line": {
                 "chip": sync_chip,
                 "line": self.sync.line,
@@ -322,6 +375,13 @@ class FrameRecorder:
     def close(self) -> None:
         for writer in self._writers:
             writer.finish()
+
+        # Written at teardown because the chunks only exist by then. It gives a
+        # reader the frame counts and the sensor_ns span of each file, so the
+        # chunk holding a given moment is found without opening any of them.
+        index_path = self.out_dir / "chunks.json"
+        with open(index_path, "w") as fh:
+            json.dump({f"cam{w.index}": w.chunks for w in self._writers}, fh, indent=2)
         path = self.sync.write_events(self.out_dir)
         self.sync.close()
         gigabytes = sum(
@@ -332,4 +392,6 @@ class FrameRecorder:
             print(f"[REC] Sync edges -> {path.name}")
         elif self.sync.available:
             print("[REC] No sync edges seen — is the trigger wired and running?")
-        print(f"[REC] Wrote {gigabytes:.2f} GB to {self.out_dir}")
+        chunks = len(self._writers[0].chunks)
+        print(f"[REC] Wrote {gigabytes:.2f} GB to {self.out_dir} "
+              f"in {chunks} chunk(s) per camera")

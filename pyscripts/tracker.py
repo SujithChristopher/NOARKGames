@@ -376,6 +376,9 @@ class TrackerClass:
         # get. The recorder decimates to its own rate instead, so the two are
         # independent.
         self.recording_hz = float(settings.get("recording_fps", 30))
+        # An hour at 30 Hz is 110 GB per camera; 900 frames is 30 s and ~0.9 GB,
+        # which copies and resumes sanely. 0 disables rotation.
+        self.recording_chunk = int(settings.get("recording_chunk_frames", 900))
         self.recorder: Optional[FrameRecorder] = None
         self._sync_chip = settings.get("sync_chip", "gpiochip4")
         self._sync_pin = settings.get("sync_pin", "PIN_11")
@@ -722,6 +725,7 @@ class TrackerClass:
             sync_chip=self._sync_chip,
             sync_pin=self._sync_pin,
             target_hz=self.recording_hz,
+            chunk_frames=self.recording_chunk,
         )
 
     def _stop_session_recording(self) -> None:
