@@ -348,11 +348,17 @@ boundary, the interval was 33.26 ms, indistinguishable from any other frame.
 
 ### Resolution
 
-`recording_scale` (default 1.0) downscales what is written; 0.5 gives 640x400
-and quarters the storage. Unlike the chunking or any compression, **this is
-irreversible** — it is not a smaller encoding of the same data, it is less data.
+`recording_scale` (default 1.0) downscales **what is written to disk, and only
+that**. Detection and tracking always run on the sensor's full 1280x800 — the
+resize happens on the writer thread, after the frame has already been handed to
+the tracking loop, so live accuracy is identical at any scale.
 
-Measured on 300 real frames, comparing the same frames at both resolutions:
+0.5 gives 640x400 and quarters the storage. Unlike the chunking or any
+compression, **it is irreversible**: not a smaller encoding of the same data,
+but less data.
+
+What it costs is re-running detection on the recordings *afterwards*. Measured
+on 300 real frames, the same frames at both resolutions:
 
 | | tags/frame | tag size |
 |---|---|---|
@@ -363,9 +369,12 @@ Half resolution detects **37% fewer tags**, and the pose from those frames
 differs from the full-resolution pose by 8.45 mm median — largely because a
 different tag subset is a different answer.
 
-So: full resolution if the recordings are for re-running the analysis offline,
-half if they are for review. The scale is written into `metadata.json`, since a
-reader needs it to scale the camera matrix and cannot infer it afterwards.
+So the question is only what the archive is for: full resolution if it must be
+able to reproduce what the live tracker saw, half if it is for review. Either
+way the live tracking is the same.
+
+The scale is written into `metadata.json`, since a reader needs it to scale the
+camera matrix and cannot infer it from the frames.
 
 Storage per hour, both cameras at 30 Hz: **110 GB** at 1.0, **27.5 GB** at 0.5.
 

@@ -745,7 +745,10 @@ class TrackerClass:
         t0 = time.perf_counter()
         raw0, raw1, ts0, ts1, allow_stereo = self.capture.next_pair()
         if self.recorder is not None:
-            # Before the flip: what is written should be what the sensor saw.
+            # Full resolution, before the flip: what is written should be what
+            # the sensor saw. recording_scale shrinks it on the writer thread,
+            # after this, so detection below always runs on the full frame
+            # whatever the recording is configured to keep.
             self.recorder.add(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._frame_count += 1
         if self.flip_frames:
