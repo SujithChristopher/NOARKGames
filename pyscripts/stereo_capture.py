@@ -49,7 +49,8 @@ class StereoCapture:
         frame_sync: bool = True,
         phase_tol_us: float = 200.0,
         resync_threshold_us: float = 1000.0,
-        exposure_us: int = 5000,
+        exposure_us: int = 10000,
+        gain: float = 1.0,
     ) -> None:
         self.frame_size          = frame_size
         self.fps_value           = fps_value
@@ -57,6 +58,7 @@ class StereoCapture:
         self.phase_tol_us        = phase_tol_us
         self.resync_threshold_us = resync_threshold_us
         self.exposure_us         = exposure_us
+        self.gain                = gain
 
         self.cam0 = None   # primary (tracking + display)
         self.cam1 = None   # stereo second view
@@ -142,7 +144,10 @@ class StereoCapture:
 
         # No FrameRate control means the sensor free-runs at whatever rate its
         # current exposure/blanking allows — i.e. max achievable fps.
-        cam_controls = {"ExposureTime": self.exposure_us}
+        cam_controls = {
+            "ExposureTime": self.exposure_us,
+            "AnalogueGain": self.gain,
+        }
         if self.fps_value is not None:
             cam_controls["FrameRate"] = self.fps_value
 
@@ -156,6 +161,18 @@ class StereoCapture:
         self.cam1.configure(size=self.frame_size, bit_depth=8)
         self.cam1.set_controls(cam_controls)
         self.cam1.start()
+
+        # The driver clips exposure to what the current blanking allows, so say
+        # what the sensor actually took rather than what was asked for.
+        for label, cam in (("cam0", self.cam0), ("cam1", self.cam1)):
+            try:
+                actual = cam.get_control("exposure") * cam.line_time_us()
+            except Exception:  # v4l2-ctl fallback cannot read it back
+                continue
+            note = ""
+            if abs(actual - self.exposure_us) > 0.02 * self.exposure_us:
+                note = f"  (clipped from {self.exposure_us} us)"
+            print(f"[CAM] {label}: exposure {actual:.0f} us, gain {self.gain:.1f}x{note}")
 
         # Concurrent grab: issue both captures in parallel so the inter-camera
         # gap collapses to the sensors' fixed phase offset (not a full frame).

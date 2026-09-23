@@ -373,7 +373,9 @@ def _progress(collector, brightness, tag_px, remaining, tag_ids, reference_id) -
     return "\n".join(lines)
 
 
-def capture(seconds: float, frame_size, display: bool, tag_ids=(), reference_id=None) -> CornerCollector:
+def capture(seconds: float, frame_size, display: bool, tag_ids=(),
+            reference_id=None, exposure_us: int = 10000,
+            gain: float = 1.0) -> CornerCollector:
     """Detect tags in both cameras for `seconds`, keeping only the corners.
 
     Captures through StereoCapture, the same synchronised source the tracker
@@ -383,7 +385,9 @@ def capture(seconds: float, frame_size, display: bool, tag_ids=(), reference_id=
     apart on this board while looking perfectly healthy from userspace. Each
     frame therefore records whether its pair was genuinely simultaneous.
     """
-    capture_source = StereoCapture(frame_size=frame_size)
+    capture_source = StereoCapture(
+        frame_size=frame_size, exposure_us=exposure_us, gain=gain
+    )
     collector = CornerCollector()
     print(
         f"[CALIB] Capturing {seconds:.0f}s. Rotate the device slowly so every "
@@ -1103,6 +1107,15 @@ if __name__ == "__main__":
                              "Pass 'none' to skip.")
     parser.add_argument("--from", dest="from_corners", type=Path, default=None,
                         help="Re-solve from a saved corner dump instead of capturing.")
+    parser.add_argument("--exposure", type=int, default=None, metavar="US",
+                        help="Exposure in microseconds, overriding device.toml. "
+                             "Keep it a multiple of the mains half-period "
+                             "(10000 at 50 Hz, 8333 at 60 Hz) or the image "
+                             "pulses in brightness frame to frame.")
+    parser.add_argument("--gain", type=float, default=None,
+                        help="Analogue gain 1.0-16.0, overriding device.toml. "
+                             "Raise exposure first where the motion allows: gain "
+                             "amplifies the noise that corner accuracy depends on.")
     parser.add_argument("--force", action="store_true",
                         help="Write the calibration even if it fails its checks.")
     parser.add_argument("--display", action=argparse.BooleanOptionalAction,
@@ -1121,6 +1134,8 @@ if __name__ == "__main__":
 
     device = load_device(args.device)
     tag_ids = args.tags if args.tags is not None else device["tag_ids"]
+    exposure_us = args.exposure if args.exposure is not None else device["exposure_us"]
+    gain = args.gain if args.gain is not None else device["gain"]
     print(f"[CALIB] Device '{device['name']}': tags {tag_ids}")
 
     # A rig with differently sized tags needs its object-point model rebuilt;
@@ -1140,7 +1155,8 @@ if __name__ == "__main__":
 
     if args.list:
         seconds = 5.0 if args.seconds == 60.0 else args.seconds
-        seen = capture(seconds, frame_size, args.display, tag_ids)
+        seen = capture(seconds, frame_size, args.display, tag_ids,
+                       exposure_us=exposure_us, gain=gain)
         counts = seen.counts()
         expected = {mid: n for mid, n in counts.items() if mid in set(tag_ids)}
         unexpected = {mid: n for mid, n in counts.items() if mid not in set(tag_ids)}
@@ -1189,7 +1205,8 @@ if __name__ == "__main__":
         print(f"[CALIB] Loaded corners <- {args.from_corners}")
     else:
         collector = capture(args.seconds, frame_size, args.display,
-                            tag_ids, device["reference_id"])
+                            tag_ids, device["reference_id"],
+                            exposure_us=exposure_us, gain=gain)
         # Kept somewhere durable unless refused: /tmp is cleared on reboot and
         # by periodic cleanup, and a take lost that way costs another session
         # in front of the cameras. Re-solving one is free.

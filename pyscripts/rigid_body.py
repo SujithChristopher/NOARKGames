@@ -67,6 +67,8 @@ def load_device(path: Path) -> dict:
             "tip_tag": None,
             "tip": np.zeros(3),
             "camera_order": ("cam0", "cam1"),
+            "exposure_us": 10000,
+            "gain": 1.0,
         }
     data = toml.load(path)
     device = data.get("device", {})
@@ -77,6 +79,8 @@ def load_device(path: Path) -> dict:
             cameras.get("stream0", "cam0"),
             cameras.get("stream1", "cam1"),
         ),
+        "exposure_us": int(cameras.get("exposure_us", 10000)),
+        "gain": float(cameras.get("gain", 1.0)),
         "name": device.get("name", "unnamed"),
         "tag_ids": list(device.get("tag_ids", DEFAULT_TAG_IDS)),
         "tag_size_m": float(device.get("tag_size_m", TAG_SIZE_M)),

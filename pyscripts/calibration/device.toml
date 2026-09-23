@@ -51,3 +51,20 @@ offset_m = [0.00, 0.01, -0.069]
 # which solves the same tag in both views and reports which mapping agrees.
 stream0 = "cam1"
 stream1 = "cam0"
+
+# Exposure and gain for both cameras.
+#
+# exposure_us should be a whole number of the mains half-period, or every frame
+# integrates a different slice of the light's sine and the image pulses in
+# brightness: 10000 us at 50 Hz, 8333 us at 60 Hz, or multiples. Measured on
+# this board under 50 Hz light, 5000 us gave 44% peak-to-peak frame brightness
+# and 10000 us gave 0.3%.
+#
+# Reach for exposure before gain: gain amplifies sensor noise, and the corner
+# positions every later stage is built on are exactly what noise spoils. But
+# exposure costs motion blur on a moving device, and it cannot exceed the frame
+# period (16.6 ms at the free-running rate), so a dark room may need both.
+#
+# The calibration prints the image level it is actually getting, with a verdict.
+exposure_us = 10000
+gain = 1.0

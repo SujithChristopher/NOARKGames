@@ -200,6 +200,8 @@ class TrackerClass:
         # 370 mm of jitter on a static device.
         device = load_device(device_path)
         self._camera_order = device["camera_order"]
+        self._exposure_us = device["exposure_us"]
+        self._gain = device["gain"]
         cameras, self.frame_size = load_cameras(stereo_calib_path, self._camera_order)
         (self.K0, self.D0) = cameras["cam0"]
         (self.K1, self.D1) = cameras["cam1"]
@@ -326,6 +328,8 @@ class TrackerClass:
             frame_sync=self.frame_sync_enabled,
             phase_tol_us=self.phase_tol_us,
             resync_threshold_us=self.resync_threshold_us,
+            exposure_us=self._exposure_us,
+            gain=self._gain,
         )
         self.cam0 = self.capture.cam0
         self.cam1 = self.capture.cam1
