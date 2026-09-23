@@ -69,6 +69,7 @@ def load_device(path: Path) -> dict:
             "camera_order": ("cam0", "cam1"),
             "exposure_us": 10000,
             "gain": 1.0,
+            "isp": None,
         }
     data = toml.load(path)
     device = data.get("device", {})
@@ -81,6 +82,9 @@ def load_device(path: Path) -> dict:
         ),
         "exposure_us": int(cameras.get("exposure_us", 10000)),
         "gain": float(cameras.get("gain", 1.0)),
+        # "" / "none" / "raw" all mean the unprocessed sensor bytes; TOML has no
+        # null, so the file says it with an empty string.
+        "isp": (cameras.get("isp") or "").strip().lower() or None,
         "name": device.get("name", "unnamed"),
         "tag_ids": list(device.get("tag_ids", DEFAULT_TAG_IDS)),
         "tag_size_m": float(device.get("tag_size_m", TAG_SIZE_M)),

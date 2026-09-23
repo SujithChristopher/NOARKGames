@@ -182,6 +182,74 @@ frame — the same shape the hand-measured `MARKER_OFFSETS` had.
 > so without a calibration the tracker supplies stale offsets for those two tags
 > and nothing for the rest. It says so loudly at startup. Calibrate before use.
 
+### Camera settings
+
+All three live in `calibration/device.toml` under `[cameras]`, shared by the
+calibration and the tracker, with `--exposure`, `--gain` and `--isp` to override
+for one run.
+
+```toml
+[cameras]
+exposure_us = 10000   # a whole number of the mains half-period
+gain        = 3.0     # analogue, 1.0-16.0
+isp         = "pisp"  # Pi 5 gamma curve, "vc4", or "" for raw
+```
+
+**Exposure** must be a multiple of the mains half-period — 10000 µs at 50 Hz,
+8333 µs at 60 Hz — or each frame integrates a different slice of the light's
+sine and the image pulses. Measured here: 44% peak-to-peak brightness at
+5000 µs, 0.3% at 10000 µs. It also cannot exceed the frame period (~16.6 ms),
+and it costs motion blur on a moving device.
+
+**Gain** is free but amplifies the sensor noise that corner accuracy rests on,
+so raise exposure first where the motion allows.
+
+**ISP** is rcam's port of the Pi's mono pipeline — black level, digital gain and
+the `ov9281_mono` gamma curve. Measured against raw at the same exposure:
+
+| | raw | pisp |
+|---|---|---|
+| image level | 58/255 | 113/255 |
+| frame rate | ~30 fps | ~19.5 fps |
+| jitter | no difference repeated runs could separate |
+| depth | — | consistent +0.8 mm |
+
+The cost is ~16 ms per pair. It hides inside the wait for the next sensor frame
+if you measure capture alone, and becomes additive once the loop is doing real
+work — so measure it end to end, not in isolation.
+
+> The depth offset means **the rigid body must be calibrated in the mode it is
+> tracked in**. The mode is stamped into `rigidbody.toml` as `meta.isp` so a
+> take cannot be silently reused under a different pipeline.
+
+### While recording
+
+The preview window is on by default (`--no-display` for headless) and carries a
+readout that answers what you can still act on: exposure level with a verdict,
+apparent tag size, and each tag's state — paired up, seen but still needing a
+neighbour, or never seen. Pairs are what the geometry is built from, so a tag
+seen thousands of times alone still contributes nothing.
+
+Takes are kept automatically under `calibration/takes/`, so any take can be
+re-solved offline without going back to the cameras.
+
+### When a calibration is rejected
+
+Two checks run before anything is written, and a failure leaves the previous
+calibration in place:
+
+```
+[CALIB] NOT WRITING the calibration:
+  - the bundle did not converge within N evaluations
+  - the tags disagree about the tracked point by 81.2 mm (limit 10 mm)
+```
+
+**Tag agreement** is the one that matters. Each visible tag places the body
+origin on its own, and the spread between those answers is the geometry
+disagreeing with itself. Reprojection error cannot see a rarely-visible tag that
+is badly placed — one that was 29 mm out still *improved* the held-out median,
+while tracking jitter went from 1.57 mm to 38 mm. Good takes measure under 2 mm.
+
 ### How the tracker uses it
 
 With a calibration present, `tracker.py` solves **one pose for the whole cluster**

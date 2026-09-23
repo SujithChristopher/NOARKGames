@@ -375,7 +375,7 @@ def _progress(collector, brightness, tag_px, remaining, tag_ids, reference_id) -
 
 def capture(seconds: float, frame_size, display: bool, tag_ids=(),
             reference_id=None, exposure_us: int = 10000,
-            gain: float = 1.0) -> CornerCollector:
+            gain: float = 4.0, isp: Optional[str] = None) -> CornerCollector:
     """Detect tags in both cameras for `seconds`, keeping only the corners.
 
     Captures through StereoCapture, the same synchronised source the tracker
@@ -386,7 +386,7 @@ def capture(seconds: float, frame_size, display: bool, tag_ids=(),
     frame therefore records whether its pair was genuinely simultaneous.
     """
     capture_source = StereoCapture(
-        frame_size=frame_size, exposure_us=exposure_us, gain=gain
+        frame_size=frame_size, exposure_us=exposure_us, gain=gain, isp=isp
     )
     collector = CornerCollector()
     print(
@@ -918,7 +918,8 @@ def tip_offsets(transforms, tip_ref) -> dict:
     }
 
 
-def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames) -> None:
+def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames,
+               isp=None) -> None:
     transforms = result["transforms"]
     offsets = tip_offsets(transforms, tip_ref)
     payload = {
@@ -931,6 +932,7 @@ def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames) 
             "marker_ids": sorted(transforms),
             "tip_in_reference_m": list(map(float, tip_ref)),
             "stereo_calibration": str(cameras_path),
+            "isp": isp or "raw",
             "frames": frames,
             "bundle_views": result["bundle"]["views"],
             "bundle_initial_rmse_px": result["bundle"]["initial_rmse_px"],
@@ -1107,12 +1109,15 @@ if __name__ == "__main__":
                              "Pass 'none' to skip.")
     parser.add_argument("--from", dest="from_corners", type=Path, default=None,
                         help="Re-solve from a saved corner dump instead of capturing.")
+    parser.add_argument("--isp", default=None, metavar="MODE",
+                        help="Image pipeline: pisp, vc4, or raw. Overrides "
+                             "device.toml. Calibrate in the mode you track in.")
     parser.add_argument("--exposure", type=int, default=None, metavar="US",
                         help="Exposure in microseconds, overriding device.toml. "
                              "Keep it a multiple of the mains half-period "
                              "(10000 at 50 Hz, 8333 at 60 Hz) or the image "
                              "pulses in brightness frame to frame.")
-    parser.add_argument("--gain", type=float, default=None,
+    parser.add_argument("--gain", type=float, default=3.0,
                         help="Analogue gain 1.0-16.0, overriding device.toml. "
                              "Raise exposure first where the motion allows: gain "
                              "amplifies the noise that corner accuracy depends on.")
@@ -1136,6 +1141,12 @@ if __name__ == "__main__":
     tag_ids = args.tags if args.tags is not None else device["tag_ids"]
     exposure_us = args.exposure if args.exposure is not None else device["exposure_us"]
     gain = args.gain if args.gain is not None else device["gain"]
+    isp = device["isp"] if args.isp is None else (args.isp.lower() or None)
+    if isp in ("none", "raw"):
+        isp = None
+    # Printed and stamped into the calibration, so a take can never be quietly
+    # reused under a different pipeline: the gamma curve shifts depth ~0.8 mm.
+    print(f"[CALIB] Image pipeline: {isp or 'raw'}")
     print(f"[CALIB] Device '{device['name']}': tags {tag_ids}")
 
     # A rig with differently sized tags needs its object-point model rebuilt;
@@ -1156,7 +1167,7 @@ if __name__ == "__main__":
     if args.list:
         seconds = 5.0 if args.seconds == 60.0 else args.seconds
         seen = capture(seconds, frame_size, args.display, tag_ids,
-                       exposure_us=exposure_us, gain=gain)
+                       exposure_us=exposure_us, gain=gain, isp=isp)
         counts = seen.counts()
         expected = {mid: n for mid, n in counts.items() if mid in set(tag_ids)}
         unexpected = {mid: n for mid, n in counts.items() if mid not in set(tag_ids)}
@@ -1206,7 +1217,7 @@ if __name__ == "__main__":
     else:
         collector = capture(args.seconds, frame_size, args.display,
                             tag_ids, device["reference_id"],
-                            exposure_us=exposure_us, gain=gain)
+                            exposure_us=exposure_us, gain=gain, isp=isp)
         # Kept somewhere durable unless refused: /tmp is cleared on reboot and
         # by periodic cleanup, and a take lost that way costs another session
         # in front of the cameras. Re-solving one is free.
@@ -1295,7 +1306,7 @@ if __name__ == "__main__":
     args.out.parent.mkdir(parents=True, exist_ok=True)
     write_toml(
         args.out, result, reference, tip_ref,
-        _SCRIPT_DIR / "calibration" / "sterio_calibration.toml", frames,
+        _SCRIPT_DIR / "calibration" / "sterio_calibration.toml", frames, isp,
     )
     report_against_hardcoded(result["transforms"], tip_ref)
     print(f"\n[CALIB] Wrote {args.out}")

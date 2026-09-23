@@ -51,6 +51,7 @@ class StereoCapture:
         resync_threshold_us: float = 1000.0,
         exposure_us: int = 10000,
         gain: float = 1.0,
+        isp: Optional[str] = None,
     ) -> None:
         self.frame_size          = frame_size
         self.fps_value           = fps_value
@@ -59,6 +60,10 @@ class StereoCapture:
         self.resync_threshold_us = resync_threshold_us
         self.exposure_us         = exposure_us
         self.gain                = gain
+        # rcam's software port of the Pi's mono pipeline: black level, digital
+        # gain and the ov9281_mono gamma curve, folded into the unpack LUT.
+        # "pisp" (Pi 5 curve) or "vc4" (Pi 4), or None for the raw high byte.
+        self.isp                 = isp
 
         self.cam0 = None   # primary (tracking + display)
         self.cam1 = None   # stereo second view
@@ -148,17 +153,22 @@ class StereoCapture:
             "ExposureTime": self.exposure_us,
             "AnalogueGain": self.gain,
         }
+        if self.isp is not None:
+            # The ISP path starts with AE on, as a Pi does. Left there the two
+            # cameras meter independently and can settle on different
+            # exposures, which is not what a stereo pair wants, so pin it.
+            cam_controls["AeEnable"] = False
         if self.fps_value is not None:
             cam_controls["FrameRate"] = self.fps_value
 
         self.cam0 = Camera(labels[0])
-        self.cam0.configure(size=self.frame_size, bit_depth=8)
+        self.cam0.configure(size=self.frame_size, bit_depth=8, isp=self.isp)
         self.cam0.set_controls(cam_controls)
         self.cam0.start()
 
         # cam1 is always active — used for stereo_pnp on every frame
         self.cam1 = Camera(labels[1])
-        self.cam1.configure(size=self.frame_size, bit_depth=8)
+        self.cam1.configure(size=self.frame_size, bit_depth=8, isp=self.isp)
         self.cam1.set_controls(cam_controls)
         self.cam1.start()
 

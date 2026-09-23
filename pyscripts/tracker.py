@@ -202,6 +202,7 @@ class TrackerClass:
         self._camera_order = device["camera_order"]
         self._exposure_us = device["exposure_us"]
         self._gain = device["gain"]
+        self._isp = device["isp"]
         cameras, self.frame_size = load_cameras(stereo_calib_path, self._camera_order)
         (self.K0, self.D0) = cameras["cam0"]
         (self.K1, self.D1) = cameras["cam1"]
@@ -330,6 +331,7 @@ class TrackerClass:
             resync_threshold_us=self.resync_threshold_us,
             exposure_us=self._exposure_us,
             gain=self._gain,
+            isp=self._isp,
         )
         self.cam0 = self.capture.cam0
         self.cam1 = self.capture.cam1

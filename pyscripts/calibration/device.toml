@@ -68,3 +68,21 @@ stream1 = "cam0"
 # The calibration prints the image level it is actually getting, with a verdict.
 exposure_us = 10000
 gain = 1.0
+
+# Raspberry Pi-style image processing, ported in rcam.isp: black level, digital
+# gain and the ov9281_mono gamma curve, folded into the Y10P unpack.
+#
+#   "pisp"  the Pi 5 curve      "vc4"  the Pi 4 curve      ""  raw sensor bytes
+#
+# Measured on this rig, against raw at the same exposure:
+#   image level   58 -> 113 /255   (the curve lifts the midtones)
+#   frame rate    30 -> 19.5 fps   (~16 ms per pair, visible once the loop is
+#                                   doing real work rather than waiting on the
+#                                   sensor)
+#   jitter        no difference that repeated runs could separate
+#   depth         a consistent +0.8 mm offset
+#
+# That last line is why this must not be changed casually: the rigid body has
+# to be calibrated in the same mode it is tracked in, or the geometry and the
+# tracking disagree by that offset.
+isp = "pisp"
