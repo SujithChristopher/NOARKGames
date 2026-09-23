@@ -70,6 +70,10 @@ MIN_SAMPLES_PER_MARKER = 20
 # Fraction of the take used to solve; the remainder scores the result on frames
 # it never saw.
 CALIBRATION_FRACTION = 0.5
+# Above this the tags place the tracked point in materially different spots, and
+# the reported position steps as the visible set changes. Good takes measure
+# well under 2 mm; the one that shipped a 29 mm error measured 81 mm.
+AGREEMENT_LIMIT_MM = 10.0
 # ── Per-tag pose ──────────────────────────────────────────────────────────────
 
 def _marker_pose(corners: np.ndarray, K: np.ndarray, D: np.ndarray):
@@ -251,7 +255,125 @@ class CornerCollector:
         return collector
 
 
-def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
+def _overlay_status(collector, brightness, tag_px, remaining, tag_ids):
+    """Lines for the preview window: what is good, and what still needs doing.
+
+    Returns (text, colour) pairs rather than a formatted block, so the window
+    can show at a glance which items are problems — during a take the person is
+    holding a device in front of the cameras and is not going to read prose.
+    """
+    GOOD, WARN, BAD = (120, 220, 120), (60, 200, 255), (80, 80, 255)
+    counts = collector.counts()
+    lines = [
+        (f"{len(collector.paired)} frames   {remaining:.0f}s left   "
+         f"{100.0 * np.mean(collector.paired):.0f}% paired", (230, 230, 230)),
+    ]
+
+    if brightness:
+        mean = float(np.mean(brightness))
+        if mean < 40:
+            lines.append((f"image {mean:.0f}/255  TOO DARK - add light", BAD))
+        elif mean > 200:
+            lines.append((f"image {mean:.0f}/255  very bright - check glare", WARN))
+        else:
+            lines.append((f"image {mean:.0f}/255  ok", GOOD))
+    if tag_px:
+        size = float(np.median(tag_px))
+        lines.append((f"tag size ~{size:.0f} px"
+                      + ("  (small - move closer)" if size < 45 else ""),
+                      WARN if size < 45 else GOOD))
+
+    pairs = {}
+    for name in collector.camera_names:
+        for frame in collector.frames[name]:
+            ids = sorted(frame)
+            for i, a in enumerate(ids):
+                for b in ids[i + 1:]:
+                    pairs[(a, b)] = pairs.get((a, b), 0) + 1
+    strong = {t for (a, b), n in pairs.items() if n >= MIN_SAMPLES_PER_MARKER
+              for t in (a, b)}
+
+    # One line per tag state: done / seen but not yet usable / never seen.
+    done = sorted(t for t in tag_ids if t in strong)
+    weak = sorted(t for t in tag_ids if t in counts and t not in strong)
+    unseen = sorted(t for t in tag_ids if t not in counts)
+    lines.append((f"paired up: {done if done else 'none yet'}",
+                  GOOD if done else WARN))
+    if weak:
+        lines.append((f"seen, needs a neighbour: {weak}", WARN))
+    if unseen:
+        lines.append((f"NOT SEEN: {unseen}", BAD))
+    if not weak and not unseen and done:
+        lines.append(("coverage complete - keep turning for more angles", GOOD))
+    return lines
+
+
+def _draw_overlay(image: np.ndarray, lines) -> np.ndarray:
+    """Put the status lines on a dimmed strip so they stay readable."""
+    if not lines:
+        return image
+    height = 24 * len(lines) + 16
+    panel = image[:height].copy()
+    cv2.rectangle(panel, (0, 0), (panel.shape[1], height), (0, 0, 0), -1)
+    cv2.addWeighted(panel, 0.55, image[:height], 0.45, 0, image[:height])
+    for index, (text, colour) in enumerate(lines):
+        cv2.putText(image, text, (12, 28 + 24 * index),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 1, cv2.LINE_AA)
+    return image
+
+
+def _progress(collector, brightness, tag_px, remaining, tag_ids, reference_id) -> str:
+    """What the take still needs, while there is still time to get it.
+
+    A calibration take is minutes of someone holding a device in front of two
+    cameras, and until now the only way to find out it was too dark, or that one
+    face never got shown, was to solve it afterwards and start again. Everything
+    here is cheap to compute and answers a question the person can act on
+    immediately: is the image usable, and which tags still need views.
+    """
+    counts = collector.counts()
+    lines = [f"  {len(collector.paired)} frames, {remaining:.0f}s left, "
+             f"{100.0 * np.mean(collector.paired):.0f}% paired"]
+
+    if brightness:
+        mean = float(np.mean(brightness))
+        # 8-bit mono: tags stop detecting reliably once the image is this dark,
+        # and the corners degrade well before detection fails outright.
+        verdict = ("DARK - add light, detection and corner accuracy both suffer"
+                   if mean < 40 else
+                   "bright - check for glare on the tags" if mean > 200 else "ok")
+        size = f", tags ~{np.median(tag_px):.0f} px" if tag_px else ""
+        lines.append(f"    image: mean level {mean:.0f}/255 ({verdict}){size}")
+
+    missing = [t for t in tag_ids if t not in counts]
+    thin = [t for t in counts if counts[t] < 40 and t not in missing]
+    if missing:
+        lines.append(f"    NOT SEEN yet: tags {missing} - turn those faces to the cameras")
+    if thin:
+        lines.append(f"    thin so far:  tags {sorted(thin)}")
+
+    # Pairs are what the geometry is actually built from, so report the tags
+    # that have no strong partner rather than only how often each was seen.
+    pairs = {}
+    for name in collector.camera_names:
+        for frame in collector.frames[name]:
+            ids = sorted(frame)
+            for i, a in enumerate(ids):
+                for b in ids[i + 1:]:
+                    pairs[(a, b)] = pairs.get((a, b), 0) + 1
+    linked = {t for (a, b), n in pairs.items() if n >= MIN_SAMPLES_PER_MARKER
+              for t in (a, b)}
+    unlinked = [t for t in counts if t not in linked]
+    if unlinked:
+        lines.append(f"    no strong pairing yet: tags {sorted(unlinked)} - "
+                     "show them alongside a neighbour")
+    if not missing and not thin and not unlinked:
+        lines.append(f"    coverage looks good ({len(counts)} tags, "
+                     f"{sum(1 for n in pairs.values() if n >= MIN_SAMPLES_PER_MARKER)} strong pairs)")
+    return "\n".join(lines)
+
+
+def capture(seconds: float, frame_size, display: bool, tag_ids=(), reference_id=None) -> CornerCollector:
     """Detect tags in both cameras for `seconds`, keeping only the corners.
 
     Captures through StereoCapture, the same synchronised source the tracker
@@ -269,8 +391,13 @@ def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
     )
     deadline = time.perf_counter() + seconds
     last_report = time.perf_counter()
+    brightness: list = []
+    tag_px: list = []
+    overlay: list = []
+    last_overlay = 0.0
     try:
         while time.perf_counter() < deadline:
+            now_frame = time.perf_counter()
             raw0, raw1, _ts0, _ts1, paired = capture_source.next_pair()
             frames = (raw0, raw1)
             detected = rapidtag.detect_markers_batch(list(frames), _APRILTAG_DICT)
@@ -293,6 +420,16 @@ def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
             capture_source.maybe_resync()
 
             if display:
+                # The status is recomputed a couple of times a second, not every
+                # frame: it walks the whole take to count pairs, and the point
+                # of the preview is that it must not slow the capture it is
+                # reporting on.
+                if now_frame - last_overlay >= 0.4:
+                    last_overlay = now_frame
+                    overlay = _overlay_status(
+                        collector, brightness, tag_px, deadline - now_frame,
+                        tag_ids,
+                    )
                 tiles = []
                 for frame, (corners, ids) in zip(frames, detected):
                     tile = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
@@ -300,20 +437,33 @@ def capture(seconds: float, frame_size, display: bool) -> CornerCollector:
                         tile = _draw_markers(
                             tile, corners, np.asarray(ids, dtype=int).reshape(-1, 1)
                         )
-                    tiles.append(cv2.resize(tile, (480, 300)))
-                cv2.imshow("rigidbody calibration", np.hstack(tiles))
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                    tiles.append(cv2.resize(tile, (640, 400)))
+                try:
+                    cv2.imshow("rigidbody calibration",
+                               _draw_overlay(np.hstack(tiles), overlay))
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        print("[CALIB] Stopped early from the preview window.")
+                        break
+                except cv2.error as exc:
+                    # Headless, or over SSH without X: the take is still fine,
+                    # it just runs on the terminal reports instead.
+                    display = False
+                    print(f"[CALIB] No preview window ({exc.err.strip()}); "
+                          "continuing without it.", flush=True)
 
-            now = time.perf_counter()
+            brightness.append(float(raw0.mean()))
+            tag_px.extend(
+                float(np.mean(np.linalg.norm(c - np.roll(c, -1, axis=0), axis=1)))
+                for c in per_camera[0].values()
+            )
+
+            now = now_frame
             if now - last_report >= 5.0:
                 last_report = now
-                paired_pct = 100.0 * np.mean(collector.paired)
-                print(
-                    f"  {len(collector.paired)} frames, "
-                    f"{deadline - now:.0f}s left, {paired_pct:.0f}% paired, "
-                    f"seen: {collector.counts()}"
-                )
+                print(_progress(collector, brightness, tag_px, deadline - now,
+                                tag_ids, reference_id), flush=True)
+                brightness.clear()
+                tag_px.clear()
     finally:
         capture_source.close()
         if display:
@@ -535,6 +685,13 @@ def _bundle_adjust(collector, poses, cameras, transforms, reference_id, end_fram
         return float(np.sqrt(np.mean(residuals(parameters).reshape(-1, 2) ** 2) * 2.0))
 
     initial = rmse(x0)
+    # Generous, and scaled to the problem: least_squares stops as soon as it
+    # converges, so a high cap costs nothing when it does — but a cap that bites
+    # is dangerous. A fixed 100 was enough for ~600 views and silently truncated
+    # at ~1250, leaving one tag 29 mm out of place while the *median* held-out
+    # reprojection still improved. The take got better and the calibration got
+    # worse, which is exactly the failure a cap should never produce quietly.
+    budget = max(400, 2 * len(views))
     result = least_squares(
         residuals,
         x0,
@@ -543,15 +700,62 @@ def _bundle_adjust(collector, poses, cameras, transforms, reference_id, end_fram
         loss="soft_l1",
         f_scale=0.5,
         x_scale="jac",
-        max_nfev=100,
+        max_nfev=budget,
     )
     for mid in marker_ids:
         transforms[mid]["R"], transforms[mid]["t"] = unpack(result.x, mid)
     return {
         "views": len(views),
+        "budget": budget,
         "initial_rmse_px": initial,
         "final_rmse_px": rmse(result.x),
         "success": bool(result.success),
+    }
+
+
+def _tag_agreement(collector, poses, transforms, start_frame) -> dict:
+    """How far apart the tags place the same physical point, within one frame.
+
+    The reprojection scores cannot see a misplaced tag that is rarely visible:
+    the median is set by whichever tags appear in most frames, so one tag 29 mm
+    out of place barely moves it — and then throws the tracked point by that
+    much whenever it comes into view.
+
+    Comparing the tags against each other does see it. Every visible tag is used
+    on its own to place the reference frame's origin, and the spread between
+    those answers is the geometry's disagreement with itself. Being a
+    within-frame comparison it needs no stationary device, so it works on the
+    calibration take itself.
+    """
+    spreads = []
+    for name in collector.camera_names:
+        for frame_index in range(start_frame, len(poses[name])):
+            frame_poses = poses[name][frame_index]
+            visible = [m for m in transforms if m in frame_poses]
+            if len(visible) < 2:
+                continue
+            points = []
+            for mid in visible:
+                # Reusing the poses the solve already computed rather than
+                # redoing the IPPE work: this pass covers every held-out frame
+                # and doubled the runtime when it solved them a second time.
+                pose = frame_poses[mid]
+                if pose["rmse_px"] > MAX_POSE_RMSE_PX:
+                    continue
+                R, t = transforms[mid]["R"], transforms[mid]["t"]
+                # The tag's own pose carried onto the body, then the body origin.
+                R_board = pose["R"] @ R.T
+                points.append(pose["t"] - R_board @ t)
+            if len(points) < 2:
+                continue
+            points = np.asarray(points)
+            spreads.append(float(np.max(np.linalg.norm(points - points.mean(0), axis=1))))
+    if not spreads:
+        return {"frames": 0, "median_mm": float("nan"), "p95_mm": float("nan")}
+    return {
+        "frames": len(spreads),
+        "median_mm": 1000.0 * float(np.median(spreads)),
+        "p95_mm": 1000.0 * float(np.percentile(spreads, 95)),
     }
 
 
@@ -601,6 +805,8 @@ def _validate(collector, cameras, transforms, start_frame) -> dict:
 def solve(collector, cameras, reference_id) -> dict:
     """Corners in, rigid body out."""
     poses = {}
+    print("[CALIB] Solving per-tag poses...", flush=True)
+    t_stage = time.perf_counter()
     for name in collector.camera_names:
         K, D = cameras[name]
         poses[name] = [
@@ -612,6 +818,8 @@ def solve(collector, cameras, reference_id) -> dict:
         poses[name] = [
             {mid: p for mid, p in frame.items() if p is not None} for frame in poses[name]
         ]
+
+    print(f"[CALIB]   {time.perf_counter() - t_stage:.1f}s", flush=True)
 
     frame_count = min(len(collector.frames[n]) for n in collector.camera_names)
     end_frame = int(frame_count * CALIBRATION_FRACTION)
@@ -653,9 +861,12 @@ def solve(collector, cameras, reference_id) -> dict:
             "visible and rotate the device more slowly"
         )
 
+    print("[CALIB] Bundle adjusting (the slow stage)...", flush=True)
+    t_stage = time.perf_counter()
     bundle = _bundle_adjust(
         collector, poses, cameras, transforms, reference_id, end_frame
     )
+    print(f"[CALIB]   {time.perf_counter() - t_stage:.1f}s", flush=True)
     print(
         f"[CALIB] Bundle adjustment: {bundle['views']} views, "
         f"RMSE {bundle['initial_rmse_px']:.3f} -> {bundle['final_rmse_px']:.3f} px"
@@ -673,7 +884,19 @@ def solve(collector, cameras, reference_id) -> dict:
         f"median={validation['median_px']:.3f} px, "
         f"p95={validation['p95_px']:.3f} px"
     )
-    return {"transforms": transforms, "bundle": bundle, "validation": validation}
+
+    agreement = _tag_agreement(collector, poses, transforms, end_frame)
+    print(
+        f"[CALIB] Tag agreement: median {agreement['median_mm']:.2f} mm, "
+        f"p95 {agreement['p95_mm']:.2f} mm "
+        f"(how far apart the tags place the same point)"
+    )
+    return {
+        "transforms": transforms,
+        "bundle": bundle,
+        "validation": validation,
+        "agreement": agreement,
+    }
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -712,6 +935,8 @@ def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames) 
             "validation_frames": result["validation"]["frames"],
             "validation_median_px": result["validation"]["median_px"],
             "validation_p95_px": result["validation"]["p95_px"],
+            "agreement_median_mm": result["agreement"]["median_mm"],
+            "agreement_p95_mm": result["agreement"]["p95_mm"],
         },
         "markers": {
             str(mid): {
@@ -871,12 +1096,23 @@ if __name__ == "__main__":
                         default=_SCRIPT_DIR / "calibration" / "rigidbody.toml",
                         help="Where to write the calibration.")
     parser.add_argument("--save-corners", type=Path, default=None,
-                        help="Also dump the detected corners here (.npz) so the "
-                             "take can be re-solved without recapturing.")
+                        help="Where to keep this take's corners. Defaults to a "
+                             "timestamped file under calibration/takes/ — a take "
+                             "is minutes of someone's time and a few hundred kB, "
+                             "so it is kept by default rather than on request. "
+                             "Pass 'none' to skip.")
     parser.add_argument("--from", dest="from_corners", type=Path, default=None,
                         help="Re-solve from a saved corner dump instead of capturing.")
-    parser.add_argument("--display", action="store_true",
-                        help="Show the detections while capturing.")
+    parser.add_argument("--force", action="store_true",
+                        help="Write the calibration even if it fails its checks.")
+    parser.add_argument("--display", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Live preview of the detections with a coverage and "
+                             "exposure readout. On by default: a take is someone "
+                             "standing in front of the cameras, and the things "
+                             "that spoil one (too dark, a face never shown) are "
+                             "only fixable while it is still running. "
+                             "--no-display for headless runs.")
     parser.add_argument("--list", action="store_true",
                         help="Just report which tags the cameras can see, then "
                              "exit. Use this first to find the ids on your "
@@ -904,7 +1140,7 @@ if __name__ == "__main__":
 
     if args.list:
         seconds = 5.0 if args.seconds == 60.0 else args.seconds
-        seen = capture(seconds, frame_size, args.display)
+        seen = capture(seconds, frame_size, args.display, tag_ids)
         counts = seen.counts()
         expected = {mid: n for mid, n in counts.items() if mid in set(tag_ids)}
         unexpected = {mid: n for mid, n in counts.items() if mid not in set(tag_ids)}
@@ -952,10 +1188,21 @@ if __name__ == "__main__":
         collector = CornerCollector.load(args.from_corners)
         print(f"[CALIB] Loaded corners <- {args.from_corners}")
     else:
-        collector = capture(args.seconds, frame_size, args.display)
-        if args.save_corners:
-            collector.save(args.save_corners)
-            print(f"[CALIB] Saved corners -> {args.save_corners}")
+        collector = capture(args.seconds, frame_size, args.display,
+                            tag_ids, device["reference_id"])
+        # Kept somewhere durable unless refused: /tmp is cleared on reboot and
+        # by periodic cleanup, and a take lost that way costs another session
+        # in front of the cameras. Re-solving one is free.
+        if str(args.save_corners).lower() != "none":
+            target = args.save_corners
+            if target is None:
+                target = (
+                    _SCRIPT_DIR / "calibration" / "takes"
+                    / f"corners_{datetime.now():%Y%m%d_%H%M%S}.npz"
+                )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            collector.save(target)
+            print(f"[CALIB] Saved corners -> {target}")
 
     collector.keep_only(tag_ids)
     counts = collector.counts()
@@ -1001,6 +1248,32 @@ if __name__ == "__main__":
             f"[CALIB] Tip -> tag {reference}'s frame: "
             f"{np.round(1000 * tip_ref, 1)} mm"
         )
+
+    # Both of these produced a calibration that looked fine by reprojection and
+    # threw the tracked point by centimetres, so neither is advisory.
+    problems = []
+    if not result["bundle"]["success"]:
+        problems.append(
+            f"the bundle did not converge within {result['bundle']['budget']} "
+            "evaluations, so some tags are left wherever the solve stopped"
+        )
+    if result["agreement"]["median_mm"] > AGREEMENT_LIMIT_MM:
+        problems.append(
+            f"the tags disagree about the tracked point by "
+            f"{result['agreement']['median_mm']:.1f} mm "
+            f"(limit {AGREEMENT_LIMIT_MM:.0f} mm), so the reported position will "
+            "jump as the visible set changes"
+        )
+    if problems and not args.force:
+        print("\n[CALIB] NOT WRITING the calibration:")
+        for problem in problems:
+            print(f"  - {problem}")
+        print(
+            f"  Nothing was changed; {args.out.name} still holds the previous "
+            "calibration. Re-record with more even coverage of the weak tags, or "
+            "pass --force to write it anyway."
+        )
+        raise SystemExit(1)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     write_toml(
