@@ -8,5 +8,6 @@
     "sync_chip": "gpiochip4",
     "sync_pin": "PIN_11",
     "recording_fps": 30,
-    "recording_chunk_frames": 900
+    "recording_chunk_frames": 900,
+    "recording_scale": 0.5
 }

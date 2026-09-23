@@ -379,6 +379,10 @@ class TrackerClass:
         # An hour at 30 Hz is 110 GB per camera; 900 frames is 30 s and ~0.9 GB,
         # which copies and resumes sanely. 0 disables rotation.
         self.recording_chunk = int(settings.get("recording_chunk_frames", 900))
+        # 1.0 keeps the sensor's 1280x800. 0.5 quarters the storage but cost
+        # 37% of the tag detections when measured, so it suits recordings kept
+        # for review rather than for re-running the analysis.
+        self.recording_scale = float(settings.get("recording_scale", 1.0))
         self.recorder: Optional[FrameRecorder] = None
         self._sync_chip = settings.get("sync_chip", "gpiochip4")
         self._sync_pin = settings.get("sync_pin", "PIN_11")
@@ -726,6 +730,7 @@ class TrackerClass:
             sync_pin=self._sync_pin,
             target_hz=self.recording_hz,
             chunk_frames=self.recording_chunk,
+            scale=self.recording_scale,
         )
 
     def _stop_session_recording(self) -> None:

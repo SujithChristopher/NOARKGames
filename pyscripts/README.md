@@ -346,6 +346,29 @@ found without opening any of them:
 Reading chunks in order reconstructs the timeline exactly — measured across a
 boundary, the interval was 33.26 ms, indistinguishable from any other frame.
 
+### Resolution
+
+`recording_scale` (default 1.0) downscales what is written; 0.5 gives 640x400
+and quarters the storage. Unlike the chunking or any compression, **this is
+irreversible** — it is not a smaller encoding of the same data, it is less data.
+
+Measured on 300 real frames, comparing the same frames at both resolutions:
+
+| | tags/frame | tag size |
+|---|---|---|
+| 1280x800 | 3.81 | 71.4 px |
+| 640x400 | 2.40 | 44.0 px |
+
+Half resolution detects **37% fewer tags**, and the pose from those frames
+differs from the full-resolution pose by 8.45 mm median — largely because a
+different tag subset is a different answer.
+
+So: full resolution if the recordings are for re-running the analysis offline,
+half if they are for review. The scale is written into `metadata.json`, since a
+reader needs it to scale the camera matrix and cannot infer it afterwards.
+
+Storage per hour, both cameras at 30 Hz: **110 GB** at 1.0, **27.5 GB** at 0.5.
+
 ### Sync line
 
 The mocap trigger is read from the 40-pin header — `gpiochip4`, `PIN_11`
