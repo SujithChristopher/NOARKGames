@@ -1117,7 +1117,7 @@ if __name__ == "__main__":
                              "Keep it a multiple of the mains half-period "
                              "(10000 at 50 Hz, 8333 at 60 Hz) or the image "
                              "pulses in brightness frame to frame.")
-    parser.add_argument("--gain", type=float, default=3.0,
+    parser.add_argument("--gain", type=float, default=None,
                         help="Analogue gain 1.0-16.0, overriding device.toml. "
                              "Raise exposure first where the motion allows: gain "
                              "amplifies the noise that corner accuracy depends on.")

@@ -41,16 +41,14 @@ offset_m = [0.00, 0.01, -0.069]
 
 [cameras]
 # Which section of sterio_calibration.toml describes each camera, in the order
-# rcam enumerates them. The stereo calibration tool labels its own cam0/cam1,
-# and that need not match the order the cameras come up in here — on this rig
-# it does not.
+# rcam enumerates them (CAM2, then CAM3 on this rig). Live paired-frame checks
+# found that the straight mapping makes stereo and cam0 poses agree within
+# about 1.3 mm median; reversing it disagreed by about 436 mm.
 #
-# Getting it wrong is not a small error: a mismatched extrinsic put 370 mm of
-# jitter on a static device, against 2.4 mm for a single camera. Verify with
-#     uv run pyscripts/rigidbody_calib.py --check-cameras
-# which solves the same tag in both views and reports which mapping agrees.
-stream0 = "cam1"
-stream1 = "cam0"
+# Getting it wrong is not a small error: the stereo pose jumps as different
+# marker faces come into view.
+stream0 = "cam0"
+stream1 = "cam1"
 
 # Exposure and gain for both cameras.
 #
@@ -89,9 +87,8 @@ isp = "pisp"
 
 # Solve the pose across both cameras rather than cam0 alone.
 #
-# Only worth it with an extrinsic that describes this pair: a mismatched one
-# put 370 mm of jitter on a static device. The [cameras] stream mapping above
-# is what makes it trustworthy, and --check-cameras re-verifies it.
+# Only worth it with an extrinsic that describes this pair. The [cameras]
+# stream mapping above was checked against live paired frames.
 #
 # Measured before the ISP change, with a multi-tag body:
 #   cam0 alone   1.02 mm jitter   0.92 ms/frame
