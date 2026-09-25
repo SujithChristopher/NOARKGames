@@ -329,6 +329,38 @@ decided:
 | cam1 alone | 0.21 mm | 1.2 ms |
 | both | 0.21 mm | 5.2 ms |
 
+### The corner deadband
+
+`CornerStabilizer` holds the previous pose when the corners it was solved from
+have barely moved, so a device resting between trials costs no solve. It gates
+on *pixel* displacement, not on the 3D output, because the corner→pose map is
+nonlinear — a fraction of a pixel on a distant tag becomes large depth jitter.
+
+It is not what makes tracking smooth. Measured on a stationary device at the
+configured 1 px threshold: it froze 34.8% of frames, left the reported point
+within 0.18 mm of the unstabilized one, and did not reduce noise (0.21 mm either
+way). While the patient is actually moving it will fire close to never. What
+made tracking smooth was fixing the camera mapping, which took stereo noise from
+1.00 mm to 0.21 mm. There is no temporal filter doing it either — the tracker
+constructs `ExponentialMovingAverageFilter3D(alpha=1)`, and alpha 1 is a
+pass-through.
+
+Two things it must get right, both covered by `pyscripts/tests/test_stabilizer.py`:
+
+- **Membership, not just movement.** The pose is solved from whichever tags are
+  visible, so the set changing is a new measurement even when the tags common to
+  both held still. A tag *arriving* was always handled (no stored corners, so it
+  reads as not static); a tag *leaving* was not — it simply stopped being
+  iterated over, and a pose solved from a tag no longer in frame stayed frozen
+  for as long as the rest held still. On a body whose tags disagree by several
+  mm about the tracked point, that is a stale answer, not a harmless one.
+- **Gate only on views the solve reads.** Handing it both cameras while tracking
+  on one makes the freeze much rarer — every corner set has to hold still at
+  once — and lets noise in a camera contributing nothing decide whether to
+  recompute.
+
+`corner_deadband_px` in `settings.json` sets the threshold (default 1).
+
 ### Choosing the estimator
 
 Which fit turns the corners into a pose is selectable, because the corners are

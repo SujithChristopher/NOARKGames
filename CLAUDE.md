@@ -46,7 +46,9 @@ python pyscripts/main.py
 
 **Dependencies** (`pyproject.toml`): `opencv-contrib-python>=4.13`, `scipy>=1.17`
 
-**Architecture**: `pyscripts/main.py` detects ArUco markers via webcam, computes 3D pose with a calibration TOML file, applies exponential moving average smoothing (alpha=0.4 in `filters.py`), then UDP-streams `(net_x, net_y, net_z, net_a)` to `127.0.0.1:8000`. Godot's `GlobalScript` receives and scales these to screen coordinates.
+**Architecture**: `pyscripts/tracker.py` detects AprilTags on both cameras, solves one pose for the calibrated rigid body, and UDP-streams 11 float32s to `127.0.0.1:8000`. Godot's `GlobalScript` receives and scales these to screen coordinates.
+
+There is **no temporal smoothing**: `ExponentialMovingAverageFilter3D` is constructed with `alpha=1`, which passes the input straight through. Smoothness comes from the geometry, not from a filter — so a jitter problem is a calibration or camera-mapping problem, and reaching for a filter would only hide it. `CornerStabilizer` freezes the pose when no contributing corner has moved, which saves the solve but measured no change to noise.
 
 ## Architecture
 

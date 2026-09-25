@@ -297,14 +297,16 @@ class TrackerClass:
         # absence must not stop tracking.
         ac = toml.load(aruco_calib_path) if Path(aruco_calib_path).exists() else {}
         stream = ac.get("stream_data", {})
-        camera = ac.get("camera", {})
+        # Not `camera`: that is the constructor's camera-choice argument, and
+        # binding it here silently discarded --camera.
+        camera_section = ac.get("camera", {})
         self.udp_ip            = settings.get("udp_ip",   stream.get("ip", "127.0.0.1"))
         self.udp_port          = settings.get("udp_port", stream.get("port", 8000))
         self.display           = settings.get(
             "display", ac.get("display", {}).get("display", False)
         )
-        self._camera_model     = camera.get("model", "OV9281")
-        self._camera_fov       = camera.get("fov", 160)
+        self._camera_model     = camera_section.get("model", "OV9281")
+        self._camera_fov       = camera_section.get("fov", 160)
 
         # Refining the board pose across both cameras is the better estimator,
         # but only with an extrinsic that actually describes this pair, and it
@@ -383,13 +385,13 @@ class TrackerClass:
                 )
             elif self.stereo_refine:
                 print("[RIG] Stereo pose from the self-calibrated extrinsic.")
-            elif not self.stereo_refine:
-                # Not a limitation being worked around: measured on this rig a
-                # joint solve over one camera's tags jitters 1.02 mm against
-                # 1.19 mm for the two-camera fit, at a quarter of the cost. A
-                # multi-tag board is already well conditioned in depth, so the
-                # baseline adds little. --stereo-refine forces it on.
-                print("[RIG] Solving on cam0 alone (measured no worse than stereo, 4x cheaper).")
+            else:
+                # Not a limitation being worked around: a multi-tag board is
+                # already well conditioned in depth, so the 78 mm baseline adds
+                # little. Measured with the mapping corrected, cam1 alone was as
+                # quiet as the two-camera fit (0.21 mm) at a quarter of the cost.
+                print("[RIG] One camera is enough here; the baseline adds little "
+                      "to a multi-tag board.")
         else:
             print(
                 f"[RIG] No calibration at {rigidbody_path} — falling back to "
@@ -401,7 +403,7 @@ class TrackerClass:
         # ── Remaining state ───────────────────────────────────────────────────
         self.filter         = ExponentialMovingAverageFilter3D(alpha=1)
         self.stabilizer     = CornerStabilizer(
-            threshold_px=settings.get("corner_deadband_px", 0.25)
+            threshold_px=settings.get("corner_deadband_px", 1)
         )
         self.marker_offsets = MARKER_OFFSETS
 
@@ -683,30 +685,47 @@ class TrackerClass:
 
         # Freeze the pose while every contributing corner is static: the solve
         # is the expensive part of the frame, and a still device only produces
-        # PnP jitter. Keys are per view and per marker, so a marker appearing or
-        # leaving counts as movement and forces a fresh solve.
-        corner_sets = {f"c0_{mid}": c for mid, c in det0.items()}
-        corner_sets.update({f"c1_{mid}": c for mid, c in det1.items()})
+        # PnP jitter. Keys are per view and per marker, so the stabilizer sees
+        # a marker appear or leave as a change of measurement and re-solves.
+        #
+        # Only the views the solve actually reads are gated on. Handing it both
+        # cameras while tracking on one made the freeze markedly rarer — every
+        # corner set has to hold still at once — and let noise in a camera that
+        # contributes nothing to the answer decide whether to recompute it.
+        # Decide which views the answer comes from once, so the gate and the
+        # solve cannot drift apart. One camera: the configured one leads, and
+        # the other stands in when only it can see the body.
+        if det0 and det1 and allow_stereo and self.stereo_refine:
+            views = ("c0", "c1")
+        elif self._primary == 0:
+            views = ("c0",) if det0 else ("c1",)
+        else:
+            views = ("c1",) if det1 else ("c0",)
+
+        corner_sets = {}
+        if "c0" in views:
+            corner_sets.update({f"c0_{mid}": c for mid, c in det0.items()})
+        if "c1" in views:
+            corner_sets.update({f"c1_{mid}": c for mid, c in det1.items()})
 
         def compute():
-            if det0 and det1 and allow_stereo and self.stereo_refine:
+            if views == ("c0", "c1"):
                 rvec, tvec = self.rig.stereo_pose(
                     det0, det1, self.K0, self.D0, self.K1, self.D1,
                     self.R_st, self.T_st, self.solver,
                 )
                 if rvec is not None:
                     return rvec, tvec
-            # One camera: the configured one leads, the other stands in when
-            # only it can see the body. Either way the answer is expressed in
-            # cam0's frame, or the point jumps by the stereo baseline whenever
-            # the lead camera loses sight of the device.
-            if self._primary == 0:
-                if det0:
-                    return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
-                return self._pose_from_cam1(det1)
-            if det1:
-                return self._pose_from_cam1(det1)
-            return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+                # Stereo declined this frame; fall back to the lead camera. The
+                # gate covered both views, which only costs an extra solve.
+                return (self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+                        if self._primary == 0 else self._pose_from_cam1(det1))
+            # A single-camera answer still comes back in cam0's frame, or the
+            # point jumps by the stereo baseline whenever the lead camera loses
+            # sight of the device.
+            if views == ("c0",):
+                return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+            return self._pose_from_cam1(det1)
 
         return self.stabilizer.stabilize(_BOARD_KEY, corner_sets, compute)
 
