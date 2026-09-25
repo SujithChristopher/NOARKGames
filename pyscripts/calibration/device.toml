@@ -41,14 +41,22 @@ offset_m = [0.00, 0.01, -0.069]
 
 [cameras]
 # Which section of sterio_calibration.toml describes each camera, in the order
-# rcam enumerates them (CAM2, then CAM3 on this rig). Live paired-frame checks
-# found that the straight mapping makes stereo and cam0 poses agree within
-# about 1.3 mm median; reversing it disagreed by about 436 mm.
+# rcam enumerates them. That order is stable across boots — rcam sorts sensors
+# by CSI-PHY id, so stream 0 is always the CAM2 connector and stream 1 always
+# CAM3, regardless of probe order or /dev/video numbering. Only physically
+# moving a cable changes it.
 #
-# Getting it wrong is not a small error: the stereo pose jumps as different
-# marker faces come into view.
-stream0 = "cam0"
-stream1 = "cam1"
+# The stereo calibration labels its own cam0/cam1, and on this rig that
+# labelling is the REVERSE of rcam's order. Getting it wrong is not a small
+# error: the two cameras then describe the same point 141 mm apart, and the
+# stereo pose jumps as different marker faces come into view.
+#
+# Verify on live frames — it scores both mappings in one take and needs no
+# ground truth, only that both cameras agree about where the device is:
+#     uv run pyscripts/bench_cameras.py --seconds 20
+# Measured on this rig: this mapping 3.1 mm median, the other 140.9 mm.
+stream0 = "cam1"
+stream1 = "cam0"
 
 # Exposure and gain for both cameras.
 #
@@ -65,7 +73,7 @@ stream1 = "cam1"
 #
 # The calibration prints the image level it is actually getting, with a verdict.
 exposure_us = 10000
-gain = 1.0
+gain = 2.8
 
 # Raspberry Pi-style image processing, ported in rcam.isp: black level, digital
 # gain and the ov9281_mono gamma curve, folded into the Y10P unpack.

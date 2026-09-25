@@ -275,6 +275,60 @@ A useful health check: if the cam0-only and stereo poses disagree by more than a
 few mm, either the rigid body or the stereo extrinsics are wrong — on a good
 calibration they agree closely.
 
+### What the game actually uses
+
+`global_script.gd` launches `tracker.py` with **no arguments**, so a command-line
+flag cannot affect a real session. The two choices that change tracking live in
+`settings.json`, which is the only configuration the running game reads:
+
+```json
+"tracker_solver": "joint",   // or "ransac"
+"tracker_camera": "both"     // or "cam0", "cam1"
+```
+
+`device.toml` still describes the *rig* — its tags, its tip, which stereo
+section maps to which stream, exposure and ISP. These two are choices about how
+to use it, and settings.json wins over device.toml when both say something.
+Flags (`--solver`, `--camera`) override both, for bench runs.
+
+`cam0`/`cam1` are rcam's enumeration order, not the stereo calibration's labels.
+
+### Which camera mapping is right
+
+`device.toml [cameras] stream0/stream1` says which section of
+`sterio_calibration.toml` describes which stream. **On this rig the calibration's
+labelling is the reverse of rcam's order.** Getting it wrong does not degrade
+gracefully — the extrinsic is then applied along the opposite baseline:
+
+```bash
+uv run pyscripts/bench_cameras.py --seconds 20
+```
+
+It scores both mappings on the same frames and needs no ground truth, only that
+both cameras must agree about where the device is at a given instant. Measured
+on this rig:
+
+| mapping | cam0 vs cam1, same instant | stereo noise |
+|---|---|---|
+| `stream0="cam1", stream1="cam0"` | **2.8 mm** | **0.21 mm** |
+| `stream0="cam0", stream1="cam1"` | 140.7 mm | 1.00 mm |
+
+**rcam's enumeration order is stable across boots** — `rcam/topology.py` sorts
+sensors by CSI-PHY id, so stream 0 is always the CAM2 connector and stream 1
+always CAM3, independent of probe order or `/dev/video*` numbering. Only
+physically moving a cable changes it. So if tracking is suddenly noisy, the
+mapping is not something that drifted on its own; run the check to find out what
+did.
+
+The same run reports each path's noise, which is how the camera choice gets
+decided:
+
+| path | noise | pose stage |
+|---|---|---|
+| cam0 alone | 0.53 mm | 1.5 ms |
+| cam1 alone | 0.21 mm | 1.2 ms |
+| both | 0.21 mm | 5.2 ms |
+
 ### Choosing the estimator
 
 Which fit turns the corners into a pose is selectable, because the corners are

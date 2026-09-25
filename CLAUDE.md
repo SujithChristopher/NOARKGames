@@ -145,10 +145,18 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
 - Stereo refinement is off unless the calibration carries a self-calibrated
   extrinsic: with a multi-tag board it measured no better than one camera
   (1.19 mm vs 1.02 mm jitter) at four times the cost.
-- The pose estimator is selectable — `[tracking] solver` in `device.toml`, or
-  `--solver`. `joint` fits every visible corner; `ransac` uses rapidtag's
-  consensus fit and drops corners that disagree. `pyscripts/bench_solvers.py`
-  runs both on the same frames and reports their per-frame disagreement.
+- The two choices that change tracking live in `settings.json`, because
+  `global_script.gd` launches `tracker.py` with no arguments — a flag cannot
+  affect a real session. `tracker_solver` is `joint` (fit every visible corner)
+  or `ransac` (rapidtag's consensus fit, dropping corners that disagree);
+  `tracker_camera` is `both`, `cam0` or `cam1`. `device.toml` describes the rig;
+  settings.json says how to use it and wins where both speak.
+- The stereo calibration's cam0/cam1 labelling is the **reverse** of rcam's
+  enumeration on this rig, which `device.toml [cameras]` corrects. rcam's order
+  is stable across boots (sorted by CSI-PHY id), so it never drifts on its own —
+  but a wrong mapping costs 141 mm of camera-to-camera disagreement, not a few.
+  `pyscripts/bench_cameras.py` scores both mappings on one take;
+  `pyscripts/bench_solvers.py` does the same for the two solvers.
 
 See `pyscripts/README.md` for the calibration workflow.
 

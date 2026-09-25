@@ -224,6 +224,17 @@ def _stereo_pnp(
     return rvec_init.flatten(), t_init.flatten()
 
 
+# Which cameras the board pose is solved from, and how each reads at startup.
+# "cam0"/"cam1" are rcam's enumeration order (stream 0 is the CAM2 connector on
+# this board), not the stereo calibration's labels — device.toml [cameras] maps
+# between the two.
+_CAMERA_CHOICES = {
+    "both": "both, fitted together",
+    "cam0": "stream 0 alone",
+    "cam1": "stream 1 alone",
+}
+
+
 class StartupAborted(Exception):
     """Godot asked to quit while the cameras were still coming up."""
 
@@ -241,6 +252,7 @@ class TrackerClass:
         flip_frames: bool = True,
         stereo_refine: Optional[bool] = None,
         solver: Optional[str] = None,
+        camera: Optional[str] = None,
         frame_sync: bool = True,
         phase_tol_us: float = 200.0,
         resync_every_s: float = 5.0,
@@ -311,21 +323,43 @@ class TrackerClass:
         # one joint PnP for the whole body; without a calibration we fall back
         # to averaging each tag's hand-measured offset independently.
         self.rig = RigidBody.load(rigidbody_path)
-        # Precedence: the command line, then device.toml, then "only when the
-        # calibration brought its own extrinsic".
         have_refit = self.rig is not None and self.rig.stereo is not None
-        configured = device["stereo_pose"]
-        if stereo_refine is not None:
-            self.stereo_refine = stereo_refine
-        elif configured is not None:
-            self.stereo_refine = bool(configured)
-        else:
-            self.stereo_refine = have_refit
-        # Same precedence for the estimator: command line, device.toml, default.
-        self.solver = solver or device["solver"] or "joint"
+
+        # Which cameras the pose is solved from, and by which estimator.
+        #
+        # Both live in settings.json, because that is the only file the Godot
+        # app reads and the only one that reaches the tracker when the game
+        # launches it — global_script.gd runs tracker.py with no arguments, so a
+        # knob that exists only on the command line cannot affect a real
+        # session. device.toml keeps the *rig's* description; these two are
+        # choices about how to use it.
+        #
+        # Precedence throughout: command line, settings.json, device.toml,
+        # then the built-in default.
+        self.camera_choice = (
+            camera
+            or (settings.get("tracker_camera") or "").strip().lower()
+            or self._camera_default(stereo_refine, device["stereo_pose"], have_refit)
+        )
+        if self.camera_choice not in _CAMERA_CHOICES:
+            raise SystemExit(
+                f"Unknown tracker_camera {self.camera_choice!r}; "
+                f"expected one of {', '.join(_CAMERA_CHOICES)}"
+            )
+        self.stereo_refine = self.camera_choice == "both"
+        # Which single stream leads when only one is used, and when the other
+        # is the only one that can see the device.
+        self._primary = 1 if self.camera_choice == "cam1" else 0
+
+        self.solver = (
+            solver
+            or (settings.get("tracker_solver") or "").strip().lower()
+            or device["solver"]
+            or "joint"
+        )
         if self.solver not in RigidBody.POSE_SOLVERS:
             raise SystemExit(
-                f"Unknown pose solver {self.solver!r}; "
+                f"Unknown tracker_solver {self.solver!r}; "
                 f"expected one of {', '.join(RigidBody.POSE_SOLVERS)}"
             )
         if self.rig is not None and self.rig.stereo is not None:
@@ -340,6 +374,7 @@ class TrackerClass:
                 print("[RIG] Pose solver: rapidtag RANSAC (rejects disagreeing corners).")
             else:
                 print("[RIG] Pose solver: joint PnP over every visible corner.")
+            print(f"[RIG] Cameras: {_CAMERA_CHOICES[self.camera_choice]}")
             if self.stereo_refine and not have_refit:
                 print(
                     "[RIG] Stereo pose from the calibration file's extrinsic "
@@ -661,16 +696,42 @@ class TrackerClass:
                 )
                 if rvec is not None:
                     return rvec, tvec
-            if det0:
-                return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
-            rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1, self.solver)
-            if rvec is None:
-                return None, None
-            # cam1-only: re-express in cam0's frame, or the point jumps by the
-            # stereo baseline whenever cam0 loses sight of the body.
-            return self.rig.pose_in_cam1_frame(rvec, tvec, self.R_st, self.T_st)
+            # One camera: the configured one leads, the other stands in when
+            # only it can see the body. Either way the answer is expressed in
+            # cam0's frame, or the point jumps by the stereo baseline whenever
+            # the lead camera loses sight of the device.
+            if self._primary == 0:
+                if det0:
+                    return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+                return self._pose_from_cam1(det1)
+            if det1:
+                return self._pose_from_cam1(det1)
+            return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
 
         return self.stabilizer.stabilize(_BOARD_KEY, corner_sets, compute)
+
+    def _pose_from_cam1(self, det1: dict):
+        """cam1's own solve, carried into cam0's frame."""
+        rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1, self.solver)
+        if rvec is None:
+            return None, None
+        return self.rig.pose_in_cam1_frame(rvec, tvec, self.R_st, self.T_st)
+
+    @staticmethod
+    def _camera_default(stereo_refine, configured, have_refit) -> str:
+        """The camera choice when neither the command line nor settings.json says.
+
+        Preserves what the older booleans meant, so a rig configured before
+        `tracker_camera` existed keeps behaving the same: --stereo-refine, then
+        device.toml's stereo_pose, then "only when the calibration brought its
+        own extrinsic" — since a stereo fit against the wrong extrinsic is far
+        worse than one camera on its own.
+        """
+        if stereo_refine is not None:
+            return "both" if stereo_refine else "cam0"
+        if configured is not None:
+            return "both" if configured else "cam0"
+        return "both" if have_refit else "cam0"
 
     @staticmethod
     def _detections_by_id(corners, ids) -> dict:
@@ -957,6 +1018,9 @@ if __name__ == "__main__":
                              "to on only when the calibration carries a "
                              "self-calibrated stereo extrinsic, since a wrong one "
                              "is far worse than using a single camera.")
+    parser.add_argument("--camera", choices=sorted(_CAMERA_CHOICES), default=None,
+                        help="Which cameras the pose is solved from. Defaults to "
+                             "settings.json tracker_camera.")
     parser.add_argument("--solver", choices=RigidBody.POSE_SOLVERS, default=None,
                         help="How the board pose is estimated from the visible "
                              "corners: 'joint' fits all of them, 'ransac' uses "
@@ -999,6 +1063,7 @@ if __name__ == "__main__":
             device_path=_SCRIPT_DIR / "calibration" / "device.toml",
             stereo_refine=args.stereo_refine,
             solver=args.solver,
+            camera=args.camera,
             settings=settings,
             record_frames=args.record,
             fps_value=args.fps,
