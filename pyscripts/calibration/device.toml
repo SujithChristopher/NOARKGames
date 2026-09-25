@@ -97,3 +97,19 @@ isp = "pisp"
 # adds little - the gain is largest for a single tag. Left true to be measured
 # in the game; set false to fall back to one camera.
 stereo_pose = true
+
+[tracking]
+# How a frame's corners become one board pose.
+#
+#   "joint"   fit every visible corner at once, trusting all of them equally
+#   "ransac"  rapidtag's consensus fit: sample, score, keep the corners that
+#             agree, refit on those
+#
+# RANSAC is the right tool when some correspondences are simply wrong — a
+# misread tag, a corner the detector placed on the wrong edge. It is the wrong
+# tool for *small* disagreement spread evenly across every tag, which is what a
+# calibration with 7 mm per-tag agreement produces: there it keeps rejecting
+# honest measurements, and the reported point shifts each time the kept set
+# changes. Measure before switching:
+#     uv run pyscripts/bench_solvers.py --seconds 20
+solver = "joint"

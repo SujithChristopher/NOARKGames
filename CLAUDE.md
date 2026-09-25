@@ -145,6 +145,10 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
 - Stereo refinement is off unless the calibration carries a self-calibrated
   extrinsic: with a multi-tag board it measured no better than one camera
   (1.19 mm vs 1.02 mm jitter) at four times the cost.
+- The pose estimator is selectable — `[tracking] solver` in `device.toml`, or
+  `--solver`. `joint` fits every visible corner; `ransac` uses rapidtag's
+  consensus fit and drops corners that disagree. `pyscripts/bench_solvers.py`
+  runs both on the same frames and reports their per-frame disagreement.
 
 See `pyscripts/README.md` for the calibration workflow.
 

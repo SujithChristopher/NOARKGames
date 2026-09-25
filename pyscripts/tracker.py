@@ -240,6 +240,7 @@ class TrackerClass:
         fps_value: Optional[int] = None,
         flip_frames: bool = True,
         stereo_refine: Optional[bool] = None,
+        solver: Optional[str] = None,
         frame_sync: bool = True,
         phase_tol_us: float = 200.0,
         resync_every_s: float = 5.0,
@@ -320,6 +321,13 @@ class TrackerClass:
             self.stereo_refine = bool(configured)
         else:
             self.stereo_refine = have_refit
+        # Same precedence for the estimator: command line, device.toml, default.
+        self.solver = solver or device["solver"] or "joint"
+        if self.solver not in RigidBody.POSE_SOLVERS:
+            raise SystemExit(
+                f"Unknown pose solver {self.solver!r}; "
+                f"expected one of {', '.join(RigidBody.POSE_SOLVERS)}"
+            )
         if self.rig is not None and self.rig.stereo is not None:
             # Measured against this rig, with these cameras, in this order.
             self.R_st, self.T_st = self.rig.stereo
@@ -328,6 +336,10 @@ class TrackerClass:
                   "(device.toml [cameras])")
         if self.rig is not None:
             print(f"[RIG] Calibrated body: {self.rig.describe()}")
+            if self.solver == "ransac":
+                print("[RIG] Pose solver: rapidtag RANSAC (rejects disagreeing corners).")
+            else:
+                print("[RIG] Pose solver: joint PnP over every visible corner.")
             if self.stereo_refine and not have_refit:
                 print(
                     "[RIG] Stereo pose from the calibration file's extrinsic "
@@ -645,13 +657,13 @@ class TrackerClass:
             if det0 and det1 and allow_stereo and self.stereo_refine:
                 rvec, tvec = self.rig.stereo_pose(
                     det0, det1, self.K0, self.D0, self.K1, self.D1,
-                    self.R_st, self.T_st,
+                    self.R_st, self.T_st, self.solver,
                 )
                 if rvec is not None:
                     return rvec, tvec
             if det0:
-                return self.rig.mono_pose(det0, self.K0, self.D0)
-            rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1)
+                return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+            rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1, self.solver)
             if rvec is None:
                 return None, None
             # cam1-only: re-express in cam0's frame, or the point jumps by the
@@ -945,6 +957,11 @@ if __name__ == "__main__":
                              "to on only when the calibration carries a "
                              "self-calibrated stereo extrinsic, since a wrong one "
                              "is far worse than using a single camera.")
+    parser.add_argument("--solver", choices=RigidBody.POSE_SOLVERS, default=None,
+                        help="How the board pose is estimated from the visible "
+                             "corners: 'joint' fits all of them, 'ransac' uses "
+                             "rapidtag's consensus fit and drops corners that "
+                             "disagree. Defaults to device.toml [tracking] solver.")
     parser.add_argument("--rigidbody", type=Path,
                         default=_SCRIPT_DIR / "calibration" / "rigidbody.toml",
                         help="Calibrated marker geometry from rigidbody_calib.py. "
@@ -981,6 +998,7 @@ if __name__ == "__main__":
             rigidbody_path=args.rigidbody,
             device_path=_SCRIPT_DIR / "calibration" / "device.toml",
             stereo_refine=args.stereo_refine,
+            solver=args.solver,
             settings=settings,
             record_frames=args.record,
             fps_value=args.fps,

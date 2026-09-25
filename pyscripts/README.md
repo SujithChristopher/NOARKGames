@@ -275,6 +275,62 @@ A useful health check: if the cam0-only and stereo poses disagree by more than a
 few mm, either the rigid body or the stereo extrinsics are wrong — on a good
 calibration they agree closely.
 
+### Choosing the estimator
+
+Which fit turns the corners into a pose is selectable, because the corners are
+not all equally trustworthy and it is not obvious in advance whether throwing
+some away helps:
+
+| | |
+|---|---|
+| `joint` | seed from the best single tag, then one OpenCV `ITERATIVE` PnP over every visible corner. All corners trusted equally. |
+| `ransac` | rapidtag's `estimate_rigid_body_pose`: RANSAC over the same corners, drop the ones the consensus disagrees with, refit on the rest. Rust, not Python. |
+
+Set it in `device.toml` under `[tracking]`, or override per run:
+
+```bash
+.venv/bin/python pyscripts/tracker.py --solver ransac
+```
+
+Measure before switching — both solvers run on identical frames, so the
+comparison is exact:
+
+```bash
+uv run pyscripts/bench_solvers.py --seconds 20            # as configured
+uv run pyscripts/bench_solvers.py --seconds 20 --no-stereo
+```
+
+The bench reports noise as the frame-to-frame residual after removing constant
+velocity, not as spread about the take's mean, so a device that drifts during
+the take does not read as estimator error. It also reports the two solvers'
+**per-frame disagreement**, which is immune to movement entirely: the same
+corners went into both.
+
+Measured on this rig, 8 tags, 20 s takes:
+
+| | joint | ransac |
+|---|---|---|
+| cam0 only — noise | 1.40 mm | 1.30 mm |
+| cam0 only — pose stage | 4.94 ms | 2.05 ms |
+| stereo — noise | 5.70 mm | 5.70 mm |
+| stereo — pose stage | 17.48 ms | 12.62 ms |
+
+Two things to read out of that. RANSAC is consistently the cheaper of the two —
+the Python seed loop it replaces runs an IPPE solve and a fisheye projection per
+visible tag. And with stereo refinement on it makes no difference to the answer
+at all (median disagreement 0.016 mm): the cross-camera least-squares fit
+converges to the same pose whichever seed it starts from, so there the solver
+choice buys time and nothing else.
+
+Where it does change the answer is cam0-only, and only modestly: it dropped a
+tag in 40 of 484 frames and came out 7% quieter. That is a smaller effect than
+it sounds, because the calibration's own per-tag agreement is ~7 mm — RANSAC has
+plenty to reject and rejecting *moves* the solution, which is why an earlier
+hand-rolled rejection experiment in this pipeline made jitter worse rather than
+better. RANSAC earns its keep against a tag that is genuinely misplaced, which
+`pyscripts/tests/test_ransac_synth.py` confirms: displace one tag by 30 mm and
+the joint fit's tip error goes to 41 mm while RANSAC stays at 0.5 mm.
+
 ## Session recording
 
 With `"recording": true` in `settings.json` the tracker also writes both

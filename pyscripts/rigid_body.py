@@ -21,6 +21,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
+import rapidtag
 import toml
 from scipy.optimize import least_squares
 
@@ -71,12 +72,16 @@ def load_device(path: Path) -> dict:
             "gain": 1.0,
             "isp": None,
             "stereo_pose": None,
+            "solver": None,
         }
     data = toml.load(path)
     device = data.get("device", {})
     tip = data.get("tip", {})
     cameras = data.get("cameras", {})
+    tracking = data.get("tracking", {})
     return {
+        # Which estimator turns corners into a board pose: see RigidBody.POSE_SOLVERS.
+        "solver": (tracking.get("solver") or "").strip().lower() or None,
         "camera_order": (
             cameras.get("stream0", "cam0"),
             cameras.get("stream1", "cam1"),
@@ -136,6 +141,22 @@ def stereo_extrinsic(path: Path, order=("cam0", "cam1")):
 class RigidBody:
     """Every tag's corners in the reference tag's frame, as one point cloud."""
 
+    #: Estimators `mono_pose` can dispatch to.
+    #:
+    #: "joint"  — seed from the best single tag, then one OpenCV ITERATIVE PnP
+    #:            over every visible corner. Every corner is trusted equally.
+    #: "ransac" — rapidtag's `estimate_rigid_body_pose`: RANSAC over the same
+    #:            corners, dropping ones the consensus disagrees with, then a
+    #:            refit on the inliers.
+    #:
+    #: The trade is not obvious in advance. RANSAC protects against a tag whose
+    #: calibrated place on the body is wrong, or a corner the detector put in
+    #: the wrong spot — but the calibration's own per-tag disagreement is
+    #: ~7 mm median, so it has plenty to reject, and dropping a tag *moves* the
+    #: solution. An earlier experiment with hand-rolled rejection in this
+    #: pipeline made jitter worse (1.57 -> 1.94 mm) for exactly that reason.
+    POSE_SOLVERS = ("joint", "ransac")
+
     def __init__(self, reference_id: int, transforms: dict, tip_ref: np.ndarray,
                  meta: dict, stereo: Optional[tuple] = None):
         self.reference_id = reference_id
@@ -146,13 +167,22 @@ class RigidBody:
         self.stereo = stereo
         self.tip_ref = np.asarray(tip_ref, dtype=np.float64).reshape(3)
         self.meta = meta
+        # The printed size the geometry was solved at. Taken from the
+        # calibration rather than the module default so a body measured with a
+        # different tag size still reprojects correctly.
+        self.tag_size_m = float(meta.get("tag_size_m", TAG_SIZE_M))
+        self.marker_pts = tag_corners(self.tag_size_m)
         # marker id -> (rotation, translation) mapping that tag's frame into the
         # reference tag's frame.
         self.transforms = transforms
         self.corners_reference = {
-            mid: MARKER_PTS @ R.T + t for mid, (R, t) in transforms.items()
+            mid: self.marker_pts @ R.T + t for mid, (R, t) in transforms.items()
         }
         self.marker_ids = tuple(sorted(transforms))
+        # rapidtag's view of the same geometry, built on first use.
+        self._rapid_body = None
+        # Which tags the last RANSAC solve kept, for diagnostics.
+        self.last_ransac = None
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -232,7 +262,7 @@ class RigidBody:
                 corners.reshape(-1, 1, 2), K, D, P=K
             ).reshape(4, 2)
             solutions = cv2.solvePnPGeneric(
-                MARKER_PTS, und, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE
+                self.marker_pts, und, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
             if not solutions[0]:
                 continue
@@ -255,8 +285,78 @@ class RigidBody:
                     best = (rmse, cv2.Rodrigues(R_board)[0], t_board.reshape(3, 1))
         return None if best is None else (best[1], best[2])
 
-    def mono_pose(self, detections: dict, K, D):
-        """One joint PnP over every visible corner in a single camera."""
+    def _rapidtag_body(self):
+        """The same geometry handed to rapidtag, built once and reused.
+
+        rapidtag derives each tag's corners from `tag_size_m` itself, using the
+        same TL/TR/BR/BL order and the same
+        `p_reference = R p_marker + t` convention this module writes, so the
+        calibration transfers across unchanged.
+        """
+        if self._rapid_body is None:
+            ids = list(self.marker_ids)
+            self._rapid_body = rapidtag.RigidBody(
+                self.tag_size_m,
+                ids,
+                [self.transforms[mid][0].tolist() for mid in ids],
+                [self.transforms[mid][1].reshape(3).tolist() for mid in ids],
+            )
+        return self._rapid_body
+
+    def ransac_pose(self, detections: dict, K, D, iterations: int = 100,
+                    reprojection_error: float = 3.0, seed: int = 0):
+        """rapidtag's RANSAC pose over every visible corner in one camera.
+
+        The corners are fisheye-undistorted into pinhole space first and
+        rapidtag is handed zero distortion, because it models OpenCV's plumb-bob
+        coefficients and these cameras are calibrated with the fisheye model —
+        passing the fisheye coefficients straight through would silently apply
+        the wrong lens.
+
+        `seed` is fixed rather than drawn per frame so the same corners always
+        produce the same pose; a re-randomised RANSAC would add jitter of its
+        own on a device that is not moving.
+
+        Returns (rvec, tvec) in the camera's frame, matching `mono_pose`, and
+        stashes the last inlier report in `self.last_ransac` for diagnostics.
+        """
+        self.last_ransac = None
+        ids, corners = [], []
+        for mid, points in detections.items():
+            if mid not in self.transforms:
+                continue
+            undistorted = cv2.fisheye.undistortPoints(
+                np.asarray(points, dtype=np.float64).reshape(-1, 1, 2), K, D, P=K
+            ).reshape(4, 2)
+            ids.append(int(mid))
+            corners.append(undistorted.tolist())
+        if not ids:
+            return None, None
+
+        pose = rapidtag.estimate_rigid_body_pose(
+            corners, ids, self._rapidtag_body(), K.tolist(), None,
+            iterations=iterations, reprojection_error=reprojection_error,
+            seed=seed,
+        )
+        if pose is None:
+            return None, None
+        tvec = np.asarray(pose.tvec, dtype=np.float64)
+        if tvec[2] <= 0:
+            return None, None
+        self.last_ransac = {
+            "used": list(pose.used_marker_ids),
+            "inliers": list(pose.inlier_marker_ids),
+            "rmse_px": float(pose.reprojection_rmse),
+        }
+        return np.asarray(pose.rvec, dtype=np.float64), tvec
+
+    def mono_pose(self, detections: dict, K, D, solver: str = "joint"):
+        """One board pose from a single camera, by whichever estimator is asked.
+
+        See POSE_SOLVERS for what the choice actually changes.
+        """
+        if solver == "ransac":
+            return self.ransac_pose(detections, K, D)
         stacked = self._stack(detections)
         if stacked is None:
             return None, None
@@ -279,12 +379,15 @@ class RigidBody:
             return None, None
         return rvec.flatten(), tvec.flatten()
 
-    def stereo_pose(self, det0: dict, det1: dict, K0, D0, K1, D1, R_st, T_st):
+    def stereo_pose(self, det0: dict, det1: dict, K0, D0, K1, D1, R_st, T_st,
+                    solver: str = "joint"):
         """One pose minimising corner reprojection in both cameras at once.
 
         The cross-baseline constraint is what tightens depth, so both images are
         fitted together rather than averaging two independent single-camera
-        poses. Seeded from the cam0 solve.
+        poses. Seeded from the cam0 solve, by whichever solver is in use — the
+        refinement itself is the same least-squares fit either way, so the
+        solver choice reaches the stereo path only through that seed.
         """
         stacked0 = self._stack(det0)
         stacked1 = self._stack(det1)
@@ -293,7 +396,7 @@ class RigidBody:
         object0, image0, _ = stacked0
         object1, image1, _ = stacked1
 
-        seed_rvec, seed_tvec = self.mono_pose(det0, K0, D0)
+        seed_rvec, seed_tvec = self.mono_pose(det0, K0, D0, solver)
         if seed_rvec is None:
             return None, None
 

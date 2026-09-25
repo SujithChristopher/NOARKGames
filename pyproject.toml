@@ -14,9 +14,12 @@ dependencies = [
 	"rcam",
 	"maturin>=1.14.1",
 	"locus-tag>=0.6.0",
-	"rapidtag>=0.1.4",
+	"rapidtag>=0.1.7",
 	"msgpack>=1.0",
 	"msgpack-numpy>=0.4.8",
+	# Optional at runtime (frame_recorder degrades to a zero sync column without
+	# it), but declared so `uv sync` stops pruning it.
+	"gpiod>=2.5",
 ]
 
 [tool.uv.sources]
