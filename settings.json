@@ -4,7 +4,7 @@
     "display": false,
     "tracker_cpus": "4-7",
     "game_cpus": "0-3",
-    "tracker_solver": "ransac",
+    "tracker_solver": "joint",
     "tracker_camera": "both",
     "recording": true,
     "sync_chip": "gpiochip4",

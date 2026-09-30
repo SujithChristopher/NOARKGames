@@ -208,8 +208,15 @@ func network_thread() -> void:
 			break
 
 
+signal tracker_config_applied(text: String)
+
+
 func handle_udp_packet() -> void:
 	var packet    = udp.get_packet()
+	# Text ack from the tracker for a CFG command (position packets are 44 bytes).
+	if packet.size() != 44 and packet.slice(0, 4).get_string_from_ascii() == "CFG:":
+		tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
+		return
 	var my_floats = PackedByteArray(packet).to_float32_array()
 	udp.put_packet(_outgoing_message.to_utf8_buffer())
 	_apply_position_packet(my_floats)
@@ -558,6 +565,11 @@ func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 
 	scaled_network_position   = Vector2(scaled_x, scaled_z)
 	scaled_network_position3D = Vector2(scaled_x, scaled_y)
+
+
+# Live tracker tuning (tracker.py _apply_config). Datagrams are capped at 30 bytes.
+func send_tracker_config(key: String, value: String) -> void:
+	_send_transport_message("CFG:%s=%s" % [key, value])
 
 
 # ── transport send ────────────────────────────────────────────────────────────

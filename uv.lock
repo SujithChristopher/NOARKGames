@@ -456,7 +456,7 @@ requires-dist = [
     { name = "msgpack", specifier = ">=1.0" },
     { name = "msgpack-numpy", specifier = ">=0.4.8" },
     { name = "opencv-contrib-python", specifier = ">=4.13.0.92" },
-    { name = "rapidtag", specifier = ">=0.1.7" },
+    { name = "rapidtag", specifier = ">=0.1.10" },
     { name = "rcam", editable = "../rcam" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "simplepyble", specifier = ">=0.12.1" },
@@ -796,17 +796,17 @@ wheels = [
 
 [[package]]
 name = "rapidtag"
-version = "0.1.7"
+version = "0.1.10"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1f/0a/2f577b09dc782b85e8d718825794fa58ee6aaef4421e73b0f0d7b43b360a/rapidtag-0.1.7.tar.gz", hash = "sha256:6d9b1df337672a9edecb2590b5ae80584c7bcf7028a6a4930b9659b78f3ed7b4", size = 1038432, upload-time = "2026-09-25T08:45:28.002Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/d2/27b882c3d71944fb91c914e7cc6d408ba91c9005269a70a9101519001a8e/rapidtag-0.1.10.tar.gz", hash = "sha256:8546aaf19899404b14fdc0a99c579ef900d474ed9120f7b289f780392078355e", size = 1054992, upload-time = "2026-09-30T08:08:42.143Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/91/b3833818a1a2d2fef238f5178dfe84631bad15ba957ee44dd4f7bd08e644/rapidtag-0.1.7-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:09943d04ed5117af0f26e1172ba75948885773004555549f9312b12f009614e6", size = 688279, upload-time = "2026-09-25T08:45:15.352Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/ab/25843efd46cb61ce24cc0a189e7edb562acbd5928aee00e3e765d0faa24b/rapidtag-0.1.7-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:956634ab11309f0b231fb4df90fda9beedefd974b5eaa52533fe1aaa7e7c2666", size = 664739, upload-time = "2026-09-25T08:45:17.389Z" },
-    { url = "https://files.pythonhosted.org/packages/30/77/0b560383bcf1db202b128ea6a4c0731464e15f5976883db292f3adbc10b6/rapidtag-0.1.7-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4a60724a56d04f82377d16dc06f52d94d7b3fd12ea2299533301f162cdd2dd44", size = 712254, upload-time = "2026-09-25T08:45:19.612Z" },
-    { url = "https://files.pythonhosted.org/packages/21/ce/e90d29cbc8ad9db16266c7bcc6a4cfd0f251ed9ad1faefcdeb3597e7a027/rapidtag-0.1.7-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a4c773d3bc4dd0d5bbda33959db0a4cfa5232072d8ae8f41d3044ac0d75f9f82", size = 733014, upload-time = "2026-09-25T08:45:21.49Z" },
-    { url = "https://files.pythonhosted.org/packages/85/db/6974dddeb1e89354b964d7ee9802700092620a8c37ea5e9c5e704fdb8abf/rapidtag-0.1.7-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:51a3efeccceb0a32ce8e458200db0d2bd64709588b20dedb0d31f38ebb8c8944", size = 889804, upload-time = "2026-09-25T08:45:23.292Z" },
-    { url = "https://files.pythonhosted.org/packages/57/ba/82dede105fa21b131015855a115966b5d1191775852a7d99b1a4fa06c084/rapidtag-0.1.7-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:e7195f07cce348de83916e02b21ce9956c74212abf511b9004aea79c40f16bf1", size = 945955, upload-time = "2026-09-25T08:45:25.069Z" },
-    { url = "https://files.pythonhosted.org/packages/76/33/8c57b7a306a4a644a6aac61053c667ffaa099011983acda6a4bbf43f5252/rapidtag-0.1.7-cp39-abi3-win_amd64.whl", hash = "sha256:87fa96b9b53fa297eaf2caae6ff3f7e1094ff4146cbd866811bd920900ddc842", size = 604952, upload-time = "2026-09-25T08:45:26.478Z" },
+    { url = "https://files.pythonhosted.org/packages/68/95/0fe71c1a5401b01ccf831ef3b75593285f5cd4d481b0a93378f199160b78/rapidtag-0.1.10-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:535c246c1e316659289685fbc7d922b672b02ad1c94317b47726fd4327267bc2", size = 758315, upload-time = "2026-09-30T08:08:31.863Z" },
+    { url = "https://files.pythonhosted.org/packages/82/07/ffb47ea8ce10ab30507c8f24a2ad3860d70d1c1bbd394fd1a3ba18466dab/rapidtag-0.1.10-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:e08cd407259f1a1f5e2f953fa4af0c9e3ee5502263e991d6b7ca6f05d01c6cb9", size = 733325, upload-time = "2026-09-30T08:08:33.352Z" },
+    { url = "https://files.pythonhosted.org/packages/11/c7/9d504a5563013fe18ac618be9e9819673775322f82978bcce5b0c9938d41/rapidtag-0.1.10-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:69bfb02d1a946e833e4d19511cefc2b0f36e24787c1a45a8df409ab93cf125f9", size = 778836, upload-time = "2026-09-30T08:08:34.868Z" },
+    { url = "https://files.pythonhosted.org/packages/74/cd/0aedbd3fcd7bd8adf99a178a1504e0c66f66c6086ab7ae383e335d19b47b/rapidtag-0.1.10-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:65d5836369bffc976a3ff8260bf86505cc23783e72ffae9ed53964f6b7391fad", size = 804942, upload-time = "2026-09-30T08:08:36.26Z" },
+    { url = "https://files.pythonhosted.org/packages/97/62/f8e1bc8776092c2aebb519503e8c8595952efac3edd86979290c5f817b68/rapidtag-0.1.10-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:7f0e7a5bf1759f7dd56f1a8fdf97292d8c4c379dcd263a95d8c7e90881f01ce6", size = 957357, upload-time = "2026-09-30T08:08:37.927Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/9a/ba987d5f40ead7b78cb1b21452ab8024b70f3e8d735256a5359fa20ed980/rapidtag-0.1.10-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:ecbe6b7803851cc72936b7569b48e82a0cfff7259c5b87dab495ba9c808ceb09", size = 1016766, upload-time = "2026-09-30T08:08:39.35Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/d7/968d28bc84e356681fbe0730b08036408da05a135d9861b1531322bc4bfc/rapidtag-0.1.10-cp39-abi3-win_amd64.whl", hash = "sha256:ab47e72fbb544cef26e0b9e5d9817eab04ed87cbf0b3064b4a07659e336442ab", size = 675668, upload-time = "2026-09-30T08:08:40.756Z" },
 ]
 
 [[package]]
@@ -829,7 +829,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "opencv-contrib-python", specifier = ">=4.13.0.92" },
     { name = "polars", specifier = ">=1.42.0" },
-    { name = "rapidtag", specifier = ">=0.1.4" },
+    { name = "rapidtag", specifier = ">=0.1.10" },
 ]
 
 [[package]]

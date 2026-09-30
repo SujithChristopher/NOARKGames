@@ -34,6 +34,12 @@ class UDPStreamer:
             return
         self._socket.sendto(struct.pack("f" * len(data), *data), self._addr)
 
+    def send_raw(self, payload: bytes) -> None:
+        """Send a non-position datagram (e.g. a CFG ack); Godot tells it by size."""
+        if self._socket is None or self._addr is None:
+            return
+        self._socket.sendto(payload, self._addr)
+
     def get_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
         if self._socket is None:

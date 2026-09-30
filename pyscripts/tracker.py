@@ -57,6 +57,17 @@ _MARKER_PTS = np.array([
     [-_L / 2, -_L / 2, 0],
 ], dtype=np.float64)
 
+# rapidtag can refine AprilTag corners itself: the fast ArUco detector finds the
+# tags, then a border-only refit runs on a small crop per tag, in parallel. It
+# matches the full-resolution AprilTag fit to 0.0001 px. Older builds lack the
+# flag, so they keep the cornerSubPix pass below.
+_DETECTOR_PARAMS = rapidtag.DetectorParameters()
+_CROP_REFINE = hasattr(_DETECTOR_PARAMS, "april_tag_refine_full_resolution")
+if _CROP_REFINE:
+    _DETECTOR_PARAMS.april_tag_refine_full_resolution = True  # corner_refinement_method stays 0
+else:
+    print("[RIG] rapidtag lacks april_tag_refine_full_resolution; using cornerSubPix.")
+
 _SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.01)
 
 # Stabilizer key for the whole-body pose, kept out of the marker-id space.
@@ -403,9 +414,11 @@ class TrackerClass:
         # ── Remaining state ───────────────────────────────────────────────────
         self.filter         = ExponentialMovingAverageFilter3D(alpha=1)
         self.stabilizer     = CornerStabilizer(
-            threshold_px=settings.get("corner_deadband_px", 1)
+            threshold_px=settings.get("corner_deadband_px", 0)  # 0 = stabilizer off: every frame is solved
         )
         self.marker_offsets = MARKER_OFFSETS
+        self.refine_mode = "crop" if _CROP_REFINE else "subpix"
+        _DETECTOR_PARAMS.april_tag_refine_full_resolution = self.refine_mode == "crop"
 
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
@@ -571,6 +584,38 @@ class TrackerClass:
     def _init_udp_socket(self) -> None:
         self.udp_streamer = UDPStreamer(ip=self.udp_ip, port=self.udp_port)
         self.udp_streamer.start()
+
+    def _apply_config(self, cmd: bytes) -> None:
+        """Live tuning from Godot: `CFG:<key>=<value>` (30-byte datagram limit).
+
+        Keys: solver (joint|ransac), refine (crop|subpix|none),
+        camera (both|cam0|cam1), deadband (px; 0 = stabilizer off).
+        Bad values are reported and ignored, never fatal mid-session.
+        """
+        try:
+            key, value = cmd[4:].decode().strip().split("=", 1)
+            if key == "solver" and value in RigidBody.POSE_SOLVERS:
+                self.solver = value
+            elif key == "refine" and value in ("crop", "subpix", "none"):
+                if value == "crop" and not _CROP_REFINE:
+                    raise ValueError("rapidtag build has no crop refine")
+                self.refine_mode = value
+                _DETECTOR_PARAMS.april_tag_refine_full_resolution = value == "crop"
+            elif key == "camera" and value in _CAMERA_CHOICES:
+                self.camera_choice = value
+                self.stereo_refine = value == "both"
+                self._primary = 1 if value == "cam1" else 0
+            elif key == "deadband":
+                self.stabilizer.threshold_px = max(0.0, float(value))
+            else:
+                raise ValueError("unknown key or value")
+        except Exception as exc:
+            print(f"[CFG] ignored {cmd!r}: {exc}")
+            return
+        print(f"[CFG] {key} = {value}")
+        # Ack so the UI can show it took effect (position packets are 44 bytes;
+        # this one is text and starts with "CFG:").
+        self.udp_streamer.send_raw(f"CFG:{key}={value}".encode())
 
     def _recv_command(self) -> bytes:
         return self.udp_streamer.get_command()
@@ -856,24 +901,36 @@ class TrackerClass:
         # given every camera's frame at once — faster than a detector call per
         # camera (see rcam/bench_rapidtag.py).
         (corners0, ids0), (corners1, ids1) = rapidtag.detect_markers_batch(
-            [raw0, raw1], _APRILTAG_DICT
+            [raw0, raw1], _APRILTAG_DICT, _DETECTOR_PARAMS
         )
         ids0 = np.array(ids0, dtype=int).reshape(-1, 1) if ids0 else None
         ids1 = np.array(ids1, dtype=int).reshape(-1, 1) if ids1 else None
         t2 = time.perf_counter()
         self._stage_time["detect"] += t2 - t1
 
-        if ids0 is not None:
-            corners0 = _refine_corners(raw0, corners0)
-        if ids1 is not None:
-            corners1 = _refine_corners(raw1, corners1)
+        if self.refine_mode == "subpix":
+            if ids0 is not None:
+                corners0 = _refine_corners(raw0, corners0)
+            if ids1 is not None:
+                corners1 = _refine_corners(raw1, corners1)
         t3 = time.perf_counter()
         self._stage_time["refine"] += t3 - t2
 
         # Poll command from Godot. STOP is latched immediately, independent of
         # marker visibility below — otherwise a STOP arriving while markers
         # are in view gets acked-and-cleared before run()'s exit check sees it.
-        cmd = self._recv_command()
+        # Drain the socket: Godot sends a datagram per position packet, so
+        # reading one per frame lets a backlog build and delays a CFG by seconds.
+        cmd = b""
+        while True:
+            nxt = self._recv_command()
+            if not nxt:
+                break
+            if nxt.startswith(b"CFG:"):
+                self._apply_config(nxt)
+                self._last_command_at = time.time()
+            else:
+                cmd = nxt
         if cmd:
             self.received_message = cmd
             self._last_command_at = time.time()
