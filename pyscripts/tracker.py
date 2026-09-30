@@ -135,11 +135,16 @@ def _pin_to_cpus(spec) -> None:
             print(f"[CPU] Could not pin: {inner}")
 
 
-def _load_settings() -> dict:
-    path = _SCRIPT_DIR.parent / "settings.json"
+# Where Godot's Settings autoload keeps the file (Linux/Windows/macOS; on Android the
+# tracker does not run). Godot passes the exact path with --settings.
+DEFAULT_SETTINGS_PATH = Path.home() / "Documents" / "NOARK" / "settings.json"
+
+
+def _load_settings(path: Path = DEFAULT_SETTINGS_PATH) -> dict:
     if path.exists():
         with open(path) as f:
             return json.load(f)
+    print(f"[RIG] No settings file at {path}; using the tracker's built-in defaults.")
     return {"debug": True}
 
 
@@ -417,7 +422,10 @@ class TrackerClass:
             threshold_px=settings.get("corner_deadband_px", 0)  # 0 = stabilizer off: every frame is solved
         )
         self.marker_offsets = MARKER_OFFSETS
-        self.refine_mode = "crop" if _CROP_REFINE else "subpix"
+        # Crop refine (rapidtag 0.1.10) gave garbage poses on this rig, so it is opt-in:
+        # settings.json tracker_refine = "crop". Default is the cornerSubPix pass.
+        want = (settings.get("tracker_refine") or "subpix").strip().lower()
+        self.refine_mode = "crop" if want == "crop" and _CROP_REFINE else "subpix"
         _DETECTOR_PARAMS.april_tag_refine_full_resolution = self.refine_mode == "crop"
 
         self.cam0     = None   # primary (tracking + display)
@@ -1080,6 +1088,8 @@ class TrackerClass:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH,
+                        help="The user settings file (default: ~/Documents/NOARK/settings.json).")
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
     parser.add_argument("--fps", type=int, default=60, choices=[15, 30, 60, 90, 100],
                          help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
@@ -1126,7 +1136,7 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S", force=True,
     )
     logging.getLogger(__name__).setLevel(logging.DEBUG)
-    settings = _load_settings()
+    settings = _load_settings(args.settings)
 
     # Before anything spawns a thread.
     _pin_to_cpus(args.cpus if args.cpus is not None else settings.get("tracker_cpus"))

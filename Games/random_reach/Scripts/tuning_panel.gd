@@ -8,7 +8,7 @@ const OPTIONS := {
 	"camera": ["both", "cam0", "cam1"],
 	"deadband": ["0", "0.5", "1", "2"],
 }
-const SETTINGS_KEYS := {"solver": "tracker_solver", "camera": "tracker_camera"}
+const SETTINGS_KEYS := {"solver": "tracker_solver", "refine": "tracker_refine", "camera": "tracker_camera"}
 
 var _box: VBoxContainer
 var _toggle: Button
@@ -17,9 +17,6 @@ var _status: Label
 
 func _ready() -> void:
 	layer = 50
-	var settings = JSON.parse_string(FileAccess.get_file_as_string("res://settings.json"))
-	if settings == null:
-		settings = {}
 
 	_toggle = Button.new()
 	_toggle.text = "Tune"
@@ -50,8 +47,8 @@ func _ready() -> void:
 		pick.focus_mode = Control.FOCUS_NONE
 		for v in OPTIONS[key]:
 			pick.add_item(v)
-		# Show what the tracker started with (settings.json); crop/0 are its defaults.
-		var start = str(settings.get(SETTINGS_KEYS.get(key, ""), ""))
+		# Show what the tracker started with (settings.json); 0 is the deadband default.
+		var start = str(Settings.get_value(SETTINGS_KEYS.get(key, ""), ""))
 		var idx = OPTIONS[key].find(start)
 		pick.select(max(idx, 0))
 		pick.item_selected.connect(func(i):

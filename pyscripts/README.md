@@ -279,7 +279,7 @@ calibration they agree closely.
 
 `global_script.gd` launches `tracker.py` with **no arguments**, so a command-line
 flag cannot affect a real session. The two choices that change tracking live in
-`settings.json`, which is the only configuration the running game reads:
+`settings.json` (`~/Documents/NOARK/settings.json`, edited from the Settings panel on the main screen), which is the only configuration the running game reads:
 
 ```json
 "tracker_solver": "joint",   // or "ransac"

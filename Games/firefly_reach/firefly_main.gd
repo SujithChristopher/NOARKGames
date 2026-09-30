@@ -11,15 +11,26 @@ extends Node
 const RoundRunner := preload("res://Games/firefly_reach/round_runner.gd")
 const ReachStore := preload("res://Games/firefly_reach/reach_store.gd")
 const Protocol := preload("res://Games/firefly_reach/protocol.gd")
+const TuningPanel := preload("res://Games/random_reach/Scripts/tuning_panel.gd")
 
 const MENU := "res://Main_screen/Scenes/select_game.tscn"
 const LEVEL_INDEX := 1   # Protocol.LEVELS[1]: the middle level
 
 var _runner: RoundRunner
 var _patient_id: String = ""
+var _prev_scale_size := Vector2i.ZERO
+var _prev_aspect := Window.CONTENT_SCALE_ASPECT_IGNORE
 
 
 func _ready() -> void:
+	# The art is authored in pixels for a 1920x1080 canvas (the project default is
+	# 1152x648, which renders it ~1.67x too big). Letterbox rather than stretch so a
+	# table circle stays a circle; both are restored in _exit_tree.
+	var root := get_tree().root
+	_prev_scale_size = root.content_scale_size
+	_prev_aspect = root.content_scale_aspect
+	root.content_scale_size = Vector2i(1920, 1080)
+	root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
 	_patient_id = "vvv" if Manager.debug else PatientDB.current_patient_id
 	_runner = RoundRunner.new()
 	_runner.config = {
@@ -31,6 +42,7 @@ func _ready() -> void:
 	_runner.finished.connect(_save_score)
 	_runner.leave.connect(_leave)
 	add_child(_runner)
+	add_child(TuningPanel.new())   # live tracker tuning: F2 or the Tune button
 
 
 func _save_score() -> void:
@@ -45,3 +57,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
 		_leave()
+
+
+func _exit_tree() -> void:
+	var root := get_tree().root
+	root.content_scale_size = _prev_scale_size
+	root.content_scale_aspect = _prev_aspect

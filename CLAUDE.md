@@ -24,7 +24,9 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Debug mode** — edit `settings.json` (a `debug.json` also exists but nothing reads it):
+**Settings** live at `{DOCUMENTS}/NOARK/settings.json`, not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). Godot passes the path to `tracker.py` with `--settings`.
+
+**Debug mode** — edit that file (a `debug.json` also exists but nothing reads it):
 ```json
 {"debug": true}   // patient ID = 'vvv', skips authentication
 {"debug": false}  // production mode
@@ -58,20 +60,21 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 
 | # | Name | Script | Purpose |
 |---|------|--------|---------|
-| 1 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Patient JSON database |
-| 2 | Manager | `Main_screen/Scripts/manager.gd` | CSV session log creation |
-| 3 | GlobalSignals | `Main_screen/Scripts/global_signals.gd` | Signal bus + shared state |
-| 4 | GlobalScript | `Main_screen/Scripts/global_script.gd` | Session/trial IDs, UDP, screen scaling |
-| 5 | SoundFx | `Main_screen/Scenes/SoundFx.tscn` | Audio management |
-| 6 | GlobalTimer | `Main_screen/Scripts/global_timer.gd` | Session-wide timer |
-| 7 | ScoreManager | `Main_screen/Scripts/score_db.gd` | High score persistence |
-| 8 | DebugSettings | `Main_screen/Scripts/debug_settings.gd` | Debug config |
-| 9 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
-| 10 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
-| 11 | GlobalTimerManager | `Main_screen/Scripts/global_timer_manager.gd` | Countdown timer with signals |
-| 12 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
-| 13 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
-| 14 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
+| 1 | Settings | `Main_screen/Scripts/settings.gd` | User settings file (must be first) |
+| 2 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Patient JSON database |
+| 3 | Manager | `Main_screen/Scripts/manager.gd` | CSV session log creation |
+| 4 | GlobalSignals | `Main_screen/Scripts/global_signals.gd` | Signal bus + shared state |
+| 5 | GlobalScript | `Main_screen/Scripts/global_script.gd` | Session/trial IDs, UDP, screen scaling |
+| 6 | SoundFx | `Main_screen/Scenes/SoundFx.tscn` | Audio management |
+| 7 | GlobalTimer | `Main_screen/Scripts/global_timer.gd` | Session-wide timer |
+| 8 | ScoreManager | `Main_screen/Scripts/score_db.gd` | High score persistence |
+| 9 | DebugSettings | `Main_screen/Scripts/debug_settings.gd` | Debug config |
+| 10 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
+| 11 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
+| 12 | GlobalTimerManager | `Main_screen/Scripts/global_timer_manager.gd` | Countdown timer with signals |
+| 13 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
+| 14 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
+| 15 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
 
 ### Data Flow
 

@@ -11,7 +11,6 @@ var Y_SCREEN_OFFSET: int
 var Y_SCREEN_OFFSET3D: int
 
 var current_score: int = 0
-var path = "res://settings.json"
 
 # 2D position scalers
 @export var PLAYER_POS_SCALER_X: int = 20 * 100
@@ -135,12 +134,11 @@ var _incoming_message: float
 
 
 func _ready() -> void:
-	var settings = JSON.parse_string(FileAccess.get_file_as_string(path))
-	debug           = settings.get("debug", false)
-	stream_type     = settings.get("stream_type", "udp")
-	ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
-	udp_port        = settings.get("udp_port", 8000)
-	_pin_to_cpus(settings.get("game_cpus", ""))
+	debug           = Settings.get_value("debug", false)
+	stream_type     = Settings.get_value("stream_type", "udp")
+	ble_device_name = Settings.get_value("ble_device_name", "NOARK_Tracker")
+	udp_port        = Settings.get_value("udp_port", 8000)
+	_pin_to_cpus(Settings.get_value("game_cpus", ""))
 
 	current_date = get_date_string()
 	load_session_info()
@@ -639,7 +637,7 @@ func python_thread() -> void:
 	if not debug:
 		var output = []
 		print("Python thread started.")
-		OS.execute(interpreter_path, [pyscript_path], output)
+		OS.execute(interpreter_path, [pyscript_path, "--settings", Settings.path], output)
 		print(output)
 	else:
 		print("Debugging…")

@@ -2,12 +2,11 @@ extends Node
 
 
 var json = JSON.new()
-var path = "res://settings.json"
 var debug:bool
 
 
 func _ready():
-    debug = JSON.parse_string(FileAccess.get_file_as_string(path))['debug']
+    debug = Settings.get_value("debug", false)
 
 func create_game_log_file(game, p_id):
 
