@@ -456,8 +456,8 @@ requires-dist = [
     { name = "msgpack", specifier = ">=1.0" },
     { name = "msgpack-numpy", specifier = ">=0.4.8" },
     { name = "opencv-contrib-python", specifier = ">=4.13.0.92" },
-    { name = "rapidtag", specifier = ">=0.1.10" },
-    { name = "rcam", editable = "../rcam" },
+    { name = "rapidtag", editable = "external/rapidtag" },
+    { name = "rcam", editable = "external/rcam" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "simplepyble", specifier = ">=0.12.1" },
     { name = "toml", specifier = ">=0.10.2" },
@@ -796,23 +796,22 @@ wheels = [
 
 [[package]]
 name = "rapidtag"
-version = "0.1.10"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f1/d2/27b882c3d71944fb91c914e7cc6d408ba91c9005269a70a9101519001a8e/rapidtag-0.1.10.tar.gz", hash = "sha256:8546aaf19899404b14fdc0a99c579ef900d474ed9120f7b289f780392078355e", size = 1054992, upload-time = "2026-09-30T08:08:42.143Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/95/0fe71c1a5401b01ccf831ef3b75593285f5cd4d481b0a93378f199160b78/rapidtag-0.1.10-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:535c246c1e316659289685fbc7d922b672b02ad1c94317b47726fd4327267bc2", size = 758315, upload-time = "2026-09-30T08:08:31.863Z" },
-    { url = "https://files.pythonhosted.org/packages/82/07/ffb47ea8ce10ab30507c8f24a2ad3860d70d1c1bbd394fd1a3ba18466dab/rapidtag-0.1.10-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:e08cd407259f1a1f5e2f953fa4af0c9e3ee5502263e991d6b7ca6f05d01c6cb9", size = 733325, upload-time = "2026-09-30T08:08:33.352Z" },
-    { url = "https://files.pythonhosted.org/packages/11/c7/9d504a5563013fe18ac618be9e9819673775322f82978bcce5b0c9938d41/rapidtag-0.1.10-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:69bfb02d1a946e833e4d19511cefc2b0f36e24787c1a45a8df409ab93cf125f9", size = 778836, upload-time = "2026-09-30T08:08:34.868Z" },
-    { url = "https://files.pythonhosted.org/packages/74/cd/0aedbd3fcd7bd8adf99a178a1504e0c66f66c6086ab7ae383e335d19b47b/rapidtag-0.1.10-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:65d5836369bffc976a3ff8260bf86505cc23783e72ffae9ed53964f6b7391fad", size = 804942, upload-time = "2026-09-30T08:08:36.26Z" },
-    { url = "https://files.pythonhosted.org/packages/97/62/f8e1bc8776092c2aebb519503e8c8595952efac3edd86979290c5f817b68/rapidtag-0.1.10-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:7f0e7a5bf1759f7dd56f1a8fdf97292d8c4c379dcd263a95d8c7e90881f01ce6", size = 957357, upload-time = "2026-09-30T08:08:37.927Z" },
-    { url = "https://files.pythonhosted.org/packages/1a/9a/ba987d5f40ead7b78cb1b21452ab8024b70f3e8d735256a5359fa20ed980/rapidtag-0.1.10-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:ecbe6b7803851cc72936b7569b48e82a0cfff7259c5b87dab495ba9c808ceb09", size = 1016766, upload-time = "2026-09-30T08:08:39.35Z" },
-    { url = "https://files.pythonhosted.org/packages/7b/d7/968d28bc84e356681fbe0730b08036408da05a135d9861b1531322bc4bfc/rapidtag-0.1.10-cp39-abi3-win_amd64.whl", hash = "sha256:ab47e72fbb544cef26e0b9e5d9817eab04ed87cbf0b3064b4a07659e336442ab", size = 675668, upload-time = "2026-09-30T08:08:40.756Z" },
+version = "0.1.11"
+source = { editable = "external/rapidtag" }
+
+[package.metadata]
+requires-dist = [
+    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6,<2" },
+    { name = "numpy", marker = "extra == 'dev'" },
+    { name = "opencv-contrib-python", marker = "extra == 'dev'" },
+    { name = "pytest", marker = "extra == 'dev'" },
 ]
+provides-extras = ["dev", "docs"]
 
 [[package]]
 name = "rcam"
 version = "0.1.0"
-source = { editable = "../rcam" }
+source = { editable = "external/rcam" }
 dependencies = [
     { name = "matplotlib" },
     { name = "maturin" },

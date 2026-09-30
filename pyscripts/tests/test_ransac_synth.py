@@ -110,7 +110,13 @@ for solver in ("joint", "ransac"):
           f"p95 {np.percentile(e, 95):6.2f} mm")
 print(f"  RANSAC dropped a tag in {rejections}/{frames} frames")
 
-assert np.median(dirty["ransac"]) < np.median(dirty["joint"]), (
-    "RANSAC gained nothing from a badly placed tag, which is the case it exists for"
+# The joint fit screens out tags that disagree with the consensus pose before
+# it solves (RigidBody.drop_outlier_tags), so a badly placed tag no longer
+# separates it from RANSAC. What matters is that neither is dragged off.
+assert np.median(dirty["ransac"]) <= np.median(dirty["joint"]) + 0.1, (
+    "RANSAC is worse than the joint fit on a badly placed tag"
 )
-print("\nOK — the calibration transfers, and RANSAC survives a tag the joint fit does not.")
+assert np.median(dirty["joint"]) < 2.0, (
+    "the joint fit was dragged off by a badly placed tag; outlier screening failed"
+)
+print("\nOK — the calibration transfers, and both solvers survive a tag that disagrees.")

@@ -23,4 +23,5 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-rcam = { path = "../rcam", editable = true }
+rcam = { path = "external/rcam", editable = true }
+rapidtag = { path = "external/rapidtag", editable = true }

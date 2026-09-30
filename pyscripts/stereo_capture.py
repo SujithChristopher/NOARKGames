@@ -40,6 +40,8 @@ import numpy as np
 class StereoCapture:
     """Both cameras, phase-aligned and queue-paired, as one source of frames."""
 
+    _MAX_STALE_SKIPS = 3   # at most the queue depth minus the frame being kept
+
     PHASE_WINDOW = 90   # frames of timestamp history the phase/resync fit uses
 
     def __init__(
@@ -87,6 +89,7 @@ class StereoCapture:
         # caller would have to change; the recorder reads it straight after.
         self.last_sequence = [None, None]
         self._dropped  = [0, 0]    # frames the sensors made that never arrived
+        self._stale_skipped = 0     # pairs passed over because a newer one was already queued
         self._repairs  = 0         # times the capture queues had to be re-paired
 
         self._init_cameras()
@@ -109,8 +112,14 @@ class StereoCapture:
     def repairs(self) -> int:
         return self._repairs
 
+    @property
+    def stale_skipped(self) -> int:
+        """Pairs discarded unprocessed because a newer one was already waiting."""
+        return self._stale_skipped
+
     def reset_counters(self) -> None:
         self._dropped = [0, 0]
+        self._stale_skipped = 0
         self._repairs = 0
 
     def next_pair(self):
@@ -123,6 +132,17 @@ class StereoCapture:
         not rather than silently fusing two different instants.
         """
         raw0, raw1, ts0, ts1 = self._capture_pair()
+        # Tracking a frame costs more than the sensor's frame period, so the V4L2
+        # queue fills and every frame is served 3-4 periods late (measured: 55 ms
+        # mean age on dequeue). A frame older than one period means the next one is
+        # already captured, so take that instead: latency is what matters here, not
+        # seeing every frame. Both cameras advance together, so pairing is kept.
+        for _ in range(self._MAX_STALE_SKIPS):
+            age_us = (time.monotonic_ns() - min(ts0, ts1)) / 1000.0
+            if not self._frame_period_us or age_us <= self._frame_period_us:
+                break
+            raw0, raw1, ts0, ts1 = self._capture_pair()
+            self._stale_skipped += 1
         if abs((ts1 - ts0) / 1000.0 - self._skew_baseline_us) >= 0.5 * self._frame_period_us:
             raw0, raw1, ts0, ts1 = self._catch_up(raw0, raw1, ts0, ts1)
         skew_us = (ts1 - ts0) / 1000.0

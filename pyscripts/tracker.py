@@ -1048,7 +1048,8 @@ class TrackerClass:
                     stage_ms = {k: (v / n) * 1000.0 for k, v in self._stage_time.items()}
                     print(f"[FPS] cam0: {fps:.1f}  cam1: {fps:.1f}  "
                           f"({pkt_rate:.1f} pkt/s sent, "
-                          f"{self.capture.dropped} sensor frames skipped)")
+                          f"{self.capture.dropped} sensor frames skipped, "
+                          f"{self.capture.stale_skipped} stale pairs skipped)")
                     report = self.capture.phase_report()
                     if report is not None:
                         print(f"[SYNC] phase: {report.phase_us:+.0f} µs  "

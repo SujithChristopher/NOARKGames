@@ -255,7 +255,7 @@ class RigidBody:
         transform — geometric initialisation, with no dependence on the previous
         frame.
         """
-        best = None
+        candidates = []  # (rmse, R_board, t_board, tag it came from)
         for mid in visible:
             corners = np.asarray(detections[mid], dtype=np.float64).reshape(4, 2)
             und = cv2.fisheye.undistortPoints(
@@ -281,9 +281,50 @@ class RigidBody:
                 )
                 residual = projected.reshape(4, 2) - corners
                 rmse = float(np.sqrt(np.mean(np.sum(residual**2, axis=1))))
-                if best is None or rmse < best[0]:
-                    best = (rmse, cv2.Rodrigues(R_board)[0], t_board.reshape(3, 1))
-        return None if best is None else (best[1], best[2])
+                candidates.append((rmse, R_board, t_board))
+        if not candidates:
+            self._last_inliers = []
+            return None
+
+        # A tag that decodes to the wrong id (a stray square, a reflection)
+        # lands far from where the calibration puts it. Left in, it drags the
+        # joint least-squares fit to a pose metres away, and the tag with the
+        # smallest own residual can be that very tag. So pick the pose that the
+        # most tags agree with, and let the rest be dropped by the caller.
+        def agreeing(R_board, t_board):
+            rvec_board = cv2.Rodrigues(R_board)[0]
+            ok = []
+            for mid in visible:
+                projected, _ = cv2.fisheye.projectPoints(
+                    self.corners_reference[mid].reshape(-1, 1, 3),
+                    rvec_board, t_board.reshape(3, 1), K, D,
+                )
+                err = np.sqrt(np.sum(
+                    (projected.reshape(4, 2) - np.asarray(detections[mid], dtype=np.float64).reshape(4, 2)) ** 2,
+                    axis=1)).max()
+                if err <= self.INLIER_PX:
+                    ok.append(mid)
+            return ok
+
+        scored = [(agreeing(R, t), rmse, R, t) for rmse, R, t in candidates]
+        inliers, _, R_best, t_best = max(scored, key=lambda s: (len(s[0]), -s[1]))
+        self._last_inliers = inliers
+        return cv2.Rodrigues(R_best)[0], t_best.reshape(3, 1)
+
+    # Max corner error, in pixels, for a tag to agree with a candidate pose.
+    # Normal tags sit within a few px of a single-tag seed; a misidentified one
+    # is hundreds away, so the exact value is not delicate.
+    INLIER_PX = 12.0
+
+    def drop_outlier_tags(self, detections: dict, K, D) -> dict:
+        """`detections` without the tags that disagree with the consensus pose."""
+        visible = [mid for mid in self.marker_ids if mid in detections]
+        if len(visible) < 3:
+            return detections  # two tags cannot outvote each other
+        if self._seed_pose(detections, visible, K, D) is None:
+            return detections
+        keep = set(self._last_inliers)
+        return {mid: c for mid, c in detections.items() if mid in keep or mid not in visible}
 
     def _rapidtag_body(self):
         """The same geometry handed to rapidtag, built once and reused.
@@ -350,13 +391,16 @@ class RigidBody:
         }
         return np.asarray(pose.rvec, dtype=np.float64), tvec
 
-    def mono_pose(self, detections: dict, K, D, solver: str = "joint"):
+    def mono_pose(self, detections: dict, K, D, solver: str = "joint",
+                  screened: bool = False):
         """One board pose from a single camera, by whichever estimator is asked.
 
         See POSE_SOLVERS for what the choice actually changes.
         """
         if solver == "ransac":
             return self.ransac_pose(detections, K, D)
+        if not screened:
+            detections = self.drop_outlier_tags(detections, K, D)
         stacked = self._stack(detections)
         if stacked is None:
             return None, None
@@ -389,6 +433,8 @@ class RigidBody:
         refinement itself is the same least-squares fit either way, so the
         solver choice reaches the stereo path only through that seed.
         """
+        det0 = self.drop_outlier_tags(det0, K0, D0)
+        det1 = self.drop_outlier_tags(det1, K1, D1)
         stacked0 = self._stack(det0)
         stacked1 = self._stack(det1)
         if stacked0 is None or stacked1 is None:
@@ -396,7 +442,7 @@ class RigidBody:
         object0, image0, _ = stacked0
         object1, image1, _ = stacked1
 
-        seed_rvec, seed_tvec = self.mono_pose(det0, K0, D0, solver)
+        seed_rvec, seed_tvec = self.mono_pose(det0, K0, D0, solver, screened=True)
         if seed_rvec is None:
             return None, None
 
