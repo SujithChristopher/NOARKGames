@@ -57,6 +57,17 @@ _MARKER_PTS = np.array([
     [-_L / 2, -_L / 2, 0],
 ], dtype=np.float64)
 
+# rapidtag can refine AprilTag corners itself: the fast ArUco detector finds the
+# tags, then a border-only refit runs on a small crop per tag, in parallel. It
+# matches the full-resolution AprilTag fit to 0.0001 px. Older builds lack the
+# flag, so they keep the cornerSubPix pass below.
+_DETECTOR_PARAMS = rapidtag.DetectorParameters()
+_CROP_REFINE = hasattr(_DETECTOR_PARAMS, "april_tag_refine_full_resolution")
+if _CROP_REFINE:
+    _DETECTOR_PARAMS.april_tag_refine_full_resolution = True  # corner_refinement_method stays 0
+else:
+    print("[RIG] rapidtag lacks april_tag_refine_full_resolution; using cornerSubPix.")
+
 _SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.01)
 
 # Stabilizer key for the whole-body pose, kept out of the marker-id space.
@@ -224,6 +235,17 @@ def _stereo_pnp(
     return rvec_init.flatten(), t_init.flatten()
 
 
+# Which cameras the board pose is solved from, and how each reads at startup.
+# "cam0"/"cam1" are rcam's enumeration order (stream 0 is the CAM2 connector on
+# this board), not the stereo calibration's labels — device.toml [cameras] maps
+# between the two.
+_CAMERA_CHOICES = {
+    "both": "both, fitted together",
+    "cam0": "stream 0 alone",
+    "cam1": "stream 1 alone",
+}
+
+
 class StartupAborted(Exception):
     """Godot asked to quit while the cameras were still coming up."""
 
@@ -240,6 +262,8 @@ class TrackerClass:
         fps_value: Optional[int] = None,
         flip_frames: bool = True,
         stereo_refine: Optional[bool] = None,
+        solver: Optional[str] = None,
+        camera: Optional[str] = None,
         frame_sync: bool = True,
         phase_tol_us: float = 200.0,
         resync_every_s: float = 5.0,
@@ -284,14 +308,16 @@ class TrackerClass:
         # absence must not stop tracking.
         ac = toml.load(aruco_calib_path) if Path(aruco_calib_path).exists() else {}
         stream = ac.get("stream_data", {})
-        camera = ac.get("camera", {})
+        # Not `camera`: that is the constructor's camera-choice argument, and
+        # binding it here silently discarded --camera.
+        camera_section = ac.get("camera", {})
         self.udp_ip            = settings.get("udp_ip",   stream.get("ip", "127.0.0.1"))
         self.udp_port          = settings.get("udp_port", stream.get("port", 8000))
         self.display           = settings.get(
             "display", ac.get("display", {}).get("display", False)
         )
-        self._camera_model     = camera.get("model", "OV9281")
-        self._camera_fov       = camera.get("fov", 160)
+        self._camera_model     = camera_section.get("model", "OV9281")
+        self._camera_fov       = camera_section.get("fov", 160)
 
         # Refining the board pose across both cameras is the better estimator,
         # but only with an extrinsic that actually describes this pair, and it
@@ -310,16 +336,45 @@ class TrackerClass:
         # one joint PnP for the whole body; without a calibration we fall back
         # to averaging each tag's hand-measured offset independently.
         self.rig = RigidBody.load(rigidbody_path)
-        # Precedence: the command line, then device.toml, then "only when the
-        # calibration brought its own extrinsic".
         have_refit = self.rig is not None and self.rig.stereo is not None
-        configured = device["stereo_pose"]
-        if stereo_refine is not None:
-            self.stereo_refine = stereo_refine
-        elif configured is not None:
-            self.stereo_refine = bool(configured)
-        else:
-            self.stereo_refine = have_refit
+
+        # Which cameras the pose is solved from, and by which estimator.
+        #
+        # Both live in settings.json, because that is the only file the Godot
+        # app reads and the only one that reaches the tracker when the game
+        # launches it — global_script.gd runs tracker.py with no arguments, so a
+        # knob that exists only on the command line cannot affect a real
+        # session. device.toml keeps the *rig's* description; these two are
+        # choices about how to use it.
+        #
+        # Precedence throughout: command line, settings.json, device.toml,
+        # then the built-in default.
+        self.camera_choice = (
+            camera
+            or (settings.get("tracker_camera") or "").strip().lower()
+            or self._camera_default(stereo_refine, device["stereo_pose"], have_refit)
+        )
+        if self.camera_choice not in _CAMERA_CHOICES:
+            raise SystemExit(
+                f"Unknown tracker_camera {self.camera_choice!r}; "
+                f"expected one of {', '.join(_CAMERA_CHOICES)}"
+            )
+        self.stereo_refine = self.camera_choice == "both"
+        # Which single stream leads when only one is used, and when the other
+        # is the only one that can see the device.
+        self._primary = 1 if self.camera_choice == "cam1" else 0
+
+        self.solver = (
+            solver
+            or (settings.get("tracker_solver") or "").strip().lower()
+            or device["solver"]
+            or "joint"
+        )
+        if self.solver not in RigidBody.POSE_SOLVERS:
+            raise SystemExit(
+                f"Unknown tracker_solver {self.solver!r}; "
+                f"expected one of {', '.join(RigidBody.POSE_SOLVERS)}"
+            )
         if self.rig is not None and self.rig.stereo is not None:
             # Measured against this rig, with these cameras, in this order.
             self.R_st, self.T_st = self.rig.stereo
@@ -328,6 +383,11 @@ class TrackerClass:
                   "(device.toml [cameras])")
         if self.rig is not None:
             print(f"[RIG] Calibrated body: {self.rig.describe()}")
+            if self.solver == "ransac":
+                print("[RIG] Pose solver: rapidtag RANSAC (rejects disagreeing corners).")
+            else:
+                print("[RIG] Pose solver: joint PnP over every visible corner.")
+            print(f"[RIG] Cameras: {_CAMERA_CHOICES[self.camera_choice]}")
             if self.stereo_refine and not have_refit:
                 print(
                     "[RIG] Stereo pose from the calibration file's extrinsic "
@@ -336,13 +396,13 @@ class TrackerClass:
                 )
             elif self.stereo_refine:
                 print("[RIG] Stereo pose from the self-calibrated extrinsic.")
-            elif not self.stereo_refine:
-                # Not a limitation being worked around: measured on this rig a
-                # joint solve over one camera's tags jitters 1.02 mm against
-                # 1.19 mm for the two-camera fit, at a quarter of the cost. A
-                # multi-tag board is already well conditioned in depth, so the
-                # baseline adds little. --stereo-refine forces it on.
-                print("[RIG] Solving on cam0 alone (measured no worse than stereo, 4x cheaper).")
+            else:
+                # Not a limitation being worked around: a multi-tag board is
+                # already well conditioned in depth, so the 78 mm baseline adds
+                # little. Measured with the mapping corrected, cam1 alone was as
+                # quiet as the two-camera fit (0.21 mm) at a quarter of the cost.
+                print("[RIG] One camera is enough here; the baseline adds little "
+                      "to a multi-tag board.")
         else:
             print(
                 f"[RIG] No calibration at {rigidbody_path} — falling back to "
@@ -354,9 +414,11 @@ class TrackerClass:
         # ── Remaining state ───────────────────────────────────────────────────
         self.filter         = ExponentialMovingAverageFilter3D(alpha=1)
         self.stabilizer     = CornerStabilizer(
-            threshold_px=settings.get("corner_deadband_px", 0.25)
+            threshold_px=settings.get("corner_deadband_px", 0)  # 0 = stabilizer off: every frame is solved
         )
         self.marker_offsets = MARKER_OFFSETS
+        self.refine_mode = "crop" if _CROP_REFINE else "subpix"
+        _DETECTOR_PARAMS.april_tag_refine_full_resolution = self.refine_mode == "crop"
 
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
@@ -523,6 +585,38 @@ class TrackerClass:
         self.udp_streamer = UDPStreamer(ip=self.udp_ip, port=self.udp_port)
         self.udp_streamer.start()
 
+    def _apply_config(self, cmd: bytes) -> None:
+        """Live tuning from Godot: `CFG:<key>=<value>` (30-byte datagram limit).
+
+        Keys: solver (joint|ransac), refine (crop|subpix|none),
+        camera (both|cam0|cam1), deadband (px; 0 = stabilizer off).
+        Bad values are reported and ignored, never fatal mid-session.
+        """
+        try:
+            key, value = cmd[4:].decode().strip().split("=", 1)
+            if key == "solver" and value in RigidBody.POSE_SOLVERS:
+                self.solver = value
+            elif key == "refine" and value in ("crop", "subpix", "none"):
+                if value == "crop" and not _CROP_REFINE:
+                    raise ValueError("rapidtag build has no crop refine")
+                self.refine_mode = value
+                _DETECTOR_PARAMS.april_tag_refine_full_resolution = value == "crop"
+            elif key == "camera" and value in _CAMERA_CHOICES:
+                self.camera_choice = value
+                self.stereo_refine = value == "both"
+                self._primary = 1 if value == "cam1" else 0
+            elif key == "deadband":
+                self.stabilizer.threshold_px = max(0.0, float(value))
+            else:
+                raise ValueError("unknown key or value")
+        except Exception as exc:
+            print(f"[CFG] ignored {cmd!r}: {exc}")
+            return
+        print(f"[CFG] {key} = {value}")
+        # Ack so the UI can show it took effect (position packets are 44 bytes;
+        # this one is text and starts with "CFG:").
+        self.udp_streamer.send_raw(f"CFG:{key}={value}".encode())
+
     def _recv_command(self) -> bytes:
         return self.udp_streamer.get_command()
 
@@ -636,29 +730,72 @@ class TrackerClass:
 
         # Freeze the pose while every contributing corner is static: the solve
         # is the expensive part of the frame, and a still device only produces
-        # PnP jitter. Keys are per view and per marker, so a marker appearing or
-        # leaving counts as movement and forces a fresh solve.
-        corner_sets = {f"c0_{mid}": c for mid, c in det0.items()}
-        corner_sets.update({f"c1_{mid}": c for mid, c in det1.items()})
+        # PnP jitter. Keys are per view and per marker, so the stabilizer sees
+        # a marker appear or leave as a change of measurement and re-solves.
+        #
+        # Only the views the solve actually reads are gated on. Handing it both
+        # cameras while tracking on one made the freeze markedly rarer — every
+        # corner set has to hold still at once — and let noise in a camera that
+        # contributes nothing to the answer decide whether to recompute it.
+        # Decide which views the answer comes from once, so the gate and the
+        # solve cannot drift apart. One camera: the configured one leads, and
+        # the other stands in when only it can see the body.
+        if det0 and det1 and allow_stereo and self.stereo_refine:
+            views = ("c0", "c1")
+        elif self._primary == 0:
+            views = ("c0",) if det0 else ("c1",)
+        else:
+            views = ("c1",) if det1 else ("c0",)
+
+        corner_sets = {}
+        if "c0" in views:
+            corner_sets.update({f"c0_{mid}": c for mid, c in det0.items()})
+        if "c1" in views:
+            corner_sets.update({f"c1_{mid}": c for mid, c in det1.items()})
 
         def compute():
-            if det0 and det1 and allow_stereo and self.stereo_refine:
+            if views == ("c0", "c1"):
                 rvec, tvec = self.rig.stereo_pose(
                     det0, det1, self.K0, self.D0, self.K1, self.D1,
-                    self.R_st, self.T_st,
+                    self.R_st, self.T_st, self.solver,
                 )
                 if rvec is not None:
                     return rvec, tvec
-            if det0:
-                return self.rig.mono_pose(det0, self.K0, self.D0)
-            rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1)
-            if rvec is None:
-                return None, None
-            # cam1-only: re-express in cam0's frame, or the point jumps by the
-            # stereo baseline whenever cam0 loses sight of the body.
-            return self.rig.pose_in_cam1_frame(rvec, tvec, self.R_st, self.T_st)
+                # Stereo declined this frame; fall back to the lead camera. The
+                # gate covered both views, which only costs an extra solve.
+                return (self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+                        if self._primary == 0 else self._pose_from_cam1(det1))
+            # A single-camera answer still comes back in cam0's frame, or the
+            # point jumps by the stereo baseline whenever the lead camera loses
+            # sight of the device.
+            if views == ("c0",):
+                return self.rig.mono_pose(det0, self.K0, self.D0, self.solver)
+            return self._pose_from_cam1(det1)
 
         return self.stabilizer.stabilize(_BOARD_KEY, corner_sets, compute)
+
+    def _pose_from_cam1(self, det1: dict):
+        """cam1's own solve, carried into cam0's frame."""
+        rvec, tvec = self.rig.mono_pose(det1, self.K1, self.D1, self.solver)
+        if rvec is None:
+            return None, None
+        return self.rig.pose_in_cam1_frame(rvec, tvec, self.R_st, self.T_st)
+
+    @staticmethod
+    def _camera_default(stereo_refine, configured, have_refit) -> str:
+        """The camera choice when neither the command line nor settings.json says.
+
+        Preserves what the older booleans meant, so a rig configured before
+        `tracker_camera` existed keeps behaving the same: --stereo-refine, then
+        device.toml's stereo_pose, then "only when the calibration brought its
+        own extrinsic" — since a stereo fit against the wrong extrinsic is far
+        worse than one camera on its own.
+        """
+        if stereo_refine is not None:
+            return "both" if stereo_refine else "cam0"
+        if configured is not None:
+            return "both" if configured else "cam0"
+        return "both" if have_refit else "cam0"
 
     @staticmethod
     def _detections_by_id(corners, ids) -> dict:
@@ -764,24 +901,36 @@ class TrackerClass:
         # given every camera's frame at once — faster than a detector call per
         # camera (see rcam/bench_rapidtag.py).
         (corners0, ids0), (corners1, ids1) = rapidtag.detect_markers_batch(
-            [raw0, raw1], _APRILTAG_DICT
+            [raw0, raw1], _APRILTAG_DICT, _DETECTOR_PARAMS
         )
         ids0 = np.array(ids0, dtype=int).reshape(-1, 1) if ids0 else None
         ids1 = np.array(ids1, dtype=int).reshape(-1, 1) if ids1 else None
         t2 = time.perf_counter()
         self._stage_time["detect"] += t2 - t1
 
-        if ids0 is not None:
-            corners0 = _refine_corners(raw0, corners0)
-        if ids1 is not None:
-            corners1 = _refine_corners(raw1, corners1)
+        if self.refine_mode == "subpix":
+            if ids0 is not None:
+                corners0 = _refine_corners(raw0, corners0)
+            if ids1 is not None:
+                corners1 = _refine_corners(raw1, corners1)
         t3 = time.perf_counter()
         self._stage_time["refine"] += t3 - t2
 
         # Poll command from Godot. STOP is latched immediately, independent of
         # marker visibility below — otherwise a STOP arriving while markers
         # are in view gets acked-and-cleared before run()'s exit check sees it.
-        cmd = self._recv_command()
+        # Drain the socket: Godot sends a datagram per position packet, so
+        # reading one per frame lets a backlog build and delays a CFG by seconds.
+        cmd = b""
+        while True:
+            nxt = self._recv_command()
+            if not nxt:
+                break
+            if nxt.startswith(b"CFG:"):
+                self._apply_config(nxt)
+                self._last_command_at = time.time()
+            else:
+                cmd = nxt
         if cmd:
             self.received_message = cmd
             self._last_command_at = time.time()
@@ -945,6 +1094,14 @@ if __name__ == "__main__":
                              "to on only when the calibration carries a "
                              "self-calibrated stereo extrinsic, since a wrong one "
                              "is far worse than using a single camera.")
+    parser.add_argument("--camera", choices=sorted(_CAMERA_CHOICES), default=None,
+                        help="Which cameras the pose is solved from. Defaults to "
+                             "settings.json tracker_camera.")
+    parser.add_argument("--solver", choices=RigidBody.POSE_SOLVERS, default=None,
+                        help="How the board pose is estimated from the visible "
+                             "corners: 'joint' fits all of them, 'ransac' uses "
+                             "rapidtag's consensus fit and drops corners that "
+                             "disagree. Defaults to device.toml [tracking] solver.")
     parser.add_argument("--rigidbody", type=Path,
                         default=_SCRIPT_DIR / "calibration" / "rigidbody.toml",
                         help="Calibrated marker geometry from rigidbody_calib.py. "
@@ -981,6 +1138,8 @@ if __name__ == "__main__":
             rigidbody_path=args.rigidbody,
             device_path=_SCRIPT_DIR / "calibration" / "device.toml",
             stereo_refine=args.stereo_refine,
+            solver=args.solver,
+            camera=args.camera,
             settings=settings,
             record_frames=args.record,
             fps_value=args.fps,

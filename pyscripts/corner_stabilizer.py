@@ -22,6 +22,8 @@ class CornerStabilizer:
         self._prev_corners: dict[tuple, np.ndarray] = {}
         # marker_id -> last accepted (rvec, tvec)
         self._prev_pose: dict[int, tuple] = {}
+        # marker_id -> which view labels the last accepted pose was solved from
+        self._prev_labels: dict[int, frozenset] = {}
 
     def _is_static(self, key: tuple, corners: np.ndarray) -> bool:
         """Update stored corners for `key` and report whether they barely moved."""
@@ -37,6 +39,9 @@ class CornerStabilizer:
 
         corner_sets: {view_label: (4, 2) corner array} for every view this
             marker is solved from (e.g. {"c0": ...} or {"c0": ..., "c1": ...}).
+            Pass only the views that `compute` actually uses: a view that is
+            gated on but not solved from makes the freeze rarer for no benefit,
+            and ties the output to a camera the answer does not depend on.
             The pose is frozen only when *all* supplied views are static.
         compute: zero-arg callable returning (rvec, tvec); invoked only when a
             fresh solve is needed. May return (None, None) on failure.
@@ -45,10 +50,20 @@ class CornerStabilizer:
         # even when an earlier view already proved non-static.
         statics = [self._is_static((mid, lbl), c) for lbl, c in corner_sets.items()]
 
-        if all(statics) and mid in self._prev_pose:
+        # A *different set of views* is a different measurement, even when every
+        # view they have in common held still. A label appearing is caught by
+        # _is_static (no history, so not static), but one disappearing is not:
+        # it simply stops being iterated over, so a pose solved from a marker
+        # that has since left the frame would be held for as long as whatever
+        # remains stays still.
+        labels = frozenset(corner_sets)
+        unchanged = self._prev_labels.get(mid) == labels
+
+        if unchanged and all(statics) and mid in self._prev_pose:
             return self._prev_pose[mid]
 
         rvec, tvec = compute()
         if rvec is not None:
             self._prev_pose[mid] = (rvec, tvec)
+            self._prev_labels[mid] = labels
         return rvec, tvec

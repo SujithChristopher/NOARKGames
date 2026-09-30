@@ -95,6 +95,7 @@ var path = "res://debug.json"
 var debug
 
 func _ready() -> void:
+	get_parent().add_child.call_deferred(preload("res://Games/random_reach/Scripts/tuning_panel.gd").new())
 	_load_debug_config()
 	_setup_training_hand()
 	_setup_timers()

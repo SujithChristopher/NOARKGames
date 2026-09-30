@@ -275,6 +275,148 @@ A useful health check: if the cam0-only and stereo poses disagree by more than a
 few mm, either the rigid body or the stereo extrinsics are wrong — on a good
 calibration they agree closely.
 
+### What the game actually uses
+
+`global_script.gd` launches `tracker.py` with **no arguments**, so a command-line
+flag cannot affect a real session. The two choices that change tracking live in
+`settings.json`, which is the only configuration the running game reads:
+
+```json
+"tracker_solver": "joint",   // or "ransac"
+"tracker_camera": "both"     // or "cam0", "cam1"
+```
+
+`device.toml` still describes the *rig* — its tags, its tip, which stereo
+section maps to which stream, exposure and ISP. These two are choices about how
+to use it, and settings.json wins over device.toml when both say something.
+Flags (`--solver`, `--camera`) override both, for bench runs.
+
+`cam0`/`cam1` are rcam's enumeration order, not the stereo calibration's labels.
+
+### Which camera mapping is right
+
+`device.toml [cameras] stream0/stream1` says which section of
+`sterio_calibration.toml` describes which stream. **On this rig the calibration's
+labelling is the reverse of rcam's order.** Getting it wrong does not degrade
+gracefully — the extrinsic is then applied along the opposite baseline:
+
+```bash
+uv run pyscripts/bench_cameras.py --seconds 20
+```
+
+It scores both mappings on the same frames and needs no ground truth, only that
+both cameras must agree about where the device is at a given instant. Measured
+on this rig:
+
+| mapping | cam0 vs cam1, same instant | stereo noise |
+|---|---|---|
+| `stream0="cam1", stream1="cam0"` | **2.8 mm** | **0.21 mm** |
+| `stream0="cam0", stream1="cam1"` | 140.7 mm | 1.00 mm |
+
+**rcam's enumeration order is stable across boots** — `rcam/topology.py` sorts
+sensors by CSI-PHY id, so stream 0 is always the CAM2 connector and stream 1
+always CAM3, independent of probe order or `/dev/video*` numbering. Only
+physically moving a cable changes it. So if tracking is suddenly noisy, the
+mapping is not something that drifted on its own; run the check to find out what
+did.
+
+The same run reports each path's noise, which is how the camera choice gets
+decided:
+
+| path | noise | pose stage |
+|---|---|---|
+| cam0 alone | 0.53 mm | 1.5 ms |
+| cam1 alone | 0.21 mm | 1.2 ms |
+| both | 0.21 mm | 5.2 ms |
+
+### The corner deadband
+
+`CornerStabilizer` holds the previous pose when the corners it was solved from
+have barely moved, so a device resting between trials costs no solve. It gates
+on *pixel* displacement, not on the 3D output, because the corner→pose map is
+nonlinear — a fraction of a pixel on a distant tag becomes large depth jitter.
+
+It is not what makes tracking smooth. Measured on a stationary device at the
+configured 1 px threshold: it froze 34.8% of frames, left the reported point
+within 0.18 mm of the unstabilized one, and did not reduce noise (0.21 mm either
+way). While the patient is actually moving it will fire close to never. What
+made tracking smooth was fixing the camera mapping, which took stereo noise from
+1.00 mm to 0.21 mm. There is no temporal filter doing it either — the tracker
+constructs `ExponentialMovingAverageFilter3D(alpha=1)`, and alpha 1 is a
+pass-through.
+
+Two things it must get right, both covered by `pyscripts/tests/test_stabilizer.py`:
+
+- **Membership, not just movement.** The pose is solved from whichever tags are
+  visible, so the set changing is a new measurement even when the tags common to
+  both held still. A tag *arriving* was always handled (no stored corners, so it
+  reads as not static); a tag *leaving* was not — it simply stopped being
+  iterated over, and a pose solved from a tag no longer in frame stayed frozen
+  for as long as the rest held still. On a body whose tags disagree by several
+  mm about the tracked point, that is a stale answer, not a harmless one.
+- **Gate only on views the solve reads.** Handing it both cameras while tracking
+  on one makes the freeze much rarer — every corner set has to hold still at
+  once — and lets noise in a camera contributing nothing decide whether to
+  recompute.
+
+`corner_deadband_px` in `settings.json` sets the threshold (default 1).
+
+### Choosing the estimator
+
+Which fit turns the corners into a pose is selectable, because the corners are
+not all equally trustworthy and it is not obvious in advance whether throwing
+some away helps:
+
+| | |
+|---|---|
+| `joint` | seed from the best single tag, then one OpenCV `ITERATIVE` PnP over every visible corner. All corners trusted equally. |
+| `ransac` | rapidtag's `estimate_rigid_body_pose`: RANSAC over the same corners, drop the ones the consensus disagrees with, refit on the rest. Rust, not Python. |
+
+Set it in `device.toml` under `[tracking]`, or override per run:
+
+```bash
+.venv/bin/python pyscripts/tracker.py --solver ransac
+```
+
+Measure before switching — both solvers run on identical frames, so the
+comparison is exact:
+
+```bash
+uv run pyscripts/bench_solvers.py --seconds 20            # as configured
+uv run pyscripts/bench_solvers.py --seconds 20 --no-stereo
+```
+
+The bench reports noise as the frame-to-frame residual after removing constant
+velocity, not as spread about the take's mean, so a device that drifts during
+the take does not read as estimator error. It also reports the two solvers'
+**per-frame disagreement**, which is immune to movement entirely: the same
+corners went into both.
+
+Measured on this rig, 8 tags, 20 s takes:
+
+| | joint | ransac |
+|---|---|---|
+| cam0 only — noise | 1.40 mm | 1.30 mm |
+| cam0 only — pose stage | 4.94 ms | 2.05 ms |
+| stereo — noise | 5.70 mm | 5.70 mm |
+| stereo — pose stage | 17.48 ms | 12.62 ms |
+
+Two things to read out of that. RANSAC is consistently the cheaper of the two —
+the Python seed loop it replaces runs an IPPE solve and a fisheye projection per
+visible tag. And with stereo refinement on it makes no difference to the answer
+at all (median disagreement 0.016 mm): the cross-camera least-squares fit
+converges to the same pose whichever seed it starts from, so there the solver
+choice buys time and nothing else.
+
+Where it does change the answer is cam0-only, and only modestly: it dropped a
+tag in 40 of 484 frames and came out 7% quieter. That is a smaller effect than
+it sounds, because the calibration's own per-tag agreement is ~7 mm — RANSAC has
+plenty to reject and rejecting *moves* the solution, which is why an earlier
+hand-rolled rejection experiment in this pipeline made jitter worse rather than
+better. RANSAC earns its keep against a tag that is genuinely misplaced, which
+`pyscripts/tests/test_ransac_synth.py` confirms: displace one tag by 30 mm and
+the joint fit's tip error goes to 41 mm while RANSAC stays at 0.5 mm.
+
 ## Session recording
 
 With `"recording": true` in `settings.json` the tracker also writes both
