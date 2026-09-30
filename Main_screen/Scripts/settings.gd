@@ -56,7 +56,7 @@ func save() -> bool:
 	if f == null:
 		push_error("Cannot write %s (error %d)" % [path, FileAccess.get_open_error()])
 		return false
-	f.store_string(JSON.stringify(data, "    ") + "\n")
+	f.store_string(JSON.stringify(_whole_numbers(data), "    ") + "\n")
 	return true
 
 
@@ -64,7 +64,7 @@ func _load() -> void:
 	if FileAccess.file_exists(path):
 		var parsed = JSON.parse_string(FileAccess.get_file_as_string(path))
 		if typeof(parsed) == TYPE_DICTIONARY:
-			data = parsed
+			data = _whole_numbers(parsed)
 			return
 		push_error("%s is not a valid JSON object; using defaults" % path)
 		data = DEFAULTS.duplicate()
@@ -76,3 +76,13 @@ func _load() -> void:
 		if typeof(legacy) == TYPE_DICTIONARY:
 			data.merge(legacy, true)
 	save()
+
+
+# Godot's JSON parses every number as a float, so a plain save would turn 8000 into
+# 8000.0 and the tracker's socket bind would reject the port. Keep whole numbers integers.
+static func _whole_numbers(d: Dictionary) -> Dictionary:
+	var out := {}
+	for k in d:
+		var v = d[k]
+		out[k] = int(v) if v is float and is_equal_approx(v, round(v)) else v
+	return out

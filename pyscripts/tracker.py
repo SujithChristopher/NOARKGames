@@ -317,7 +317,7 @@ class TrackerClass:
         # binding it here silently discarded --camera.
         camera_section = ac.get("camera", {})
         self.udp_ip            = settings.get("udp_ip",   stream.get("ip", "127.0.0.1"))
-        self.udp_port          = settings.get("udp_port", stream.get("port", 8000))
+        self.udp_port          = int(settings.get("udp_port", stream.get("port", 8000)))
         self.display           = settings.get(
             "display", ac.get("display", {}).get("display", False)
         )
