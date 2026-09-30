@@ -1,0 +1,6 @@
+[submodule "external/rcam"]
+	path = external/rcam
+	url = https://github.com/SujithChristopher/rcam.git
+[submodule "external/rapidtag"]
+	path = external/rapidtag
+	url = https://github.com/SujithChristopher/rapidtag.git
