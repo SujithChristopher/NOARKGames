@@ -166,4 +166,4 @@ AssetStoreTools/
 .venv
 addons/gdble/~*
 android/build/
-graphify-out/
+/graphify-out/cache/
