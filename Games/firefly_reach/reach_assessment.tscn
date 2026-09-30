@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Games/firefly_reach/reach_assessment.gd" id="1"]
+
+[node name="reach_assessment" type="Node"]
+script = ExtResource("1")

@@ -112,6 +112,7 @@ var scaled_network_position3D: Vector2 = Vector2.ZERO
 
 # ── packet rate (position packets/sec, UDP + BLE) ──────────────────────────────
 var packets_per_second: int = 0
+var last_packet_ms: int = 0   # Time.get_ticks_msec() of the latest position packet; 0 = none yet
 var _packet_count: int = 0
 var _pps_accum_time: float = 0.0
 
@@ -523,6 +524,7 @@ func set_origin() -> void:
 func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	_incoming_message = my_floats[0]
 	_packet_count += 1
+	last_packet_ms = Time.get_ticks_msec()
 
 	# Cache what set_origin() needs: the board orientation, and the id that
 	# says a packet has been seen at all. The board translation in floats 7-9

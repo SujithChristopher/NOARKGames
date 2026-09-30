@@ -9,6 +9,8 @@ var flappy_scene = preload("res://Games/flappy_bird/Scenes/flappy_main.tscn")
 var pingpong_scene = preload("res://Games/ping_pong/Scenes/PingPong.tscn")
 var fruit_catcher = preload("res://Games/fruit_catcher/Scenes/Game/Game.tscn")
 var assessment_scene = preload("res://Games/assessment/workspace.tscn")
+var firefly_reach_scene = preload("res://Games/firefly_reach/firefly_main.tscn")
+var reach_scan_scene = preload("res://Games/firefly_reach/reach_assessment.tscn")
 var results_scene = preload("res://Results/scenes/user_progress.tscn")
 var main_menu_scene = preload("res://Main_screen/Scenes/main.tscn")
 var endgame : bool
@@ -88,3 +90,9 @@ func _on_fruit_catcher_pressed() -> void:
 func _on_switch_3d_toggled(toggled_on: bool) -> void:
     GlobalSignals.selected_game_mode = "3D"
     get_tree().change_scene_to_file("res://Main_screen/Scenes/3d_games.tscn")
+
+func _on_firefly_reach_pressed() -> void:
+    get_tree().change_scene_to_packed(firefly_reach_scene)
+
+func _on_reach_scan_pressed() -> void:
+    get_tree().change_scene_to_packed(reach_scan_scene)
