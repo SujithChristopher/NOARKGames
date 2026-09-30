@@ -40,6 +40,15 @@ func _on_set_origin_pressed() -> void:
     GlobalScript.set_origin()
 
 
+func _on_define_table_pressed() -> void:
+    var overlay: Control = load("res://Main_screen/Scripts/table_overlay.gd").new()
+    var layer := CanvasLayer.new()
+    layer.layer = 50
+    layer.add_child(overlay)
+    overlay.tree_exited.connect(layer.queue_free)
+    get_tree().current_scene.add_child(layer)
+
+
 func _on_assess_button_pressed() -> void:
     PatientDB.save_database()
 

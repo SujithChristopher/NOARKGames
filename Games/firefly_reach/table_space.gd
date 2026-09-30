@@ -11,7 +11,8 @@ extends RefCounted
 # This class uses the same mapping so the firefly game's cursor lines up with
 # every other game, but with ONE scale (the smaller of the two scalers) so a
 # table circle is a circle on screen. (The clinic build used the 4-corner
-# affine of WorkspaceConfig; this repo has no such calibration.)
+# affine of WorkspaceConfig; here the main screen's "Define Table" plays that
+# role, see GlobalScript.set_table.)
 
 var mapped: bool = true
 var _m: Transform2D     # table mm -> screen px
@@ -24,6 +25,10 @@ func _init(viewport_size: Vector2) -> void:
 	var s: Vector2 = viewport_size / ref
 	var k := minf(float(GlobalScript.PLAYER_POS_SCALER_X) * s.x,
 		float(GlobalScript.PLAYER_POS_SCALER_Z) * s.y) / 1000.0
+	if GlobalScript.table_set:
+		# The defined table fixes the real scale (px per metre), and the hand
+		# arrives in real metres from its centre (input_adapter.gd).
+		k = GlobalScript.table_k * minf(s.x, s.y) / 1000.0
 	_m = Transform2D(Vector2(k, 0.0), Vector2(0.0, k), viewport_size * 0.5)
 	_inv = _m.affine_inverse()
 

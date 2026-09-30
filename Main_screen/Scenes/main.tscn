@@ -354,6 +354,16 @@ theme = ExtResource("3_oasjk")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Set Origin"
 
+[node name="DefineTableButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 412.0
+offset_top = 465.0
+offset_right = 756.0
+offset_bottom = 530.0
+theme = ExtResource("3_oasjk")
+theme_override_fonts/font = SubResource("FontFile_o1ivk")
+text = "Define Table"
+
 [node name="Logo" type="TextureRect" parent="." unique_id=163609671]
 layout_mode = 0
 offset_left = 364.0
@@ -496,5 +506,6 @@ script = ExtResource("10_setpn")
 [connection signal="pressed" from="TextureRect/NewPatient" to="PlayButton" method="_on_new_patient_pressed"]
 [connection signal="pressed" from="PlayButton" to="PlayButton" method="_on_pressed"]
 [connection signal="pressed" from="SetOriginButton" to="PlayButton" method="_on_set_origin_pressed"]
+[connection signal="pressed" from="DefineTableButton" to="PlayButton" method="_on_define_table_pressed"]
 [connection signal="pressed" from="Warning/Button" to="PlayButton" method="_on_window_close_requested"]
 [connection signal="pressed" from="Patient_notfound/patient_nf_ok" to="PlayButton" method="_on_patient_nf_ok_pressed"]

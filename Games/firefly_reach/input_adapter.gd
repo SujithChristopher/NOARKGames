@@ -14,7 +14,11 @@ static func take_samples() -> Array:
 	if not connected():
 		return []
 	var now := Time.get_unix_time_from_system()
-	return [[now, 0.0, 0.0, GlobalScript.raw_x, GlobalScript.raw_y, GlobalScript.raw_z, now]]
+	# With a table defined the hand is in real metres from the table centre;
+	# without one raw_x / raw_z are the origin-lock metres.
+	var hx: float = GlobalScript.table_r.x if GlobalScript.table_set else GlobalScript.raw_x
+	var hz: float = GlobalScript.table_r.y if GlobalScript.table_set else GlobalScript.raw_z
+	return [[now, 0.0, 0.0, hx, GlobalScript.raw_y, hz, now]]
 
 
 # A packet has been seen since the game started.

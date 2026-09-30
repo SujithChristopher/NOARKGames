@@ -1,5 +1,7 @@
 extends Node
 
+const TableFit := preload("res://Main_screen/Scripts/table_fit.gd")
+
 # ── session state ─────────────────────────────────────────────────────────────
 var session_id: int = 1
 var current_date: String = ""
@@ -50,6 +52,18 @@ var _origin_ref_point: Vector3 = Vector3.ZERO
 var _last_rvec:     Vector3 = Vector3.ZERO
 var _last_centroid: Vector3 = Vector3.ZERO
 var _last_ref_id:   int     = -1
+
+# ── table frame ──────────────────────────────────────────────────────────────
+# Defined on the main screen ("Define Table"): the hand is put on the four table
+# corners, which fixes the zero, the axis directions and the px-per-metre scale
+# in one go, so set_origin() is not needed. While set, it replaces the origin
+# lock in _apply_position_packet. Persisted in table.json next to settings.json.
+var table_set:    bool        = false
+var table_k:      float       = 0.0            # screen px per real metre
+var table_r:      Vector2     = Vector2.ZERO   # hand, real metres from the table centre
+var _table_basis: Transform2D = Transform2D.IDENTITY   # camera x-z -> screen-aligned unit axes
+var _table_centre: Vector2    = Vector2.ZERO   # camera x-z of the table centre (m)
+var _table_y0:    float       = 0.0
 
 # ── transport settings ────────────────────────────────────────────────────────
 var stream_type: String = "udp"
@@ -142,6 +156,7 @@ func _ready() -> void:
 
 	current_date = get_date_string()
 	load_session_info()
+	load_table()
 
 	# Use the actual rendered viewport area — correct on all platforms including
 	# Android tablets where screen_get_size() can return physical pixels before
@@ -526,6 +541,77 @@ func set_origin() -> void:
 	GlobalSignals.origin_set.emit()
 
 
+# Hand position as the tracker reports it, before any origin or table (camera frame, m).
+func hand_camera() -> Vector3:
+	return _last_centroid
+
+
+# corners: camera (x, z) of the hand at TL, TR, BL, BR of the table, in metres.
+# Fits the affine that stretches them onto the screen corners, then keeps its
+# rotation and centre but one scale (the smaller), so the table fits and a
+# circle on the table stays a circle on screen. Returns false if degenerate.
+func set_table(corners: Array, y0: float) -> bool:
+	if corners.size() < 4:
+		return false
+	var sz := screen_size if screen_size.x > 0.0 else get_viewport().get_visible_rect().size
+	var dst: Array = [Vector2(0, 0), Vector2(sz.x, 0), Vector2(0, sz.y), Vector2(sz.x, sz.y)]
+	var fit = TableFit.fit(corners, dst)
+	if fit == null:
+		return false
+	var fr: Dictionary = TableFit.frame(fit)
+	var k: float = fr["k"]
+	if k < 1.0:
+		return false
+	var centre: Vector2 = fit.affine_inverse() * (sz * 0.5)
+	_table_basis = fr["basis"]
+	_table_centre = centre
+	_table_y0 = y0
+	table_k = k
+	table_set = true
+	save_table()
+	return true
+
+
+func clear_table() -> void:
+	table_set = false
+	table_r = Vector2.ZERO
+	if FileAccess.file_exists(_table_path()):
+		DirAccess.remove_absolute(_table_path())
+
+
+func _table_path() -> String:
+	return Settings.path.get_base_dir().path_join("table.json")
+
+
+func save_table() -> void:
+	var d := {
+		"k": table_k, "y0": _table_y0,
+		"centre": [_table_centre.x, _table_centre.y],
+		"basis": [_table_basis.x.x, _table_basis.x.y, _table_basis.y.x, _table_basis.y.y],
+	}
+	DirAccess.make_dir_recursive_absolute(_table_path().get_base_dir())
+	var f := FileAccess.open(_table_path(), FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(d))
+
+
+func load_table() -> void:
+	if not FileAccess.file_exists(_table_path()):
+		return
+	var d = JSON.parse_string(FileAccess.get_file_as_string(_table_path()))
+	if not d is Dictionary or not d.has("basis") or not d.has("centre"):
+		return
+	var b: Array = d["basis"]
+	var c: Array = d["centre"]
+	if b.size() != 4 or c.size() != 2 or float(d.get("k", 0.0)) < 1.0:
+		return
+	_table_basis = Transform2D(Vector2(b[0], b[1]), Vector2(b[2], b[3]), Vector2.ZERO)
+	_table_centre = Vector2(c[0], c[1])
+	_table_y0 = float(d.get("y0", 0.0))
+	table_k = float(d["k"])
+	table_set = true
+
+
 func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	_incoming_message = my_floats[0]
 	_packet_count += 1
@@ -541,7 +627,14 @@ func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	var centroid := Vector3(my_floats[1], my_floats[2], my_floats[3])
 	_last_centroid = centroid
 	var local: Vector3
-	if _origin_set:
+	if table_set:
+		# Real metres from the table centre, axes aligned with the screen; the
+		# px-per-metre scale is folded in so the usual `local * SCALER` lands on
+		# the table-fitted pixel.
+		table_r = _table_basis * (Vector2(centroid.x, centroid.z) - _table_centre)
+		local = Vector3(table_r.x * table_k / PLAYER_POS_SCALER_X, centroid.y - _table_y0,
+			table_r.y * table_k / PLAYER_POS_SCALER_Z)
+	elif _origin_set:
 		local = _origin_basis.transposed() * (_origin_ref_point - centroid)
 	else:
 		local = centroid
