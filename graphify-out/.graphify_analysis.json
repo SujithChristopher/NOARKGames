@@ -1,0 +1,746 @@
+{
+  "communities": {
+    "0": [
+      "path",
+      "pyscripts_tracker_draw_markers",
+      "pyscripts_tracker_py_ndarray",
+      "pyscripts_tracker_rationale_263",
+      "pyscripts_tracker_rationale_275",
+      "pyscripts_tracker_rationale_283",
+      "pyscripts_tracker_rationale_377",
+      "pyscripts_tracker_rationale_436",
+      "pyscripts_tracker_rationale_73",
+      "pyscripts_tracker_rationale_87",
+      "pyscripts_tracker_rationale_97",
+      "pyscripts_tracker_refine_corners",
+      "pyscripts_tracker_single_cam_pnp",
+      "pyscripts_tracker_trackerclass",
+      "pyscripts_tracker_trackerclass_cam1_pose",
+      "pyscripts_tracker_trackerclass_capture_pair",
+      "pyscripts_tracker_trackerclass_close_rec_files",
+      "pyscripts_tracker_trackerclass_estimate_poses",
+      "pyscripts_tracker_trackerclass_get_centroid",
+      "pyscripts_tracker_trackerclass_grab",
+      "pyscripts_tracker_trackerclass_init",
+      "pyscripts_tracker_trackerclass_init_cameras",
+      "pyscripts_tracker_trackerclass_init_udp_socket",
+      "pyscripts_tracker_trackerclass_measure_phase_offset",
+      "pyscripts_tracker_trackerclass_open_rec_files",
+      "pyscripts_tracker_trackerclass_process_frame",
+      "pyscripts_tracker_trackerclass_recv_command",
+      "pyscripts_tracker_trackerclass_run",
+      "pyscripts_tracker_trackerclass_select_hospitalid",
+      "pyscripts_tracker_trackerclass_send_coordinates",
+      "pyscripts_tracker_trackerclass_write_frames"
+    ],
+    "1": [
+      "activitytaskmanager",
+      "android_tablet_logcat",
+      "assets_background_2d_png",
+      "audioflinger",
+      "basekeyboardsizehelper",
+      "com_example_noarkgames",
+      "com_godot_game_godotapplauncher",
+      "com_google_android_inputmethod_latin",
+      "compactwindowmanagerservice",
+      "gameopt_hal",
+      "godot_engine",
+      "googleinputmethodservice",
+      "inputmethodmanager",
+      "latinime",
+      "libgodot_android_so",
+      "oplusinputmanagerservice_jni",
+      "osense_basedecisionmaker",
+      "passwordime",
+      "refreshratedirector",
+      "surfaceflinger",
+      "threefingerviewmanager",
+      "windowmanager",
+      "windowmanagershell"
+    ],
+    "2": [
+      "any",
+      "blessgattcharacteristic",
+      "pyscripts_ble_streamer",
+      "pyscripts_ble_streamer_blestreamer",
+      "pyscripts_ble_streamer_blestreamer_get_command",
+      "pyscripts_ble_streamer_blestreamer_init",
+      "pyscripts_ble_streamer_blestreamer_on_read",
+      "pyscripts_ble_streamer_blestreamer_on_write",
+      "pyscripts_ble_streamer_blestreamer_reset",
+      "pyscripts_ble_streamer_blestreamer_run_loop",
+      "pyscripts_ble_streamer_blestreamer_send",
+      "pyscripts_ble_streamer_blestreamer_serve",
+      "pyscripts_ble_streamer_blestreamer_start",
+      "pyscripts_ble_streamer_blestreamer_stop",
+      "pyscripts_ble_streamer_rationale_1",
+      "pyscripts_ble_streamer_rationale_36",
+      "pyscripts_ble_streamer_rationale_53",
+      "pyscripts_ble_streamer_rationale_60",
+      "pyscripts_ble_streamer_rationale_81",
+      "pyscripts_ble_streamer_rationale_88",
+      "pyscripts_ble_streamer_rationale_96"
+    ],
+    "3": [
+      "pyscripts_filters",
+      "pyscripts_filters_coordinatetransform",
+      "pyscripts_filters_coordinatetransform_compute_transformed_coordinates",
+      "pyscripts_filters_coordinatetransform_init",
+      "pyscripts_filters_coordinatetransform_transform_to_world_coordinates",
+      "pyscripts_filters_exponentialmovingaveragefilter3d",
+      "pyscripts_filters_exponentialmovingaveragefilter3d_init",
+      "pyscripts_filters_exponentialmovingaveragefilter3d_update",
+      "pyscripts_tracker",
+      "pyscripts_tracker_kabsch",
+      "pyscripts_tracker_load_settings",
+      "pyscripts_tracker_rationale_116",
+      "pyscripts_tracker_rationale_61",
+      "pyscripts_tracker_stereo_pnp"
+    ],
+    "4": [
+      "pyscripts_udp_streamer",
+      "pyscripts_udp_streamer_rationale_1",
+      "pyscripts_udp_streamer_rationale_16",
+      "pyscripts_udp_streamer_rationale_25",
+      "pyscripts_udp_streamer_rationale_32",
+      "pyscripts_udp_streamer_rationale_38",
+      "pyscripts_udp_streamer_rationale_48",
+      "pyscripts_udp_streamer_udpstreamer",
+      "pyscripts_udp_streamer_udpstreamer_get_command",
+      "pyscripts_udp_streamer_udpstreamer_init",
+      "pyscripts_udp_streamer_udpstreamer_send",
+      "pyscripts_udp_streamer_udpstreamer_start",
+      "pyscripts_udp_streamer_udpstreamer_stop"
+    ],
+    "5": [
+      "pyscripts_corner_stabilizer",
+      "pyscripts_corner_stabilizer_cornerstabilizer",
+      "pyscripts_corner_stabilizer_cornerstabilizer_init",
+      "pyscripts_corner_stabilizer_cornerstabilizer_is_static",
+      "pyscripts_corner_stabilizer_cornerstabilizer_stabilize",
+      "pyscripts_corner_stabilizer_py_ndarray",
+      "pyscripts_corner_stabilizer_rationale_1",
+      "pyscripts_corner_stabilizer_rationale_27",
+      "pyscripts_corner_stabilizer_rationale_36"
+    ],
+    "6": [
+      "pyscripts_dual_recorder",
+      "pyscripts_dual_recorder_rationale_1",
+      "pyscripts_dual_recorder_recorddata",
+      "pyscripts_dual_recorder_recorddata_capture_webcam",
+      "pyscripts_dual_recorder_recorddata_init",
+      "pyscripts_dual_recorder_recorddata_run"
+    ],
+    "7": [
+      "notebooks_calibration_dual_notebooks_01_corner_detection_py",
+      "notebooks_calibration_dual_notebooks_02_dual_calibration_py",
+      "notebooks_calibration_dual_notebooks_verification_dual_camera_py",
+      "notebooks_calibration_dual_notebooks_verification_dual_undistort_compare_py",
+      "pyscripts_calibration_stereo_camera_md"
+    ],
+    "8": [
+      "agm_audio_graph_manager",
+      "audiopolicymanagerextimpl",
+      "oplus_bt_dual_sync",
+      "pal_audio_hal"
+    ],
+    "9": [
+      "assets_background_apple_score_2",
+      "assets_background_ball_2",
+      "assets_background_diamond",
+      "assets_background_fruit_score_2"
+    ],
+    "10": [
+      "pyscripts_tests_test_ble_receiver",
+      "pyscripts_tests_test_ble_receiver_main",
+      "pyscripts_tests_test_ble_receiver_on_notification",
+      "pyscripts_tests_test_ble_receiver_rationale_1"
+    ],
+    "11": [
+      "assets_background_pause",
+      "assets_background_play",
+      "assets_background_retry"
+    ],
+    "12": [
+      "assets_tiny_swords_resources_sheep_happysheep_all",
+      "assets_tiny_swords_resources_sheep_happysheep_bouncing",
+      "assets_tiny_swords_resources_sheep_happysheep_idle"
+    ],
+    "13": [
+      "games_fruit_catcher_assets_collected",
+      "games_fruit_catcher_assets_fruit_basket",
+      "games_fruit_catcher_assets_fruits_banana"
+    ],
+    "14": [
+      "pyscripts_docs_ble_status_md",
+      "pyscripts_main_py",
+      "pyscripts_test_ble_receiver_py"
+    ],
+    "15": [
+      "pyscripts_tests_test_btplug_connect",
+      "pyscripts_tests_test_btplug_connect_main",
+      "pyscripts_tests_test_btplug_connect_notification_handler"
+    ],
+    "16": [
+      "test_android_adb",
+      "test_android_adb_get_adbdeviceserial",
+      "test_android_adb_invoke_adb"
+    ],
+    "17": [
+      "assets_plane_fly_1",
+      "assets_plane_fly_2"
+    ],
+    "18": [
+      "assets_plane_shoot_1",
+      "assets_plane_shoot_2"
+    ],
+    "19": [
+      "assets_pp_assets_arts_computer",
+      "assets_pp_assets_arts_player"
+    ],
+    "20": [
+      "assets_pp_assets_fonts_font_download_link",
+      "teko_semi_bold"
+    ],
+    "21": [
+      "games_jumpify_assets_splash_2d_platformer_starter_kit_splash_png",
+      "games_jumpify_assets_spritesheet_platformerpack_character_png"
+    ],
+    "22": [
+      "games_jumpify_icon_png",
+      "games_jumpify_icon_svg"
+    ],
+    "23": [
+      "keystore2",
+      "protecteddownloadprocessorimpl"
+    ],
+    "24": [
+      "vendor_qti_bluetooth_ibs_handler",
+      "vendor_qti_bluetooth_wake_lock"
+    ],
+    "25": [
+      "assets_background_5409a183c25b88e58c3950d786678ca8_jpg"
+    ],
+    "26": [
+      "assets_background_adobe_express_file_png"
+    ],
+    "27": [
+      "assets_background_banner"
+    ],
+    "28": [
+      "assets_background_button_icon_2"
+    ],
+    "29": [
+      "assets_background_chirag_vijay_environment"
+    ],
+    "30": [
+      "assets_background_dd5665d9c66b8797b53b2242bf5993bd"
+    ],
+    "31": [
+      "assets_background_fe910380effb29ba810a6df234190cc0"
+    ],
+    "32": [
+      "assets_background_gameover_2"
+    ],
+    "33": [
+      "assets_background_grass_2"
+    ],
+    "34": [
+      "assets_background_green_png"
+    ],
+    "35": [
+      "assets_background_home_2"
+    ],
+    "36": [
+      "assets_background_home_png"
+    ],
+    "37": [
+      "assets_background_metallic_banner_set_png"
+    ],
+    "38": [
+      "assets_background_old_paper_scroll_png"
+    ],
+    "39": [
+      "assets_background_panda_with_blank_sign_png"
+    ],
+    "40": [
+      "assets_background_pink"
+    ],
+    "41": [
+      "assets_background_png"
+    ],
+    "42": [
+      "assets_background_sheepbg_min_2"
+    ],
+    "43": [
+      "assets_background_space"
+    ],
+    "44": [
+      "assets_background_unlock_fun_learning"
+    ],
+    "45": [
+      "assets_background_yellow"
+    ],
+    "46": [
+      "assets_health_and_pointers_bar_sprites_brain_bar_brain_stage_3"
+    ],
+    "47": [
+      "assets_health_and_pointers_bar_sprites_brain_bar_brain_stage_4"
+    ],
+    "48": [
+      "assets_health_and_pointers_bar_sprites_brain_bar_brain_stage_5"
+    ],
+    "49": [
+      "assets_health_and_pointers_bar_sprites_cookie_bar_cookie_stage_1"
+    ],
+    "50": [
+      "assets_health_and_pointers_bar_sprites_cookie_bar_cookie_stage_2"
+    ],
+    "51": [
+      "assets_health_and_pointers_bar_sprites_cookie_bar_cookie_stage_3"
+    ],
+    "52": [
+      "assets_health_and_pointers_bar_sprites_cookie_bar_cookie_stage_4"
+    ],
+    "53": [
+      "assets_health_and_pointers_bar_sprites_cookie_bar_cookie_stage_5"
+    ],
+    "54": [
+      "assets_health_and_pointers_bar_sprites_diamond_bar_diamond_stage_1"
+    ],
+    "55": [
+      "assets_health_and_pointers_bar_sprites_diamond_bar_diamond_stage_2"
+    ],
+    "56": [
+      "assets_health_and_pointers_bar_sprites_diamond_bar_diamond_stage_3"
+    ],
+    "57": [
+      "assets_health_and_pointers_bar_sprites_diamond_bar_diamond_stage_4"
+    ],
+    "58": [
+      "assets_health_and_pointers_bar_sprites_diamond_bar_diamond_stage_5"
+    ],
+    "59": [
+      "assets_health_and_pointers_bar_sprites_energy_bar_energy_stage_1"
+    ],
+    "60": [
+      "assets_health_and_pointers_bar_sprites_energy_bar_energy_stage_2"
+    ],
+    "61": [
+      "assets_health_and_pointers_bar_sprites_energy_bar_energy_stage_4"
+    ],
+    "62": [
+      "assets_health_and_pointers_bar_sprites_energy_bar_energy_stage_5"
+    ],
+    "63": [
+      "assets_health_and_pointers_bar_sprites_gas_bar_gas_stage_1"
+    ],
+    "64": [
+      "assets_health_and_pointers_bar_sprites_gas_bar_gas_stage_2"
+    ],
+    "65": [
+      "assets_health_and_pointers_bar_sprites_gas_bar_gas_stage_3"
+    ],
+    "66": [
+      "assets_health_and_pointers_bar_sprites_gas_bar_gas_stage_4"
+    ],
+    "67": [
+      "assets_health_and_pointers_bar_sprites_gas_bar_gas_stage_5"
+    ],
+    "68": [
+      "assets_health_and_pointers_bar_sprites_heart_bar_heart_stage_1"
+    ],
+    "69": [
+      "assets_health_and_pointers_bar_sprites_heart_bar_heart_stage_2"
+    ],
+    "70": [
+      "assets_health_and_pointers_bar_sprites_heart_bar_heart_stage_3"
+    ],
+    "71": [
+      "assets_health_and_pointers_bar_sprites_heart_bar_heart_stage_4"
+    ],
+    "72": [
+      "assets_health_and_pointers_bar_sprites_heart_bar_heart_stage_5"
+    ],
+    "73": [
+      "assets_health_and_pointers_bar_sprites_star_bar_star_stage_1"
+    ],
+    "74": [
+      "assets_health_and_pointers_bar_sprites_star_bar_star_stage_2"
+    ],
+    "75": [
+      "assets_health_and_pointers_bar_sprites_star_bar_star_stage_3"
+    ],
+    "76": [
+      "assets_health_and_pointers_bar_sprites_star_bar_star_stage_5"
+    ],
+    "77": [
+      "assets_health_and_pointers_bar_sprites_strawberry_bar_strawberry_stage_1"
+    ],
+    "78": [
+      "assets_health_and_pointers_bar_sprites_strawberry_bar_strawberry_stage_2"
+    ],
+    "79": [
+      "assets_health_and_pointers_bar_sprites_strawberry_bar_strawberry_stage_3"
+    ],
+    "80": [
+      "assets_health_and_pointers_bar_sprites_strawberry_bar_strawberry_stage_4"
+    ],
+    "81": [
+      "assets_health_and_pointers_bar_sprites_strawberry_bar_strawberry_stage_5"
+    ],
+    "82": [
+      "assets_paddle_paddle"
+    ],
+    "83": [
+      "assets_plane_dead_1"
+    ],
+    "84": [
+      "assets_plane_shoot_3"
+    ],
+    "85": [
+      "assets_plane_shoot_4"
+    ],
+    "86": [
+      "assets_plane_shoot_5"
+    ],
+    "87": [
+      "assets_pp_assets_arts_background"
+    ],
+    "88": [
+      "assets_pp_assets_arts_ball"
+    ],
+    "89": [
+      "assets_pp_assets_arts_ballmotion"
+    ],
+    "90": [
+      "assets_pp_assets_arts_board"
+    ],
+    "91": [
+      "assets_pp_assets_arts_scorebar"
+    ],
+    "92": [
+      "assets_scoring_system_background"
+    ],
+    "93": [
+      "assets_scoring_system_brown"
+    ],
+    "94": [
+      "assets_terrian_terrain_16x16"
+    ],
+    "95": [
+      "com_android_launcher"
+    ],
+    "96": [
+      "games_fruit_catcher_assets_element_red_diamond"
+    ],
+    "97": [
+      "games_fruit_catcher_assets_fruits_black_berry_light"
+    ],
+    "98": [
+      "games_fruit_catcher_assets_fruits_green_apple"
+    ],
+    "99": [
+      "games_fruit_catcher_assets_fruits_green_grape"
+    ],
+    "100": [
+      "games_fruit_catcher_assets_fruits_lemon"
+    ],
+    "101": [
+      "games_fruit_catcher_assets_fruits_lime"
+    ],
+    "102": [
+      "games_fruit_catcher_assets_fruits_orange"
+    ],
+    "103": [
+      "games_fruit_catcher_assets_fruits_peach"
+    ],
+    "104": [
+      "games_fruit_catcher_assets_fruits_pear"
+    ],
+    "105": [
+      "games_fruit_catcher_assets_fruits_plum"
+    ],
+    "106": [
+      "games_fruit_catcher_assets_fruits_raspberry"
+    ],
+    "107": [
+      "games_fruit_catcher_assets_fruits_red_apple"
+    ],
+    "108": [
+      "games_fruit_catcher_assets_fruits_red_cherry"
+    ],
+    "109": [
+      "games_fruit_catcher_assets_fruits_red_grape"
+    ],
+    "110": [
+      "games_fruit_catcher_assets_fruits_strawberry"
+    ],
+    "111": [
+      "games_fruit_catcher_assets_fruits_watermelon"
+    ],
+    "112": [
+      "games_fruit_catcher_assets_vecteezy_deep_forest_scene"
+    ],
+    "113": [
+      "games_random_reach_sprites_jet_png"
+    ],
+    "114": [
+      "id_assets_health_and_pointers_bar_sprites_energy_bar_energy_stage_3"
+    ],
+    "115": [
+      "id_assets_health_and_pointers_bar_sprites_star_bar_star_stage_4"
+    ],
+    "116": [
+      "ime_lifecycle"
+    ],
+    "117": [
+      "oplusstoragewfsbandwidth"
+    ],
+    "118": [
+      "pkg_noarkgames"
+    ],
+    "119": [
+      "pyscripts_readme"
+    ],
+    "120": [
+      "sdm_display"
+    ]
+  },
+  "cohesion": {
+    "0": 0.11612903225806452,
+    "1": 0.09486166007905138,
+    "2": 0.10952380952380952,
+    "3": 0.16483516483516483,
+    "4": 0.15384615384615385,
+    "5": 0.25,
+    "6": 0.4,
+    "7": 0.4,
+    "8": 0.5,
+    "9": 0.5,
+    "10": 0.6666666666666666,
+    "11": 0.6666666666666666,
+    "12": 0.6666666666666666,
+    "13": 0.6666666666666666,
+    "14": 0.6666666666666666,
+    "15": 1.0,
+    "16": 0.6666666666666666,
+    "17": 1.0,
+    "18": 1.0,
+    "19": 1.0,
+    "20": 1.0,
+    "21": 1.0,
+    "22": 1.0,
+    "23": 1.0,
+    "24": 1.0,
+    "25": 1.0,
+    "26": 1.0,
+    "27": 1.0,
+    "28": 1.0,
+    "29": 1.0,
+    "30": 1.0,
+    "31": 1.0,
+    "32": 1.0,
+    "33": 1.0,
+    "34": 1.0,
+    "35": 1.0,
+    "36": 1.0,
+    "37": 1.0,
+    "38": 1.0,
+    "39": 1.0,
+    "40": 1.0,
+    "41": 1.0,
+    "42": 1.0,
+    "43": 1.0,
+    "44": 1.0,
+    "45": 1.0,
+    "46": 1.0,
+    "47": 1.0,
+    "48": 1.0,
+    "49": 1.0,
+    "50": 1.0,
+    "51": 1.0,
+    "52": 1.0,
+    "53": 1.0,
+    "54": 1.0,
+    "55": 1.0,
+    "56": 1.0,
+    "57": 1.0,
+    "58": 1.0,
+    "59": 1.0,
+    "60": 1.0,
+    "61": 1.0,
+    "62": 1.0,
+    "63": 1.0,
+    "64": 1.0,
+    "65": 1.0,
+    "66": 1.0,
+    "67": 1.0,
+    "68": 1.0,
+    "69": 1.0,
+    "70": 1.0,
+    "71": 1.0,
+    "72": 1.0,
+    "73": 1.0,
+    "74": 1.0,
+    "75": 1.0,
+    "76": 1.0,
+    "77": 1.0,
+    "78": 1.0,
+    "79": 1.0,
+    "80": 1.0,
+    "81": 1.0,
+    "82": 1.0,
+    "83": 1.0,
+    "84": 1.0,
+    "85": 1.0,
+    "86": 1.0,
+    "87": 1.0,
+    "88": 1.0,
+    "89": 1.0,
+    "90": 1.0,
+    "91": 1.0,
+    "92": 1.0,
+    "93": 1.0,
+    "94": 1.0,
+    "95": 1.0,
+    "96": 1.0,
+    "97": 1.0,
+    "98": 1.0,
+    "99": 1.0,
+    "100": 1.0,
+    "101": 1.0,
+    "102": 1.0,
+    "103": 1.0,
+    "104": 1.0,
+    "105": 1.0,
+    "106": 1.0,
+    "107": 1.0,
+    "108": 1.0,
+    "109": 1.0,
+    "110": 1.0,
+    "111": 1.0,
+    "112": 1.0,
+    "113": 1.0,
+    "114": 1.0,
+    "115": 1.0,
+    "116": 1.0,
+    "117": 1.0,
+    "118": 1.0,
+    "119": 1.0,
+    "120": 1.0
+  },
+  "gods": [
+    {
+      "id": "pyscripts_tracker_trackerclass",
+      "label": "TrackerClass",
+      "degree": 21
+    },
+    {
+      "id": "pyscripts_ble_streamer_blestreamer",
+      "label": "BLEStreamer",
+      "degree": 12
+    },
+    {
+      "id": "pyscripts_udp_streamer_udpstreamer",
+      "label": "UDPStreamer",
+      "degree": 10
+    },
+    {
+      "id": "com_godot_game_godotapplauncher",
+      "label": "GodotAppLauncher",
+      "degree": 9
+    },
+    {
+      "id": "com_example_noarkgames",
+      "label": "Noark Games App",
+      "degree": 8
+    },
+    {
+      "id": "pyscripts_corner_stabilizer_cornerstabilizer",
+      "label": "CornerStabilizer",
+      "degree": 7
+    },
+    {
+      "id": "pyscripts_filters_exponentialmovingaveragefilter3d",
+      "label": "ExponentialMovingAverageFilter3D",
+      "degree": 6
+    },
+    {
+      "id": "pyscripts_tracker_single_cam_pnp",
+      "label": "_single_cam_pnp()",
+      "degree": 5
+    },
+    {
+      "id": "pyscripts_tracker_stereo_pnp",
+      "label": "_stereo_pnp()",
+      "degree": 5
+    },
+    {
+      "id": "googleinputmethodservice",
+      "label": "GoogleInputMethodService",
+      "degree": 5
+    }
+  ],
+  "surprises": [
+    {
+      "source": "GodotAppLauncher",
+      "target": "Cartoon Landscape Background",
+      "source_files": [
+        "android/tablet-logcat.txt",
+        "Assets/Background/2d.png"
+      ],
+      "confidence": "INFERRED",
+      "relation": "references",
+      "why": "inferred connection - not explicitly stated in source; crosses file types (doc \u2194 image); connects across different repos/directories; peripheral node `Cartoon Landscape Background` unexpectedly reaches hub `GodotAppLauncher`"
+    },
+    {
+      "source": "TrackerClass",
+      "target": "CornerStabilizer",
+      "source_files": [
+        "pyscripts/tracker.py",
+        "pyscripts/corner_stabilizer.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "uses",
+      "why": "inferred connection - not explicitly stated in source; bridges separate communities"
+    },
+    {
+      "source": "TrackerClass",
+      "target": "ExponentialMovingAverageFilter3D",
+      "source_files": [
+        "pyscripts/tracker.py",
+        "pyscripts/filters.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "uses",
+      "why": "inferred connection - not explicitly stated in source; bridges separate communities"
+    },
+    {
+      "source": "TrackerClass",
+      "target": "UDPStreamer",
+      "source_files": [
+        "pyscripts/tracker.py",
+        "pyscripts/udp_streamer.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "uses",
+      "why": "inferred connection - not explicitly stated in source; bridges separate communities"
+    },
+    {
+      "source": "Pause Button UI",
+      "target": "Play Button UI",
+      "source_files": [
+        "Assets/Background/Pause.png",
+        "Assets/Background/Play.png"
+      ],
+      "confidence": "INFERRED",
+      "relation": "semantically_similar_to",
+      "why": "inferred connection - not explicitly stated in source; semantically similar concepts with no structural link"
+    }
+  ],
+  "tokens": {
+    "input": 538924,
+    "output": 15466
+  }
+}
