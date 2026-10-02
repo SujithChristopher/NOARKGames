@@ -14,7 +14,7 @@ var pending_game: PackedScene = null   # chosen game waiting on today's reach sc
 @export var inflated_workspace: PackedVector2Array
 
 @export var current_patient_id:String = ""
-@export var data_path:String = (OS.get_user_data_dir() if OS.get_name() == "Android" else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS).path_join("NOARK")).path_join("data")
+@export var data_path:String = Settings.base_dir.path_join("data")
 
 
 @export var ball_position: Vector2

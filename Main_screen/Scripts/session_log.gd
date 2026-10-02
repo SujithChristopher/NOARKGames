@@ -2,7 +2,7 @@ extends Node
 ## Per-patient session log and therapy dose, after the MARS robot's
 ## sessions.csv / configdata.csv (external/references/, docs/session_logging_spec.md).
 ##
-##   {data}/{pid}/session.csv     one row per trial, written when the trial ends
+##   {data}/{pid}/sessions.csv     one row per trial, written when the trial ends
 ##   {data}/{pid}/configdata.csv  dose history; the last row is the active dose
 ##   {data}/{pid}/GameData/raw-sessNN-trialNNN-{Game}-{Mode}.csv  (Manager writes these)
 ##
@@ -61,7 +61,7 @@ func patient_dir(pid: String) -> String:
 
 
 func session_path(pid: String) -> String:
-	return patient_dir(pid).path_join("session.csv")
+	return patient_dir(pid).path_join("sessions.csv")
 
 
 func dose_path(pid: String) -> String:
@@ -70,7 +70,7 @@ func dose_path(pid: String) -> String:
 
 # ── session ───────────────────────────────────────────────────────────────────
 
-## Called at login: the next SessionNumber is one past the highest in session.csv.
+## Called at login: the next SessionNumber is one past the highest in sessions.csv.
 func start_session(pid: String) -> void:
 	end_trial()
 	patient_id = effective_id(pid)
@@ -173,7 +173,7 @@ func end_trial() -> void:
 	_append(session_path(patient_id), _session_header(patient_id), row)
 
 
-## Today's minutes of play per movement, from session.csv: {"ML": 12.5, ...}.
+## Today's minutes of play per movement, from sessions.csv: {"ML": 12.5, ...}.
 func today_minutes(pid: String) -> Dictionary:
 	var out := {"ML": 0.0, "AP": 0.0, "MLAP": 0.0}
 	var today := _now().substr(0, 10)

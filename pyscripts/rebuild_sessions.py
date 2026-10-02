@@ -1,14 +1,14 @@
-"""Rebuild each patient's session.csv from the raw game logs written before it existed.
+"""Rebuild each patient's sessions.csv from the raw game logs written before it existed.
 
 Old raw files are GameData/{Game}_S{n}_T{n}_{date}.csv. Their S/T numbers come
 from a global counter that went up on every game start, so they say nothing
 about logins: a session here is a run of trials with no gap over --gap minutes.
 Each file is renamed to the new raw-sessNN-trialNNN-{Game}-{Mode}.csv (Firefly
 Reach's _hand/_reach/_calibration files go with it) and gets its row in
-{patient}/session.csv, in the format Main_screen/Scripts/session_log.gd writes.
+{patient}/sessions.csv, in the format Main_screen/Scripts/session_log.gd writes.
 
 Only files that start with the 7-line Manager header are used; anything else is
-listed and left alone. A patient that already has a session.csv is skipped.
+listed and left alone. A patient that already has a sessions.csv is skipped.
 
 Hits and misses are recovered where the log has them:
   FruitCatcher  last gems_caught / gems_missed
@@ -22,7 +22,7 @@ Dry run by default; --apply renames and writes.
 
     python pyscripts/rebuild_sessions.py                 # report only
     python pyscripts/rebuild_sessions.py --apply
-    python pyscripts/rebuild_sessions.py --data /path/to/NOARK/data --patient vvv
+    python pyscripts/rebuild_sessions.py --data /path/to/NOARK_demo/data --patient vvv
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ class Trial:
 
 
 def default_data_dir() -> Path:
-    return Path.home() / "Documents" / "NOARK" / "data"
+    return Path.home() / "Documents" / "NOARK_demo" / "data"
 
 
 def _float(s: str) -> float | None:
@@ -157,7 +157,7 @@ def _score(t: Trial, rows: list[dict]) -> None:
 
 
 def build_rows(patient: str, trials: list[Trial], gap: timedelta) -> None:
-    """Number sessions and trials, fill each trial's new_name and session.csv row."""
+    """Number sessions and trials, fill each trial's new_name and sessions.csv row."""
     trials.sort(key=lambda t: t.start)
     session, session_start, last_stop = 0, None, None
     per_session: dict = defaultdict(int)
@@ -204,12 +204,12 @@ def write_session_csv(path: Path, patient: str, location: str, trials: list[Tria
 def rebuild_patient(folder: Path, gap: timedelta, location: str, apply: bool) -> None:
     patient = folder.name
     game_dir = folder / "GameData"
-    session_csv = folder / "session.csv"
+    session_csv = folder / "sessions.csv"
     if not game_dir.is_dir():
         return
     print(f"\n== {patient}")
     if session_csv.exists():
-        print(f"   session.csv already exists - skipped (delete it to rebuild)")
+        print(f"   sessions.csv already exists - skipped (delete it to rebuild)")
         return
 
     trials, skipped = [], []
@@ -264,8 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data", type=Path, default=default_data_dir(), help="NOARK data folder")
     ap.add_argument("--patient", help="only this patient folder")
     ap.add_argument("--gap", type=float, default=30.0, help="minutes between trials that start a new session")
-    ap.add_argument("--location", default="PMR", help=":Location: line of session.csv")
-    ap.add_argument("--apply", action="store_true", help="rename files and write session.csv (default: dry run)")
+    ap.add_argument("--location", default="PMR", help=":Location: line of sessions.csv")
+    ap.add_argument("--apply", action="store_true", help="rename files and write sessions.csv (default: dry run)")
     args = ap.parse_args(argv)
 
     if not args.data.is_dir():

@@ -91,7 +91,7 @@ func _on_confirmed() -> void:
 		changed = changed or _minutes(m) != int(_previous.get(m, "0"))
 	if changed:
 		SessionLog.save_dose(_pid, _minutes("ML"), _minutes("AP"), _minutes("MLAP"), location)
-	# The site is the device's, not the patient's: session.csv and the raw logs read it from settings.
+	# The site is the device's, not the patient's: sessions.csv and the raw logs read it from settings.
 	if location != "" and location != Settings.get_value("location", ""):
 		Settings.set_value("location", location)
 		Settings.save()
