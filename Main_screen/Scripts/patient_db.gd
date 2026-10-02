@@ -37,6 +37,9 @@ func _ensure_directory_exists() -> void:
 		else:
 			push_error("Failed to create patient records directory: ", records_path)
 
+# The side the patient trains; required at registration.
+const AFFECTED_SIDES := ["Left", "Right", "Both"]
+
 func load_database() -> bool:
 	if not FileAccess.file_exists(database_file_path):
 		print("Patient database not found, creating new one")
@@ -65,10 +68,24 @@ func load_database() -> bool:
 		patient_register = data.get("patient_register", {})
 		current_patient_id = data.get("current_patient_id", "")
 		print("Loaded patient database with ", patient_register.size(), " patients")
+		_fill_missing_affected_side()
 		return true
 	else:
 		push_error("Invalid patient database format")
 		return false
+
+# Patients registered before the affected side was required get one at random,
+# so every patient has a training side. Saved at once, so it is assigned only once.
+func _fill_missing_affected_side() -> void:
+	var changed := false
+	for id in patient_register:
+		var patient: Dictionary = patient_register[id]
+		if patient.get("affected_hand", "") not in AFFECTED_SIDES:
+			patient["affected_hand"] = AFFECTED_SIDES.pick_random()
+			push_warning("Patient %s had no affected side; assigned %s at random" % [id, patient["affected_hand"]])
+			changed = true
+	if changed:
+		save_database()
 
 func save_database() -> bool:
 	var data = {

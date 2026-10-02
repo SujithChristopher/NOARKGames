@@ -39,6 +39,7 @@ var endgame : bool
 
 func _ready() -> void:
     json_path = OS.get_system_dir(2) + "//NOARK//data.json"
+    affected_hand_field.selected = -1   # no default: the therapist must pick the side
     _refresh_patient_data()
 
 func _refresh_patient_data() -> void:
@@ -77,7 +78,8 @@ func _get_affected_hand_string(hand_id: int) -> String:
 func _validate_patient_input() -> bool:
     return (patient_name_field.text.strip_edges() != "" and 
             hosp_id_field.text.strip_edges() != "" and 
-            age_field.text.strip_edges() != "")
+            age_field.text.strip_edges() != "" and
+            affected_hand_field.selected >= 0)   # affected side is required
 
 func _clear_form_fields() -> void:
     patient_name_field.text = ""
@@ -229,7 +231,7 @@ func _on_login_button_pressed() -> void:
     dose.confirmed_dose.connect(func():
         SessionLog.start_session(current_patient['hospital_id'])
         get_tree().change_scene_to_packed(MODE_SELECTION))
-    dose.open(self, current_patient['hospital_id'], current_patient['affected_hand'])
+    dose.open(self, current_patient['hospital_id'])
 
 # Window management
 func _on_auth_close_requested() -> void:

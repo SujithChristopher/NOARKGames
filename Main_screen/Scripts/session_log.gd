@@ -29,7 +29,7 @@ const SESSION_COLUMNS := [
 	"GameDuration", "SuccessRate", "MoveTime", "CurrentTargets", "CurrentHits", "CurrentMisses",
 	"CummulativeTargets", "CummulativeHits", "CummulativeMisses", "RawDataFileName",
 ]
-const DOSE_COLUMNS := ["HomerID", "DateTime", "TotalTime", "ML", "AP", "MLAP", "TrainingSide", "Location"]
+const DOSE_COLUMNS := ["HomerID", "DateTime", "TotalTime", "ML", "AP", "MLAP", "Location"]
 
 var patient_id: String = ""
 var session_number: int = 0
@@ -197,10 +197,11 @@ func latest_dose(pid: String) -> Dictionary:
 
 
 ## Minutes per day for each movement; TotalTime is their sum.
-func save_dose(pid: String, ml: int, ap: int, mlap: int, side: String, location: String) -> void:
+## The training side is not stored: it is the patient's affected hand (patients.json).
+func save_dose(pid: String, ml: int, ap: int, mlap: int, location: String) -> void:
 	var id := effective_id(pid)
 	_append(dose_path(id), [",".join(PackedStringArray(DOSE_COLUMNS))],
-		[id, _now(), ml + ap + mlap, ml, ap, mlap, side.replace(",", " "), location.replace(",", " ")])
+		[id, _now(), ml + ap + mlap, ml, ap, mlap, location.replace(",", " ")])
 
 
 # ── csv ───────────────────────────────────────────────────────────────────────

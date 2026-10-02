@@ -6,7 +6,7 @@ extends ConfirmationDialog
 ##
 ##   var d := DoseDialog.new()
 ##   d.confirmed_dose.connect(_go_on)
-##   d.open(self, patient_id, affected_hand)
+##   d.open(self, patient_id)
 
 signal confirmed_dose
 
@@ -16,25 +16,24 @@ const MAX_MINUTES := 180
 var _pid: String = ""
 var _previous: Dictionary = {}
 var _spins: Dictionary = {}   # movement -> SpinBox
-var _side: OptionButton
 var _location: LineEdit
 var _total: Label
 
 
-func open(parent: Node, pid: String, affected_hand: String) -> void:
+func open(parent: Node, pid: String) -> void:
 	_pid = pid
 	_previous = SessionLog.latest_dose(pid)
 	title = "Confirm therapy dose" if not _previous.is_empty() else "Enter therapy dose"
 	ok_button_text = "Confirm"
 	exclusive = true
-	_build(affected_hand)
+	_build()
 	confirmed.connect(_on_confirmed)
 	canceled.connect(queue_free)
 	parent.add_child(self)
 	popup_centered(Vector2i(640, 0))
 
 
-func _build(affected_hand: String) -> void:
+func _build() -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 14)
 	add_child(box)
@@ -58,14 +57,6 @@ func _build(affected_hand: String) -> void:
 		spin.value_changed.connect(func(_v): _refresh())
 		grid.add_child(spin)
 		_spins[m] = spin
-
-	grid.add_child(_sized(_label("Training side")))
-	_side = OptionButton.new()
-	for s in ["Left", "Right"]:
-		_side.add_item(s)
-	var side: String = _previous.get("TrainingSide", affected_hand)
-	_side.select(1 if side == "Right" else 0)
-	grid.add_child(_sized(_side))
 
 	grid.add_child(_sized(_label("Location")))
 	_location = LineEdit.new()
@@ -92,15 +83,14 @@ func _refresh() -> void:
 
 
 func _on_confirmed() -> void:
-	var side := _side.get_item_text(_side.selected)
 	var location := _location.text.strip_edges()
 	var changed: bool = _previous.is_empty() \
-		or side != _previous.get("TrainingSide", "") \
+\
 		or location != _previous.get("Location", "")
 	for m in SessionLog.MOVEMENTS:
 		changed = changed or _minutes(m) != int(_previous.get(m, "0"))
 	if changed:
-		SessionLog.save_dose(_pid, _minutes("ML"), _minutes("AP"), _minutes("MLAP"), side, location)
+		SessionLog.save_dose(_pid, _minutes("ML"), _minutes("AP"), _minutes("MLAP"), location)
 	# The site is the device's, not the patient's: session.csv and the raw logs read it from settings.
 	if location != "" and location != Settings.get_value("location", ""):
 		Settings.set_value("location", location)

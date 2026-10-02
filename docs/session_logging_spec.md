@@ -49,14 +49,15 @@ CummulativeStars.
 ## configdata.csv
 
 ```
-HomerID,DateTime,TotalTime,ML,AP,MLAP,TrainingSide,Location
+HomerID,DateTime,TotalTime,ML,AP,MLAP,Location
 ```
 
 - Minutes per day, not game specific. TotalTime = ML + AP + MLAP (auto).
 - DateTime = when the dose was set; last row is the active dose.
 - Location also updates `settings.json` `location`, which the `:Location:` line
   and the raw logs' `device_location` read.
-- Start/End dates, arm lengths and Group dropped.
+- Start/End dates, arm lengths, Group and TrainingSide dropped (the side is the
+  patient's affected hand in patients.json).
 
 ## Login flow
 
