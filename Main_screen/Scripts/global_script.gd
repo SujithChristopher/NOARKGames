@@ -95,6 +95,8 @@ var _ble_shutting_down: bool = false
 
 # ── python launcher ───────────────────────────────────────────────────────────
 @onready var interpreter_path: String
+const SENDER_SCRIPT := "sender_raspberryPI.py"
+var _quitting := false   # the close request is being handled (it waits for the upload)
 @onready var pyscript_path: String
 @onready var pypath_checker_path: String
 @export var endgame: bool = false
@@ -758,6 +760,9 @@ func change_patient() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if _quitting:
+			return
+		_quitting = true
 		handle_quit_request()
 		if stream_type == "udp":
 			thread_python.wait_to_finish()
@@ -770,7 +775,30 @@ func _notification(what: int) -> void:
 					ble_device.disconnect()
 				if _ble_manager != null:
 					_ble_manager.stop_scan()
+		# The last trial's row goes to the server before the app goes.
+		SessionLog.end_trial()
+		if SessionLog.is_uploading():
+			get_tree().paused = true
+			_show_upload_notice()
+			await SessionLog.uploads_finished
 		get_tree().quit()
+
+
+func _show_upload_notice() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 128
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.75)
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(shade)
+	var label := Label.new()
+	label.text = "Saving the session to the server..."
+	label.add_theme_font_size_override("font_size", 36)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.add_child(label)
+	add_child(layer)
 
 
 # ── path helpers ─────────────────────────────────────────────────────────────
@@ -794,6 +822,16 @@ func _pin_to_cpus(spec: String) -> void:
 		print("[CPU] Game pinned to cores %s" % spec)
 	else:
 		push_warning("[CPU] Could not pin the game to %s: %s" % [spec, output])
+
+
+## The Python that runs the helper scripts: the project's venv, else python3.
+func python() -> String:
+	return interpreter_path if FileAccess.file_exists(interpreter_path) else "python3"
+
+
+## sender_raspberryPI.py: patient sync (--sync) and session upload (--upload).
+func sender_path() -> String:
+	return _project_root().path_join(SENDER_SCRIPT)
 
 
 func _project_root() -> String:

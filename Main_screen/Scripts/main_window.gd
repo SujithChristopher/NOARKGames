@@ -12,7 +12,6 @@ var endgame : bool
 
 # Fetches patients.json from the server when the main screen opens. The
 # sender only uses the standard library, so any python3 runs it.
-const SENDER_SCRIPT = "sender_raspberryPI.py"
 var sync_thread := Thread.new()
 
 # The patient box is a combo box: typing filters the ids shown under it,
@@ -34,12 +33,8 @@ func _exit_tree() -> void:
 
 
 func _sync_patients() -> void:
-    var python: String = GlobalScript.interpreter_path
-    if not FileAccess.file_exists(python):
-        python = "python3"
-    var script := GlobalScript._project_root().path_join(SENDER_SCRIPT)
     var output := []
-    var code := OS.execute(python, [script, "--sync"], output, true)
+    var code := OS.execute(GlobalScript.python(), [GlobalScript.sender_path(), "--sync"], output, true)
     print("[sync] ", "".join(output).strip_edges())
     _on_sync_done.call_deferred(code)
 
