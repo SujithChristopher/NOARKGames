@@ -6,14 +6,17 @@ extends Node2D
 @onready var right_button = $HandSelectionPopup/HBoxContainer/RightButton
 
 
-var random_reach3D = preload("res://Games/random_reach/scenes/random_reach.tscn")
-var fly_through3D = preload("res://Games/flappy_bird/Scenes/flappy_main.tscn")
-var jumpify = preload("res://Games/Jumpify/Scenes/Levels/Level_01.tscn")
+# Loaded in the background once the menu is up (AssessmentGate.warm), not
+# preloaded: preloading every game here held the menu back 10-15 s.
+const RANDOM_REACH = "res://Games/random_reach/scenes/random_reach.tscn"
+const FLY_THROUGH = "res://Games/flappy_bird/Scenes/flappy_main.tscn"
+const JUMPIFY = "res://Games/Jumpify/Scenes/Levels/Level_01.tscn"
+const RESULTS = "res://Results/scenes/user_progress.tscn"
 const AssessmentGate = preload("res://Main_screen/Scripts/assessment_gate.gd")
-var results = preload("res://Results/scenes/user_progress.tscn")
 
 
 func _ready() -> void:
+    AssessmentGate.warm([RANDOM_REACH, FLY_THROUGH, JUMPIFY, RESULTS])
     logged_in_as.text = "Patient: " + PatientDB.current_patient_id
     add_child(preload("res://Main_screen/Scripts/dose_progress.gd").new())
     var affected_hand = GlobalSignals.affected_hand
@@ -33,21 +36,21 @@ func _ready() -> void:
 
 func _on_random_reach_3d_pressed() -> void:
     MusicManager.play_music("rr_bgm")
-    AssessmentGate.play(get_tree(), random_reach3D)
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(RANDOM_REACH))
 
 func _on_fly_through_3d_pressed() -> void:
    MusicManager.play_music("ft_bgm")
-   AssessmentGate.play(get_tree(), fly_through3D)
+   AssessmentGate.play(get_tree(), AssessmentGate.scene(FLY_THROUGH))
 
 func _on_jumpify_pressed() -> void:
   MusicManager.play_music("jy_bgm")
-  AssessmentGate.play(get_tree(), jumpify)
+  AssessmentGate.play(get_tree(), AssessmentGate.scene(JUMPIFY))
 
 func _on_assessment_pressed() -> void:
    AssessmentGate.assess(get_tree())
 
 func _on_results_pressed() -> void:
-    get_tree().change_scene_to_packed(results)
+    get_tree().change_scene_to_packed(AssessmentGate.scene(RESULTS))
     
 func _on_exit_pressed() -> void:
    GlobalScript._notification(NOTIFICATION_WM_CLOSE_REQUEST)

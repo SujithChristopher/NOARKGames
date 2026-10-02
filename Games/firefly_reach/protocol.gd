@@ -25,11 +25,15 @@ static var WARMUP_ROUNDS: int = 1   # played before calibration, not counted (0-
 static var CALIB_ROUNDS: int = 5
 static var PLAY_ROUNDS: int = 15
 
-# Warm-up speed points (spec §4.4; calibration used them until 2026-09-28). A
-# warm-up hold must start within POINT_CAP_S of the spawn (round_runner.gd);
-# it is also the staircase's longest lifetime.
+# Warm-up speed points (spec §4.4; calibration used them until 2026-09-28).
+# POINT_CAP_S is the staircase's longest lifetime and how long a reposition
+# firefly waits. A warm-up hold must start within WARMUP_CAP_S of the spawn
+# (round_runner.gd): the three diamonds go out at equal steps, 1 s each, and
+# the bat takes the firefly as the last one goes (2026-10-02; before, the last
+# diamond stayed lit up to POINT_CAP_S).
 static var POINT_CAP_S: float = 8.0
 static var POINT_LIMITS_S: Array = [1.0, 2.0]   # MT < 1.0 s -> 3 points, < 2.0 s -> 2, else 1
+static var WARMUP_CAP_S: float = 3.0            # ...and 1 point up to here
 
 # Reach scan (spec §4.3): fixed in reach_scan.gd (30-corner polygon the
 # participant stretches; since 2026-09-28 — the spoke speed and wait are gone).

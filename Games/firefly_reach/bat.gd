@@ -21,7 +21,9 @@ extends RefCounted
 #   SNATCH:  then it flies off carrying it, the light fading over CARRY_S.
 # (2026-09-29: the first version dropped the firefly at once and showed only a
 # small one in the bat's mouth; on the board it looked as if it just vanished.)
-# Warm-up and reposition fireflies have no deadline: it only patrols.
+# Warm-up fireflies: it hunts only during the last diamond (hunt's not_before),
+# arriving as the cap ends. Reposition fireflies have no deadline: it patrols,
+# and swoops from its perch if one reaches its cap uncaught.
 # Warm brown with see-through reddish wings and a light edge, as if the moon
 # were behind it (black did not show on the night sky).
 # Screen pixels; times on the runner's clock (_now(), seconds).
@@ -83,7 +85,7 @@ var _dir := Vector2.RIGHT      # snatch direction
 var _s0 := 0.0
 var _carry := INF              # when the carried light began to fade (flight start)
 var _carrying := false
-var _pending: Array = []       # a hunt waiting to start: [target, r, spawn, window, release time]
+var _pending: Array = []       # a hunt waiting to start: [target, r, spawn, window, release time, not_before]
 var _leave_t0 := -9.0          # when the bat last began to fly away
 var _target := Vector2.ZERO    # the firefly it is (or was last) hunting
 var _avoid := false            # giving up: move straight away from _target first
@@ -114,17 +116,20 @@ func set_play_band(top: float, bottom: float) -> void:
 # It may start later — while it is still taking a missed firefly (SWOOP, GRAB),
 # while it is still flying away (LEAVE_MIN_S), or RESUME_DELAY_S after a hold
 # broke (resume = true) — but never later than half the lifetime; it still
-# arrives at spawn + window, just faster.
-func hunt(target: Vector2, r: float, spawn: float, window: float, now: float, resume: bool = false) -> void:
+# arrives at spawn + window, just faster. not_before holds it back further
+# (the warm-up's last diamond), past that half-lifetime limit.
+func hunt(target: Vector2, r: float, spawn: float, window: float, now: float, resume: bool = false,
+		not_before: float = 0.0) -> void:
 	_target = target
 	var release := now + (RESUME_DELAY_S if resume else 0.0)
 	if _state == State.SNATCH or _state == State.RETREAT:
 		release = maxf(release, _leave_t0 + LEAVE_MIN_S)
 	release = minf(release, spawn + LEAVE_MAX_FRAC * window)
+	release = maxf(release, not_before)
 	if _state == State.SWOOP or _state == State.GRAB:
 		release = INF   # set when the grab ends
 	if release > now:
-		_pending = [target, r, spawn, window, release]
+		_pending = [target, r, spawn, window, release, not_before]
 		return
 	_start_hunt(target, r, spawn, window, now)
 
@@ -172,6 +177,11 @@ func missed(target: Vector2, L: float, ang: float, _now_s: float) -> void:
 
 func is_hunting() -> bool:
 	return _state == State.HUNT
+
+
+# Still flying at, or holding, a missed firefly: the next one waits for this.
+func is_taking() -> bool:
+	return _state == State.SWOOP or _state == State.GRAB
 
 
 func _mouth() -> Vector2:
@@ -241,7 +251,8 @@ func update(dt: float, now: float) -> void:
 				_s0 = now
 				_leave_t0 = now
 				if not _pending.is_empty():   # a hunt that came during the grab: after the leave
-					_pending[4] = minf(now + LEAVE_MIN_S, float(_pending[2]) + LEAVE_MAX_FRAC * float(_pending[3]))
+					_pending[4] = maxf(minf(now + LEAVE_MIN_S, float(_pending[2]) + LEAVE_MAX_FRAC * float(_pending[3])),
+						float(_pending[5]))
 		State.SNATCH:
 			pos += (_dir * SNATCH_PX_S + Vector2(0.0, -120.0)) * dt
 			if now - _s0 > SNATCH_S:

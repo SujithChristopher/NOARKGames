@@ -81,7 +81,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 
 **Patient flow**: no registry in NOARK. When the main screen opens it runs `sender_raspberryPI.py --sync` on a thread, which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients only; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used.
 
-**Login flow**: patient id typed or picked from the dropdown on the main screen → `DoseDialog` confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen
+**Login flow**: patient id typed or picked from the suggestion list on the main screen → the dose screen (`Main_screen/Scenes/dose.tscn`, `dose_screen.gd`) confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen
 
 **Trial flow**: game start → `Manager.create_game_log_file(game_name, patient_id)` → `SessionLog.begin_trial` names the raw file → log rows every ~0.02s → game calls `SessionLog.hit()` / `miss()` → `SessionLog.end_trial()` at game over appends the sessions.csv row. Leaving the scene, starting another trial, or closing the app also ends the trial. MoveTime excludes pauses (`GlobalTimer.pause_timer` → `SessionLog.set_paused`).
 

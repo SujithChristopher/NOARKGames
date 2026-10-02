@@ -7,7 +7,7 @@ extends Button
 @onready var hosp_id_edit: LineEdit = $"../TextureRect/HospID"
 @onready var sync_status: Label = $"../TextureRect/SyncStatus"
 @onready var loading_dialog: AcceptDialog = AcceptDialog.new()
-const DoseDialog = preload("res://Main_screen/Scripts/dose_dialog.gd")
+const DOSE_SCENE = "res://Main_screen/Scenes/dose.tscn"
 var endgame : bool
 
 # Fetches patients.json from the server when the main screen opens. The
@@ -192,9 +192,5 @@ func _login() -> void:
     GlobalScript.change_patient()
     GlobalSignals.current_patient_id = hosp_id
     GlobalSignals.affected_hand = patient.get("affected_hand", "")
-    # Confirm today's dose, then the session starts and the 2D/3D choice opens.
-    var dose := DoseDialog.new()
-    dose.confirmed_dose.connect(func():
-        SessionLog.start_session(hosp_id)
-        get_tree().change_scene_to_file("res://Main_screen/Scenes/mode.tscn"))
-    dose.open(get_tree().current_scene, hosp_id)
+    # The dose screen confirms today's dose, then starts the session.
+    get_tree().change_scene_to_file(DOSE_SCENE)
