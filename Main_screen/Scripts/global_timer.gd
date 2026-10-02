@@ -18,10 +18,12 @@ func stop_timer() -> void:
 	
 
 func pause_timer() -> void:
+	SessionLog.set_paused(true)
 	if timer_running:
 		timer_paused = true
 
 func resume_timer() -> void:
+	SessionLog.set_paused(false)
 	if timer_running and timer_paused:
 		timer_paused = false
 

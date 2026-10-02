@@ -13,6 +13,7 @@ extends Node
 const LEGACY_PATH := "res://settings.json"
 const DEFAULTS := {
 	"debug": false,
+	"location": "PMR",
 	"udp_port": 8000,
 	"display": false,
 	"tracker_cpus": "4-7",

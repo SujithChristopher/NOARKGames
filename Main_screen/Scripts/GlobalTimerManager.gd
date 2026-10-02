@@ -11,6 +11,7 @@ var timer_selector_instance: Control = null
 # Countdown variables
 var countdown_timer: Timer = null
 var countdown_time: int = 0
+var countdown_total: int = 0   # the length chosen for this countdown (SessionLog's GameDuration)
 var countdown_active: bool = false
 var current_game_node: Node = null
 
@@ -44,6 +45,7 @@ func remove_timer_selector_from_game() -> void:
 
 func start_countdown_with_time(time: int) -> void:
 	countdown_time = time
+	countdown_total = time
 	countdown_active = true
 	countdown_timer.start()
 	_emit_countdown_update()

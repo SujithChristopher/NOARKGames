@@ -133,7 +133,6 @@ func connect_signals() -> void:
 
 func initialize_game_state() -> void:
     network_position = Vector2.ZERO
-    GlobalScript.start_new_session_if_needed()
 
 func update_top_score_display() -> void:
     var top_score = ScoreManager.get_top_score(patient_id, game_name)
@@ -336,6 +335,7 @@ func show_game_over() -> void:
     ui_nodes.high_score.text = str(top_score)
     GlobalTimer.stop_timer()
     game_started = false
+    SessionLog.end_trial()
     save_final_score_to_log(score)
     ui_nodes.game_over_label.visible = true
     ui_nodes.color_rect.show()

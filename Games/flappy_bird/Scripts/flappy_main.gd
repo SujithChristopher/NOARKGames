@@ -158,7 +158,7 @@ func _connect_signals() -> void:
 	_panel_nodes.game_over_scene.restart_games.connect(restart_game)
 
 func _setup_logging() -> void:
-	GlobalScript.start_new_session_if_needed()
+	pass   # the trial log opens at game start (_setup_game_logging)
 
 func _initialize_scoring() -> void:
 	_update_top_score_display()
@@ -241,6 +241,7 @@ func show_game_over() -> void:
 	_ui_nodes.high_score.text = str(top_score)
 	print("Game Over!")
 	game_running = false
+	SessionLog.end_trial()
 	save_final_score_to_log(score)
 	GlobalTimer.stop_timer()
 	_ui_nodes.game_over_label.visible = true
@@ -405,6 +406,7 @@ func pipe_hit() -> void:
 	can_score = false  
 	MusicManager.play_sound_effect("hit")
 	missed_count += 1
+	SessionLog.miss()
 	_ui_nodes.missed_label.text = "Missed " + str(missed_count)
 	flash_animation.emit()
 	await get_tree().create_timer(0.5).timeout
@@ -425,6 +427,7 @@ func scored() -> void:
 	can_score = false  
 	MusicManager.play_sound_effect("scored")
 	score += 1
+	SessionLog.hit()
 
 	# Show +1 animation properly
 	plus_one.visible = true

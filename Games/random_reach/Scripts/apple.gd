@@ -1,5 +1,6 @@
 extends Area2D
 signal apple_eaten
+signal apple_missed   # its timer ran out before it was eaten
 @onready var anim = $Sprite2D
 @onready var timer_circle = $TimerCircle
 @onready var score_label = Label.new()
@@ -155,4 +156,5 @@ func _on_body_exited(body: Node2D):
 
 func _on_timer_timeout():
 	if not is_eaten:
+		apple_missed.emit()
 		queue_free()

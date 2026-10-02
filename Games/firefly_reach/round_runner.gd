@@ -432,6 +432,7 @@ func _update_pause() -> void:
 	if lost == _paused:
 		return
 	_paused = lost
+	SessionLog.set_paused(lost)
 	if not lost:
 		return
 	if not _apple.is_empty():
@@ -755,6 +756,10 @@ func _finish_apple(outcome: String, t: float) -> void:
 		outcome = "missed"
 	_mark(outcome, int(a["n"]))
 	var caught := outcome == "caught"
+	if caught:
+		SessionLog.hit()
+	elif outcome == "missed" or outcome == "timeout":
+		SessionLog.miss()
 	var mt := -1.0
 	var pts := 0
 	if caught:

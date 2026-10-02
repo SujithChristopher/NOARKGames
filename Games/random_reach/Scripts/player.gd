@@ -148,7 +148,6 @@ func _connect_signals() -> void:
 
 func _initialize_game_state() -> void:
 	network_position = Vector2.ZERO
-	GlobalScript.start_new_session_if_needed()
 
 func _update_top_score_display() -> void:
 	var top_score = ScoreManager.get_top_score(patient_id, game_name)
@@ -277,6 +276,7 @@ func _spawn_new_apple() -> void:
 
 	# Connect apple signals
 	current_apple.apple_eaten.connect(_on_apple_eaten)
+	current_apple.apple_missed.connect(SessionLog.miss)
 	current_apple.tree_exited.connect(_on_apple_removed)
 
 	# Set apple position
@@ -353,6 +353,7 @@ func show_game_over() -> void:
 	_ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
 	GlobalTimer.stop_timer()
 	game_started = false
+	SessionLog.end_trial()
 	save_final_score_to_log(score)
 	_ui_nodes.game_over_label.show()
 	_ui_nodes.color_rect.visible = true
@@ -412,6 +413,7 @@ func _on_apple_removed() -> void:
 	current_apple = null
 
 func _on_apple_eaten() -> void:
+	SessionLog.hit()
 	if score < max_score:
 		score += 1
 		_ui_nodes.score_board.text = str(score)

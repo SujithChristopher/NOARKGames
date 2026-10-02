@@ -28,6 +28,7 @@ boot_splash/minimum_display_time=2000
 
 Settings="*res://Main_screen/Scripts/settings.gd"
 PatientDB="*res://Main_screen/Scripts/patient_db.gd"
+SessionLog="*res://Main_screen/Scripts/session_log.gd"
 Manager="*res://Main_screen/Scripts/manager.gd"
 GlobalSignals="*res://Main_screen/Scripts/global_signals.gd"
 GlobalScript="*res://Main_screen/Scripts/global_script.gd"

@@ -44,6 +44,7 @@ func _physics_process(delta):
         match collider_name:
             "bottom":
                 computer_score += 1
+                SessionLog.miss()
                 status = "ground"
                 GlobalSignals.hit_ground = collision_point
                 print("Hit bottom at:", collision_point)
@@ -78,6 +79,7 @@ func _physics_process(delta):
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "player":
+                SessionLog.hit()
                 MusicManager.play_sound_effect("ball")
                 _reset_side_hit_counter()
                 status = "player"

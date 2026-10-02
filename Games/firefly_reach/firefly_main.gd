@@ -32,6 +32,7 @@ func _ready() -> void:
 	root.content_scale_size = Vector2i(1920, 1080)
 	root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
 	_patient_id = "vvv" if Manager.debug else PatientDB.current_patient_id
+	GlobalTimerManager.stop_countdown()   # untimed: no GameDuration left over from another game
 	_runner = RoundRunner.new()
 	_runner.config = {
 		"participant": _patient_id, "day": 0, "quick": false, "resume": {},
@@ -46,6 +47,7 @@ func _ready() -> void:
 
 
 func _save_score() -> void:
+	SessionLog.end_trial()
 	ScoreManager.update_top_score(_patient_id, RoundRunner.GAME_NAME, _runner.play_caught())
 
 
@@ -60,6 +62,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _exit_tree() -> void:
+	SessionLog.end_trial()   # left early: the trial still gets its row
 	var root := get_tree().root
 	root.content_scale_size = _prev_scale_size
 	root.content_scale_aspect = _prev_aspect

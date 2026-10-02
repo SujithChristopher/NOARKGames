@@ -15,6 +15,7 @@ var results = preload("res://Results/scenes/user_progress.tscn")
 
 func _ready() -> void:
     logged_in_as.text = "Patient: " + PatientDB.current_patient_id
+    add_child(preload("res://Main_screen/Scripts/dose_progress.gd").new())
     var affected_hand = GlobalSignals.affected_hand
     
     if affected_hand == "Left":

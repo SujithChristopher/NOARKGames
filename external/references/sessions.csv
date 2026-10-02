@@ -1,0 +1,10 @@
+﻿:Location: ranipet
+:Device: MARS
+:User: test1
+SessionNumber,DateTime,TrialNumberDay,TrialNumberSession,TrialStartTime,TrialStopTime,TrialRawDataFile,Movement,TrainingPlaneAngle,GameName,ReachSpeed,GameParameter,GameDuration,SuccessRate,MoveTime,CurrentTargets,CurrentHits,CurrentMisses,CummulativeTargets,CummulativeHits,CummulativeMisses,currentStar,CummulativeStars,RawDataFileName
+1,2026-06-29 12:28:03,1,1,2026-06-29 12:29:22,2026-06-29 12:30:24,test1,ML,-90,SS,0.135,3.292938,60,77,60,22,17,5,22,17,5,1,1,raw-sess01-trial001-SS-ML.csv
+1,2026-06-29 12:28:03,2,2,2026-06-29 12:32:54,2026-06-29 12:33:55,test1,ML,-90,SS,0.135,3.292938,60,100,60,31,31,0,53,48,5,0,1,raw-sess01-trial002-SS-ML.csv
+2,2026-06-30 15:43:31,1,1,2026-06-30 15:43:54,2026-06-30 15:44:32,test1,ML,-90,SS,0.135,3.292938,60,76,38,17,13,3,70,61,8,0,1,raw-sess02-trial001-SS-ML.csv
+2,2026-06-30 15:43:31,1,1,2026-06-30 15:47:57,2026-06-30 15:48:04,test1,AP,-90,TT,0.025,9.986823,60,0,7,1,0,0,1,0,0,0,1,raw-sess02-trial001-TT-AP.csv
+2,2026-06-30 15:43:31,1,1,2026-06-30 15:48:10,2026-06-30 15:49:11,test1,MLAP,-90,TW,0,0.0009,60,93,60,16,15,0,16,15,0,1,2,raw-sess02-trial001-TW-MLAP.csv
+2,2026-06-30 15:43:31,2,2,2026-06-30 15:49:24,2026-06-30 15:50:26,test1,ML,-90,MC,0.125,3.556372,60,85,60,14,12,2,14,12,2,1,3,raw-sess02-trial002-MC-ML.csv

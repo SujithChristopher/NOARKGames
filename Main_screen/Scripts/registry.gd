@@ -5,6 +5,7 @@ const ADMIN_PASSWORD = "CMC"
 const MAIN_SCENE_PATH = "res://Main_screen/Scenes/main.tscn"
 const SELECT_GAME_SCENE_PATH = preload("res://Main_screen/Scenes/select_game.tscn")
 const MODE_SELECTION = preload("res://Main_screen/Scenes/mode.tscn")
+const DoseDialog = preload("res://Main_screen/Scripts/dose_dialog.gd")
 
 # Enums for better type safety
 enum Gender { MALE, FEMALE, OTHERS, UNSPECIFIED = -1 }
@@ -222,7 +223,13 @@ func _on_login_button_pressed() -> void:
     GlobalSignals.affected_hand = current_patient['affected_hand']
 
     _save_patient_data()
-    get_tree().change_scene_to_packed(MODE_SELECTION)
+    # The therapy dose is confirmed (or entered) before the session starts.
+    login_to_patient.hide()
+    var dose := DoseDialog.new()
+    dose.confirmed_dose.connect(func():
+        SessionLog.start_session(current_patient['hospital_id'])
+        get_tree().change_scene_to_packed(MODE_SELECTION))
+    dose.open(self, current_patient['hospital_id'], current_patient['affected_hand'])
 
 # Window management
 func _on_auth_close_requested() -> void:

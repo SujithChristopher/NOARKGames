@@ -6,6 +6,7 @@ extends Button
 @onready var patient_notfound = $"../Patient_notfound"
 @onready var loading_dialog: AcceptDialog = AcceptDialog.new()
 var registry_scene = preload("res://Main_screen/Scenes/registry.tscn")
+const DoseDialog = preload("res://Main_screen/Scripts/dose_dialog.gd")
 var endgame : bool
 
 
@@ -62,12 +63,18 @@ func _on_hosp_id_text_submitted(new_text: String) -> void:
     if patient_name == "" and hosp_id == "":
         popup.show()
     else:
-        if PatientDB.get_patient(hosp_id):
+        var patient = PatientDB.get_patient(hosp_id)
+        if patient:
             PatientDB.current_patient_id = hosp_id
             GlobalScript.change_patient()
             GlobalSignals.current_patient_id = hosp_id
             PatientDB.save_database()
-            get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+            # Same dose check as the registry login, then the session starts.
+            var dose := DoseDialog.new()
+            dose.confirmed_dose.connect(func():
+                SessionLog.start_session(hosp_id)
+                get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn"))
+            dose.open(get_tree().current_scene, hosp_id, patient.get("affected_hand", ""))
         else:
             patient_notfound.show()
             

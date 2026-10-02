@@ -24,7 +24,7 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Settings** live at `{DOCUMENTS}/NOARK/settings.json`, not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). Godot passes the path to `tracker.py` with `--settings`.
+**Settings** live at `{DOCUMENTS}/NOARK/settings.json`, not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). `location` (the site written to session.csv and raw logs) is set from the login dose dialog. Godot passes the path to `tracker.py` with `--settings`.
 
 **Debug mode** — edit that file (a `debug.json` also exists but nothing reads it):
 ```json
@@ -62,25 +62,28 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 |---|------|--------|---------|
 | 1 | Settings | `Main_screen/Scripts/settings.gd` | User settings file (must be first) |
 | 2 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Patient JSON database |
-| 3 | Manager | `Main_screen/Scripts/manager.gd` | CSV session log creation |
-| 4 | GlobalSignals | `Main_screen/Scripts/global_signals.gd` | Signal bus + shared state |
-| 5 | GlobalScript | `Main_screen/Scripts/global_script.gd` | Session/trial IDs, UDP, screen scaling |
-| 6 | SoundFx | `Main_screen/Scenes/SoundFx.tscn` | Audio management |
-| 7 | GlobalTimer | `Main_screen/Scripts/global_timer.gd` | Session-wide timer |
-| 8 | ScoreManager | `Main_screen/Scripts/score_db.gd` | High score persistence |
-| 9 | DebugSettings | `Main_screen/Scripts/debug_settings.gd` | Debug config |
-| 10 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
-| 11 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
-| 12 | GlobalTimerManager | `Main_screen/Scripts/global_timer_manager.gd` | Countdown timer with signals |
-| 13 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
-| 14 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
-| 15 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
+| 3 | SessionLog | `Main_screen/Scripts/session_log.gd` | Per-patient session.csv, trial numbering, therapy dose |
+| 4 | Manager | `Main_screen/Scripts/manager.gd` | Raw trial CSV creation |
+| 5 | GlobalSignals | `Main_screen/Scripts/global_signals.gd` | Signal bus + shared state |
+| 6 | GlobalScript | `Main_screen/Scripts/global_script.gd` | UDP, screen scaling |
+| 7 | SoundFx | `Main_screen/Scenes/SoundFx.tscn` | Audio management |
+| 8 | GlobalTimer | `Main_screen/Scripts/global_timer.gd` | Session-wide timer |
+| 9 | ScoreManager | `Main_screen/Scripts/score_db.gd` | High score persistence |
+| 10 | DebugSettings | `Main_screen/Scripts/debug_settings.gd` | Debug config |
+| 11 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
+| 12 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
+| 13 | GlobalTimerManager | `Main_screen/Scripts/GlobalTimerManager.gd` | Countdown timer with signals |
+| 14 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
+| 15 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
+| 16 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
 
 ### Data Flow
 
 **Patient flow**: Registration UI → `PatientDB.add_patient()` → JSON at `{DOCUMENTS}/NOARK/records/patients.json`
 
-**Session flow**: Game `_ready()` → `Manager.create_game_log_file(game_name, patient_id)` → CSV file handle → log rows every ~0.02s → close on game end
+**Login flow**: patient login (registry, or Hosp-ID on the main screen) → `DoseDialog` confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in session.csv + 1)
+
+**Trial flow**: game start → `Manager.create_game_log_file(game_name, patient_id)` → `SessionLog.begin_trial` names the raw file → log rows every ~0.02s → game calls `SessionLog.hit()` / `miss()` → `SessionLog.end_trial()` at game over appends the session.csv row. Leaving the scene, starting another trial, or closing the app also ends the trial. MoveTime excludes pauses (`GlobalTimer.pause_timer` → `SessionLog.set_paused`).
 
 **Score flow**: Game end → `ScoreManager.update_top_score(patient_id, game_name, score)` → JSON at `{DOCUMENTS}/NOARK/records/scores.json`
 
@@ -89,11 +92,18 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 {DOCUMENTS}/NOARK/
   records/patients.json        # patient database
   records/scores.json          # high scores per patient per game
-  data/{patient_id}/GameData/  # CSV session logs
+  data/{patient_id}/session.csv     # one row per trial (MARS sessions.csv format)
+  data/{patient_id}/configdata.csv  # therapy dose history; last row is active
+  data/{patient_id}/GameData/       # raw trial CSVs
 ```
 
-**CSV filename format**: `{game}_S{session}_T{trial}_{date}.csv`
-**CSV header**: 7 lines — `game_name, h_id, device_location, device_version, protocol_version, start_time, headerrows`
+See `docs/session_logging_spec.md` for the session.csv / configdata.csv columns.
+Movement per game: FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach, FireflyReach = MLAP (`SessionLog.MOVEMENT`).
+
+**Raw filename format**: `raw-sess{NN}-trial{NNN}-{Game}-{Mode}.csv` (trial = nth of that game+mode in the session)
+**Raw CSV header**: 7 lines — `headerrows, game_name, h_id, device_location, device_version, protocol_version, start_time`
+
+`pyscripts/rebuild_sessions.py` converts pre-session.csv data (old `{game}_S*_T*_{date}.csv` files): dry run by default, `--apply` renames and writes.
 
 ### Games
 
@@ -126,12 +136,13 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 ## Critical Implementation Details
 
 ### Adding a New Game
-1. Call `Manager.create_game_log_file(game_name, patient_id)` in `_ready()` and store the returned handle
-2. Use `GlobalScript.session_id` and `GlobalScript.get_next_trial_id(game_name)`
-3. Log rows via the handle at ~0.02s intervals using a Timer node
-4. Check `if debug: p_id = 'vvv'` before constructing any file paths
+1. Call `Manager.create_game_log_file(game_name, patient_id)` when play starts and store the returned handle (session/trial numbering and the debug `vvv` id are handled by `SessionLog`)
+2. Log rows via the handle at ~0.02s intervals using a Timer node
+3. Call `SessionLog.hit()` / `SessionLog.miss()` per target, and `SessionLog.end_trial()` at game over
+4. Pause through `GlobalTimer.pause_timer()` / `resume_timer()` so MoveTime leaves pauses out
 5. Close the file handle on game end
-6. For 2D/3D support: set `game_name` dynamically via an `is_3d_mode` flag
+6. For 2D/3D support: set `game_name` dynamically via an `is_3d_mode` flag (`"…3D"` suffix → Mode 3D)
+7. Add the game to `SessionLog.MOVEMENT` (and `MOVEMENT` in `pyscripts/rebuild_sessions.py`)
 
 ### Marker Geometry (Rigid Body)
 

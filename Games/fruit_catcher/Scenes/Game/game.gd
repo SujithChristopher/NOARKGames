@@ -181,7 +181,6 @@ func start_game() -> void:
 	spawn_gem()
 
 func setup_game_logging() -> void:
-	GlobalScript.start_new_session_if_needed()
 	game_log_file = Manager.create_game_log_file(GAME_NAME, GlobalSignals.current_patient_id)
 	game_log_file.store_csv_line(PackedStringArray([
 		'epochtime', 'score', 'status', 'pause_state',
@@ -215,6 +214,7 @@ func _on_gem_off_screen() -> void:
 	current_gem = null
 	status = "gem_missed"
 	missed_gems += 1
+	SessionLog.miss()
 	
 	await get_tree().create_timer(0.5).timeout
 	if game_active:
@@ -226,6 +226,7 @@ func _on_paddle_area_entered(area: Area2D) -> void:
 		show_score_popup(area.position)
 		
 		_score += 1
+		SessionLog.hit()
 		score_label.text = str(_score)
 		print("Gem caught! Score: ", _score)
 		status = "gem_caught"
@@ -307,6 +308,7 @@ func end_game() -> void:
 	
 	paddle.set_process(false)
 	log_timer.stop()
+	SessionLog.end_trial()
 	
 	# Save final score
 	save_final_score()

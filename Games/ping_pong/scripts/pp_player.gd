@@ -107,7 +107,7 @@ func _initialize_game_state() -> void:
     pause_state = 1
 
 func _setup_logging() -> void:
-    GlobalScript.start_new_session_if_needed()
+    pass   # the trial log opens at game start (_setup_game_logging)
 
 func _update_top_score_display() -> void:
     var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, GAME_NAME)
@@ -232,6 +232,7 @@ func show_game_over() -> void:
     var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, GAME_NAME)
     high_score.text = str(top_score)
     ball.game_started = false
+    SessionLog.end_trial()
     save_final_score_to_log(GlobalScript.current_score)
     GlobalTimer.stop_timer()
     game_over_label.visible = true

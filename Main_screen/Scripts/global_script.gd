@@ -2,11 +2,6 @@ extends Node
 
 const TableFit := preload("res://Main_screen/Scripts/table_fit.gd")
 
-# ── session state ─────────────────────────────────────────────────────────────
-var session_id: int = 1
-var current_date: String = ""
-var trial_counts: Dictionary = {}
-
 # ── screen bounds ─────────────────────────────────────────────────────────────
 var X_SCREEN_OFFSET: int
 var Y_SCREEN_OFFSET: int
@@ -154,8 +149,6 @@ func _ready() -> void:
 	udp_port        = Settings.get_value("udp_port", 8000)
 	_pin_to_cpus(Settings.get_value("game_cpus", ""))
 
-	current_date = get_date_string()
-	load_session_info()
 	load_table()
 
 	# Use the actual rendered viewport area — correct on all platforms including
@@ -817,47 +810,6 @@ func _project_root() -> String:
 func get_date_string() -> String:
 	var time = Time.get_datetime_dict_from_system()
 	return "%04d-%02d-%02d" % [time.year, time.month, time.day]
-
-
-func start_new_session_if_needed() -> void:
-	var today = get_date_string()
-	if today != current_date:
-		current_date = today
-		session_id   = 1
-		trial_counts.clear()
-	else:
-		session_id += 1
-		trial_counts.clear()
-	save_session_info()
-
-
-func get_next_trial_id(game_name: String) -> int:
-	if not trial_counts.has(game_name):
-		trial_counts[game_name] = 1
-	else:
-		trial_counts[game_name] += 1
-	save_session_info()
-	return trial_counts[game_name]
-
-
-func load_session_info() -> void:
-	if FileAccess.file_exists("user://session.json"):
-		var file = FileAccess.open("user://session.json", FileAccess.READ)
-		var data = JSON.parse_string(file.get_as_text())
-		if typeof(data) == TYPE_DICTIONARY:
-			current_date = data.get("current_date", get_date_string())
-			session_id   = data.get("session_id", 1)
-			trial_counts = data.get("trial_counts", {})
-
-
-func save_session_info() -> void:
-	var data = {
-		"current_date": current_date,
-		"session_id":   session_id,
-		"trial_counts": trial_counts,
-	}
-	var file = FileAccess.open("user://session.json", FileAccess.WRITE)
-	file.store_string(JSON.stringify(data))
 
 
 func get_top_score_for_game(game_name: String, p_id: String) -> int:
