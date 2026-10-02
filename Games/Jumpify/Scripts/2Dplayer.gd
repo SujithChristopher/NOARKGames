@@ -27,7 +27,6 @@ var game_over = false
 var countdown_time = 0
 var countdown_active = false
 var pause_state = 1
-var adapt_toggle: bool = false
 
 # Status tracking variables
 var coin_collected_timer = 0.0
@@ -63,7 +62,6 @@ var log_timer := Timer.new()
     "game_over_label": $"../Gameover",
     "top_score_label": $"../HighScore/TopScoreLabel",
     "color_rect": $"../Gameover",
-    "warning_window": $"../Warning",
     "paused_screen":$"../Paused",
     "current_score":$"../Gameover/CurrentScore",
     "high_score":$"../Gameover/HighScore"
@@ -71,10 +69,6 @@ var log_timer := Timer.new()
 
 @onready var panel_nodes = {
     "pause_button": $"../UserInterface/GameUI/PauseButton"
-}
-
-@onready var button_nodes = {
-    "adapt_prom": $"../UserInterface/GameUI/AdaptProm"
 }
 
 # Original node references
@@ -184,14 +178,9 @@ func update_coin_target_position() -> void:
     if coin_node and is_instance_valid(coin_node):
         var coin_pos = coin_node.position
         
-        if not adapt_toggle:
-            # Standard mode calculations - convert coin position to game coordinates
-            coin_target_x = (coin_pos.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
-            coin_target_z = (coin_pos.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
-        else:
-            # Adaptive mode calculations - convert coin position to game coordinates
-            coin_target_x = (coin_pos.x - GlobalScript.X_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_X * GlobalSignals.global_scalar_x)
-            coin_target_z = (coin_pos.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Z * GlobalSignals.global_scalar_y)
+        # Convert coin position to game coordinates
+        coin_target_x = (coin_pos.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
+        coin_target_z = (coin_pos.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
     else:
         # If coin node is invalid, use player position as fallback
         coin_target_x = game_x
@@ -204,8 +193,6 @@ func update_player_position() -> void:
     # Get position from different sources based on mode
     if debug_mode:
         network_position = get_global_mouse_position()
-    elif adapt_toggle:
-        network_position = GlobalScript.scaled_network_position3D
     else:
         network_position = GlobalScript.network_position3D
     
@@ -228,16 +215,9 @@ func update_position_tracking() -> void:
     pos_y = GlobalScript.raw_y
     pos_z = GlobalScript.raw_z
     
-    if not adapt_toggle:
-        # Standard mode calculations for Jumpify (2D mode)
-        game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
-        game_y = 0.0  # Jumpify is primarily 2D
-        game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
-    else:
-        # Adaptive mode calculations
-        game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_X * GlobalSignals.global_scalar_x)
-        game_y = 0.0
-        game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Z * GlobalSignals.global_scalar_y)
+    game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
+    game_y = 0.0  # Jumpify is primarily 2D
+    game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
 
 # Handle status with timers - no coin.gd changes needed
 func update_status_based_on_timers(delta):
@@ -362,20 +342,6 @@ func _on_retry_button_pressed() -> void:
     
     # Show timer selector for retry
     GlobalTimerManager.show_timer_selector_for_retry()
-
-# Adaptive ROM System
-func _on_adapt_rom_toggled(toggled_on: bool) -> void:
-    if toggled_on and not GlobalSignals.assessment_done:
-        button_nodes.adapt_prom.button_pressed = false
-        ui_nodes.warning_window.visible = true
-        return
-    adapt_toggle = toggled_on
-
-func _on_do_assess_pressed() -> void:
-    get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
-
-func _on_close_assess_pressed() -> void:
-    ui_nodes.warning_window.visible = false
 
 # CSV Logging System
 func setup_game_logging() -> void:

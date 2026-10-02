@@ -43,7 +43,6 @@ var packets: String = ""
 var game_log_file
 
 # Settings
-@onready var adapt_toggle: bool = false
 @onready var debug_mode = DebugSettings.debug_mode
 
 # Timers
@@ -55,8 +54,6 @@ var game_log_file
 # UI Labels
 @onready var countdown_display: Control = $"../CircularTimer"
 @onready var top_score_label: Label = $"../CanvasLayer/TextureRect/TopScoreLabel"
-@onready var warning_window: TextureRect= $"../Warning"
-@onready var adapt_prom: Button = $"../AdaptRom"
 @onready var paused_screen: TextureRect = $"../Paused"
 @onready var current_score: Label =$"../Gameover/CurrentScore"
 @onready var high_score: Label =$"../Gameover/HighScore"
@@ -161,8 +158,6 @@ func _physics_process(delta: float) -> void:
 func _update_network_position() -> void:
     if debug_mode:
         network_position = get_global_mouse_position()
-    elif adapt_toggle:
-        network_position = GlobalScript.scaled_network_position
     else:
         network_position = GlobalScript.network_position
 
@@ -203,12 +198,8 @@ func _update_game_data() -> void:
     _calculate_player_game_position()
 
 func _calculate_player_game_position() -> void:
-    if not adapt_toggle:
-        game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
-        game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
-    else:
-        game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_X * GlobalSignals.global_scalar_x)
-        game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Y * GlobalSignals.global_scalar_y)
+    game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
+    game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
 
 func _on_pause_button_pressed() -> void:
     paused_screen.show()
@@ -287,22 +278,6 @@ func _on_logout_pressed() -> void:
     GlobalTimer.stop_timer()
     GlobalTimerManager.remove_timer_selector_from_game()
     get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
-
-func _on_adapt_rom_toggled(toggled_on: bool) -> void:
-    if toggled_on and not GlobalSignals.assessment_done:
-        _pause_game()
-        adapt_prom.button_pressed = false
-        warning_window.visible = true
-        return
-    adapt_toggle = toggled_on
-
-func _on_do_asses_pressed() -> void:
-    get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
-
-func _on_close_asses_pressed() -> void:
-    _resume_game()
-    warning_window.visible = false
-
 
 func _on_home_pressed() -> void:
     get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")

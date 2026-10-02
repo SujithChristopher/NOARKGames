@@ -114,7 +114,10 @@ Movement per game: FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach
 | Fruit Catcher | `Games/fruit_catcher/` | 2D only | `fruit.gd` class is named `Gem` |
 | Jumpify | `Games/Jumpify/` | 3D only | Platformer with level progression |
 | Random Reach | `Games/random_reach/` | 2D + 3D | Most complex; uses shaders and `@onready` dicts |
-| Assessment | `Games/assessment/` | 3D only | Workspace boundary testing (minimal) |
+| Reach Scan | `Games/firefly_reach/reach_assessment.tscn` | — | The workspace assessment; required once a day before any game |
+| ~~Assessment~~ | `Games/assessment/` | — | Old workspace assessment, unhooked (Results still uses `workspace.gd` for area maths) |
+
+**Daily assessment gate**: every game button goes through `AssessmentGate.play()` (`Main_screen/Scripts/assessment_gate.gd`). If `reach_boundary.json` (`data/{pid}/`, `ReachStore`) was not saved today, the reach scan runs first and then the chosen game starts (`GlobalSignals.pending_game`). The menus' Assessment button always runs a fresh scan; Esc in the scan returns to the menu without playing. Adapt ROM was removed from all games.
 
 Games supporting both modes maintain **separate high scores** — `game_name` is set dynamically:
 ```gdscript
@@ -136,6 +139,7 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 ## Critical Implementation Details
 
 ### Adding a New Game
+0. Launch it from the menu with `AssessmentGate.play(get_tree(), scene)`, never `change_scene_*` directly
 1. Call `Manager.create_game_log_file(game_name, patient_id)` when play starts and store the returned handle (session/trial numbering and the debug `vvv` id are handled by `SessionLog`)
 2. Log rows via the handle at ~0.02s intervals using a Timer node
 3. Call `SessionLog.hit()` / `SessionLog.miss()` per target, and `SessionLog.end_trial()` at game over

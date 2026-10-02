@@ -54,8 +54,6 @@ var log_timer: Timer
 @onready var button_nodes = {
 	"pause_button": $PauseButton,
 	"retry_button": $ColorRect/GameOverLabel/RetryButton,
-	"adapt_prom": $AdaptProm,
-	"warning_window": $Warning
 }
 
 func _init() -> void:
@@ -411,12 +409,6 @@ func _on_log_timer_timeout() -> void:
 		]))
 
 # Assessment Functions
-func _on_do_asses_pressed() -> void:
-	get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
-
-func _on_close_asses_pressed() -> void:
-	resume_game()
-	button_nodes.warning_window.visible = false
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:

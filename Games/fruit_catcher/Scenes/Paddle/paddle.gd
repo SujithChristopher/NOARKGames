@@ -15,7 +15,6 @@ var MIN_X_VALUE: float
 var MAX_X_VALUE: float
 
 # Settings
-@onready var adapt_toggle: bool = false
 @onready var debug_mode = DebugSettings.debug_mode
 @onready var game: Node2D = $".."
 
@@ -50,8 +49,6 @@ func _physics_process(delta: float) -> void:
 func _update_network_position() -> void:
 	if debug_mode:
 		network_position = get_global_mouse_position()
-	elif adapt_toggle:
-		network_position = GlobalScript.scaled_network_position
 	else:
 		network_position = GlobalScript.network_position
 
@@ -73,11 +70,3 @@ func _update_paddle_position() -> void:
 	# Clamp to boundaries and set fixed Y position
 	position.x = clampf(position.x, MIN_X_VALUE, MAX_X_VALUE)
 	position.y = 615.0
-
-func _on_adapt_prom_toggled(toggled_on: bool) -> void:
-	if toggled_on and not GlobalSignals.assessment_done:
-		game.pause_game()
-		game.button_nodes.adapt_prom.button_pressed = false
-		game.button_nodes.warning_window.visible = true
-		return
-	adapt_toggle = toggled_on

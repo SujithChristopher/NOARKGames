@@ -576,17 +576,6 @@ theme = ExtResource("10_ckgwo")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 18
 
-[node name="AdaptRom" type="CheckButton" parent="."]
-layout_mode = 0
-offset_left = 478.0
-offset_top = 56.0
-offset_right = 644.0
-offset_bottom = 117.0
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
-theme_override_font_sizes/font_size = 18
-text = "Adapt PROM"
-flat = true
-
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
 script = ExtResource("10_g2848")
 
@@ -659,49 +648,6 @@ offset_top = 11.0
 offset_right = 81.416016
 offset_bottom = -4.080002
 script = ExtResource("16_ckgwo")
-
-[node name="Warning" type="TextureRect" parent="."]
-visible = false
-layout_mode = 0
-offset_left = 306.0
-offset_top = 168.0
-offset_right = 837.0
-offset_bottom = 422.0
-texture = ExtResource("17_f5xin")
-expand_mode = 1
-
-[node name="Label" type="Label" parent="Warning"]
-layout_mode = 0
-offset_left = 36.0
-offset_top = 31.0
-offset_right = 489.0
-offset_bottom = 183.0
-theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
-theme_override_fonts/font = ExtResource("18_nvv74")
-text = "ASSESSMENT NOT COMPLETED YET!
-PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="HBoxContainer" type="HBoxContainer" parent="Warning"]
-layout_mode = 0
-offset_left = 128.0
-offset_top = 145.0
-offset_right = 369.0
-offset_bottom = 185.0
-theme_override_constants/separation = 20
-
-[node name="do_asses" type="Button" parent="Warning/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("19_p6iqu")
-theme_override_fonts/font = ExtResource("15_koe3q")
-text = "  Do assessment  "
-
-[node name="close_asses" type="Button" parent="Warning/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("19_p6iqu")
-theme_override_fonts/font = ExtResource("15_koe3q")
-text = "  Close  "
 
 [node name="Paused" type="TextureRect" parent="."]
 visible = false
@@ -841,9 +787,6 @@ theme_override_font_sizes/font_size = 25
 [connection signal="ready" from="computer" to="computer" method="_on_ready"]
 [connection signal="ready" from="Ball" to="Ball" method="_on_ready"]
 [connection signal="pressed" from="logout" to="player" method="_on_logout_pressed"]
-[connection signal="toggled" from="AdaptRom" to="player" method="_on_adapt_rom_toggled"]
-[connection signal="pressed" from="Warning/HBoxContainer/do_asses" to="player" method="_on_do_asses_pressed"]
-[connection signal="pressed" from="Warning/HBoxContainer/close_asses" to="player" method="_on_close_asses_pressed"]
 [connection signal="pressed" from="Paused/Home" to="player" method="_on_home_pressed"]
 [connection signal="pressed" from="Paused/Resume" to="player" method="_on_resume_pressed"]
 [connection signal="pressed" from="Paused/Restart" to="player" method="_on_restart_pressed"]

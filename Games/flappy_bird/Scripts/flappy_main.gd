@@ -33,7 +33,6 @@ signal game_started
 	"countdown_display": $CircularTimer,
 	"game_over_label": $Gameover,
 	"top_score_label":$CanvasLayer/TextureRect/TopScoreLabel,
-	"warning_window": $Warning,
 	"Paused_screen":$Paused,
 	"current_score":$Gameover/CurrentScore,
 	"high_score":$Gameover/HighScore
@@ -42,12 +41,6 @@ signal game_started
 @onready var _panel_nodes = {
 	"game_over_scene": $GameOver,
 	"pause_button":$CanvasLayer/PauseButton
-}
-
-@onready var _button_nodes = {
-	#"logout_button": $CanvasLayer/GameOverLabel/LogoutButton,
-	#"retry_button": $CanvasLayer/GameOverLabel/RetryButton,
-	"adapt_prom": $AdaptRom
 }
 
 @onready var _health_nodes = {
@@ -288,30 +281,16 @@ func _update_game_status() -> void:
 
 func _update_player_position() -> void:
 	if pilot_node:
-		if not pilot_node.adapt_toggle:
-			# Standard mode calculations
-			game_x = (pilot_node.position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
+		game_x = (pilot_node.position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
 
-			if is_3d_mode:
-				# 3D mode: calculate game_y from screen Y position
-				game_y = (pilot_node.position.y - GlobalScript.Y_SCREEN_OFFSET3D) / GlobalScript.PLAYER3D_POS_SCALER_Y
-				game_z = 0.0  # Z not used in 3D screen mapping
-			else:
-				# 2D mode: Y is always 0, Z calculated from screen Y position
-				game_y = 0.0
-				game_z = (pilot_node.position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
+		if is_3d_mode:
+			# 3D mode: calculate game_y from screen Y position
+			game_y = (pilot_node.position.y - GlobalScript.Y_SCREEN_OFFSET3D) / GlobalScript.PLAYER3D_POS_SCALER_Y
+			game_z = 0.0  # Z not used in 3D screen mapping
 		else:
-			# Adaptive mode calculations
-			game_x = (pilot_node.position.x - GlobalScript.X_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_X * GlobalSignals.global_scalar_x)
-
-			if is_3d_mode:
-				# 3D adaptive mode: calculate game_y with scaling
-				game_y = (pilot_node.position.y - GlobalScript.Y_SCREEN_OFFSET3D) / (GlobalScript.PLAYER3D_POS_SCALER_Y * GlobalSignals.global_scalar_y)
-				game_z = 0.0
-			else:
-				# 2D adaptive mode: Y is 0, Z calculated with scaling
-				game_y = 0.0
-				game_z = (pilot_node.position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Z * GlobalSignals.global_scalar_y)
+			# 2D mode: Y is always 0, Z calculated from screen Y position
+			game_y = 0.0
+			game_z = (pilot_node.position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
 
 func _update_scroll_and_pipes() -> void:
 	scroll += SCROLL_SPEED
@@ -493,14 +472,6 @@ func _set_3d_mode() -> void:
 	is_3d_mode = true
 	_update_game_name()  # Update game name for file saving
 	print("3D mode selected - game_name:", game_name)
-
-func _on_do_asses_pressed() -> void:
-	get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
-
-func _on_close_asses_pressed() -> void:
-	_resume_game()
-	_ui_nodes.warning_window.visible = false
-
 
 func _on_home_pressed() -> void:
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")

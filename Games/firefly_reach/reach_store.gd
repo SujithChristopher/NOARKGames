@@ -32,6 +32,14 @@ static func load_boundary(patient_id: String) -> Array:
 	return []
 
 
+# True when the saved outline was scanned today: the reach scan is required once a day.
+static func assessed_today(patient_id: String) -> bool:
+	if load_boundary(patient_id).is_empty():
+		return false
+	var d = JSON.parse_string(FileAccess.get_file_as_string(_path(patient_id)))
+	return String(d.get("saved", "")).begins_with(Time.get_date_string_from_system())
+
+
 static func clear(patient_id: String) -> void:
 	if FileAccess.file_exists(_path(patient_id)):
 		DirAccess.remove_absolute(_path(patient_id))

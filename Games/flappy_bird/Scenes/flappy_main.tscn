@@ -85,50 +85,6 @@ offset_right = 1336.0
 offset_bottom = 849.0
 texture = ExtResource("2_qkajw")
 
-[node name="Warning" type="TextureRect" parent="."]
-visible = false
-layout_mode = 0
-offset_left = 281.0
-offset_top = 157.0
-offset_right = 853.0
-offset_bottom = 401.0
-texture = ExtResource("17_3jrir")
-expand_mode = 1
-
-[node name="Label" type="Label" parent="Warning"]
-layout_mode = 0
-offset_left = -5.0
-offset_top = 28.0
-offset_right = 574.0
-offset_bottom = 165.0
-theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
-theme_override_fonts/font = ExtResource("18_jg6b6")
-theme_override_font_sizes/font_size = 17
-text = "ASSESSMENT NOT COMPLETED YET!
-PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="HBoxContainer" type="HBoxContainer" parent="Warning"]
-layout_mode = 0
-offset_left = 150.0
-offset_top = 137.0
-offset_right = 405.0
-offset_bottom = 177.0
-theme_override_constants/separation = 20
-
-[node name="do_asses" type="Button" parent="Warning/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("19_jg6b6")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "   Do assessment   "
-
-[node name="close_asses" type="Button" parent="Warning/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("19_jg6b6")
-theme_override_fonts/font = ExtResource("7_m56p3")
-text = "   Close   "
-
 [node name="ground" parent="." instance=ExtResource("2_lkjn6")]
 z_index = 1
 position = Vector2(-185, 591)
@@ -227,25 +183,6 @@ autoplay = "default"
 
 [node name="GameOver" parent="." instance=ExtResource("9_wgnds")]
 visible = false
-
-[node name="AdaptRom" type="CheckButton" parent="."]
-z_index = 13
-layout_mode = 0
-offset_left = 497.0
-offset_top = 11.0
-offset_right = 681.0
-offset_bottom = 46.0
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_colors/font_focus_color = Color(0, 0, 0, 1)
-theme_override_colors/font_pressed_color = Color(0, 0, 0, 1)
-theme_override_colors/font_hover_color = Color(0, 0, 0, 1)
-theme_override_colors/font_hover_pressed_color = Color(0, 0, 0, 1)
-theme_override_colors/font_disabled_color = Color(0, 0, 0, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("7_m56p3")
-theme_override_font_sizes/font_size = 20
-text = "Adapt PROM"
-flat = true
 
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
 script = ExtResource("10_7qyl5")
@@ -481,12 +418,9 @@ theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
 theme_override_fonts/font = ExtResource("7_m56p3")
 theme_override_font_sizes/font_size = 25
 
-[connection signal="pressed" from="Warning/HBoxContainer/do_asses" to="." method="_on_do_asses_pressed"]
-[connection signal="pressed" from="Warning/HBoxContainer/close_asses" to="." method="_on_close_asses_pressed"]
 [connection signal="area_entered" from="ground" to="ground" method="_on_area_entered"]
 [connection signal="timeout" from="PipeTimer" to="." method="_on_pipe_timer_timeout"]
 [connection signal="pressed" from="logout" to="." method="_on_logout_pressed"]
-[connection signal="toggled" from="AdaptRom" to="pilot" method="_on_adapt_rom_toggled"]
 [connection signal="pressed" from="Paused/Home" to="." method="_on_home_pressed"]
 [connection signal="pressed" from="Paused/Resume" to="." method="_on_resume_pressed"]
 [connection signal="pressed" from="Paused/Restart" to="." method="_on_restart_pressed"]

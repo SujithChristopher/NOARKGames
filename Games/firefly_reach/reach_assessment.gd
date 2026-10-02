@@ -1,13 +1,16 @@
 extends Node
 
 # Reach Scan assessment: the clinic study's "stretch the bubble" scan
-# (reach_scan.gd) and nothing else. Saves the outline (reach_store.gd) for
-# Firefly Reach, then returns to the menu. Esc leaves without saving.
+# (reach_scan.gd) and nothing else. It is the workspace assessment for every
+# game, required once a day (assessment_gate.gd). Saves the outline
+# (reach_store.gd), then starts the game the patient chose, or returns to the
+# menu when opened from the Assessment button. Esc leaves without saving.
 
 const RoundRunner := preload("res://Games/firefly_reach/round_runner.gd")
 const ReachStore := preload("res://Games/firefly_reach/reach_store.gd")
 
-const MENU := "res://Main_screen/Scenes/select_game.tscn"
+const MENU_2D := "res://Main_screen/Scenes/select_game.tscn"
+const MENU_3D := "res://Main_screen/Scenes/3d_games.tscn"
 
 var _patient_id: String = ""
 var _prev_scale_size := Vector2i.ZERO
@@ -29,14 +32,24 @@ func _ready() -> void:
 		"level_index": 0, "order_id": 0, "show_check": false, "scan_only": true}
 	runner.scan_done.connect(func(boundary: Array):
 		ReachStore.save(_patient_id, boundary)
-		get_tree().change_scene_to_file(MENU))
+		var game: PackedScene = GlobalSignals.pending_game
+		GlobalSignals.pending_game = null
+		if game:
+			get_tree().change_scene_to_packed(game)
+		else:
+			_to_menu())
 	add_child(runner)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
-		get_tree().change_scene_to_file(MENU)
+		GlobalSignals.pending_game = null   # no scan, no game
+		_to_menu()
+
+
+func _to_menu() -> void:
+	get_tree().change_scene_to_file(MENU_3D if GlobalSignals.selected_game_mode == "3D" else MENU_2D)
 
 
 func _exit_tree() -> void:

@@ -22,7 +22,6 @@ const LOG_INTERVAL = 0.02
 	"game_over_label": $"../TileMap/CanvasLayer/ColorRect",
 	"top_score_label":$"../TileMap/CanvasLayer/TopScore/TopScoreLabel",
 	"color_rect": $"../TileMap/CanvasLayer/ColorRect",
-	"warning_window":$"../Assesment",
 	"bg_2d":$"../2DRR",
 	"bg_3d":$"../3DRR",
 	"current_score":$"../TileMap/CanvasLayer/ColorRect/CurrentScore",
@@ -39,10 +38,6 @@ const LOG_INTERVAL = 0.02
 	"pause_button": $"../TileMap/CanvasLayer/PauseButton"
 }
 
-@onready var _button_nodes = {
-	"adapt_prom": $"../AdaptRom"
-}
-
 @onready var _sprite_nodes = {
 	"anim": $Sprite2D
 }
@@ -57,7 +52,6 @@ var game_over = false
 var countdown_time = 0
 var countdown_active = false
 var pause_state = 1
-var adapt_toggle: bool = false
 var is_3d_mode := false
 
 # Position tracking variables
@@ -202,11 +196,6 @@ func _physics_process(delta):
 func _update_player_position() -> void:
 	if debug_mode:
 		network_position = get_global_mouse_position()
-	elif adapt_toggle:
-		if is_3d_mode:
-			network_position = GlobalScript.scaled_network_position3D
-		else:
-			network_position = GlobalScript.scaled_network_position
 	else:
 		network_position = GlobalScript.network_position3D if is_3d_mode else GlobalScript.network_position
 	if network_position != Vector2.ZERO:
@@ -222,31 +211,16 @@ func _update_position_tracking() -> void:
 	pos_y = GlobalScript.raw_y
 	pos_z = GlobalScript.raw_z
 
-	if not adapt_toggle:
-		# Standard mode calculations
-		game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
+	game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
 
-		if is_3d_mode:
-			# 3D mode: calculate game_y from screen Y position
-			game_y = (position.y - GlobalScript.Y_SCREEN_OFFSET3D) / GlobalScript.PLAYER3D_POS_SCALER_Y
-			game_z = 0.0  # Z not used in 3D screen mapping
-		else:
-			# 2D mode: Y is always 0, Z calculated from screen Y position
-			game_y = 0.0
-			game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
-
+	if is_3d_mode:
+		# 3D mode: calculate game_y from screen Y position
+		game_y = (position.y - GlobalScript.Y_SCREEN_OFFSET3D) / GlobalScript.PLAYER3D_POS_SCALER_Y
+		game_z = 0.0  # Z not used in 3D screen mapping
 	else:
-		# Adaptive mode calculations
-		game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_X * GlobalSignals.global_scalar_x)
-
-		if is_3d_mode:
-			# 3D adaptive mode: calculate game_y with scaling
-			game_y = (position.y - GlobalScript.Y_SCREEN_OFFSET3D) / (GlobalScript.PLAYER3D_POS_SCALER_Y * GlobalSignals.global_scalar_y)
-			game_z = 0.0
-		else:
-			# 2D adaptive mode: Y is 0, Z calculated with scaling
-			game_y = 0.0
-			game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Z * GlobalSignals.global_scalar_y)
+		# 2D mode: Y is always 0, Z calculated from screen Y position
+		game_y = 0.0
+		game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
 
 
 func _update_pps_display() -> void:
@@ -283,28 +257,9 @@ func _spawn_new_apple() -> void:
 	_set_apple_position()
 
 func _set_apple_position() -> void:
-	var apple_position: Vector2
-
-	if adapt_toggle:
-		apple_position = _get_valid_apple_position()
-	else:
-		apple_position = Vector2(randi_range(200, 900), randi_range(200, 600))
-		_update_target_position(apple_position)
-
+	var apple_position := Vector2(randi_range(200, 900), randi_range(200, 600))
+	_update_target_position(apple_position)
 	current_apple.position = apple_position
-
-func _get_valid_apple_position() -> Vector2:
-	var apple_position: Vector2
-	while true:
-		if debug_mode:
-			apple_position = get_global_mouse_position()
-		else:
-			apple_position = Vector2(randi_range(200, 900), randi_range(200, 600))
-
-		if Geometry2D.is_point_in_polygon(apple_position, GlobalSignals.inflated_workspace):
-			break
-
-	return apple_position
 
 func _update_target_position(apple_position: Vector2) -> void:
 	target_x = (apple_position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
@@ -453,13 +408,6 @@ func _on_logout_pressed() -> void:
 	else:
 		get_tree().change_scene_to_file("res://Main_screen/Scenes/3d_games.tscn")
 
-func _on_adapt_rom_toggled(toggled_on: bool) -> void:
-	if toggled_on and not GlobalSignals.assessment_done:
-		_button_nodes.adapt_prom.button_pressed = false
-		_ui_nodes.warning_window.visible = true
-		return
-	adapt_toggle = toggled_on
-
 # Legacy functions maintained for compatibility
 func apple_function() -> void:
 	if score <= max_score:
@@ -490,13 +438,6 @@ func _set_3d_mode() -> void:
 
 func _update_game_name() -> void:
 	game_name = "RandomReach3D" if is_3d_mode else "RandomReach"
-
-func _on_do_asses_pressed() -> void:
-	get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
-
-func _on_close_asses_pressed() -> void:
-	_resume_game()
-	_ui_nodes.warning_window.visible = false
 
 
 func _on_home_pressed() -> void:

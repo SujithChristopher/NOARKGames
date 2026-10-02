@@ -9,6 +9,7 @@ signal origin_set
 @export var global_scalar_y:float = 1.0
 @export var assessment_done: bool = false
 @export var selected_game_mode: String = "2D"
+var pending_game: PackedScene = null   # chosen game waiting on today's reach scan (AssessmentGate)
 
 @export var inflated_workspace: PackedVector2Array
 

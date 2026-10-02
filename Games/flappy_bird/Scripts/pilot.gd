@@ -4,7 +4,6 @@ var network_position = Vector2.ZERO
 var zero_offset = Vector2.ZERO
 @onready var flappy = $".."
 
-@onready var adapt_toggle:bool = false
 @onready var flash: AnimationPlayer = $AnimatedSprite2D/Flash
 @onready var animated_sprite_2d: AnimatedSprite2D = $AnimatedSprite2D
 @onready var debug_mode = DebugSettings.debug_mode
@@ -26,11 +25,6 @@ func _physics_process(delta: float) -> void:
     
     if debug_mode:
         network_position = get_global_mouse_position()
-    elif adapt_toggle:
-        if flappy.is_3d_mode:
-           network_position = GlobalScript.scaled_network_position3D
-        else:
-            network_position = GlobalScript.scaled_network_position
     else:
         network_position = GlobalScript.network_position3D if flappy.is_3d_mode else GlobalScript.network_position
 
@@ -51,11 +45,4 @@ func plane_anim_change():
     
 func anim_change():
     flash.play('flash')
-    
-func _on_adapt_rom_toggled(toggled_on: bool) -> void:
-     if toggled_on and not GlobalSignals.assessment_done:
-        flappy._pause_game()
-        flappy._button_nodes.adapt_prom.button_pressed = false
-        flappy._ui_nodes.warning_window.visible = true
-        return
-     adapt_toggle = false
+

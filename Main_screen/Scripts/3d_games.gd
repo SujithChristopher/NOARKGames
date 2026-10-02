@@ -9,7 +9,7 @@ extends Node2D
 var random_reach3D = preload("res://Games/random_reach/scenes/random_reach.tscn")
 var fly_through3D = preload("res://Games/flappy_bird/Scenes/flappy_main.tscn")
 var jumpify = preload("res://Games/Jumpify/Scenes/Levels/Level_01.tscn")
-var assesment = preload("res://Games/assessment/workspace.tscn")
+const AssessmentGate = preload("res://Main_screen/Scripts/assessment_gate.gd")
 var results = preload("res://Results/scenes/user_progress.tscn")
 
 
@@ -33,18 +33,18 @@ func _ready() -> void:
 
 func _on_random_reach_3d_pressed() -> void:
     MusicManager.play_music("rr_bgm")
-    get_tree().change_scene_to_packed(random_reach3D)
+    AssessmentGate.play(get_tree(), random_reach3D)
 
 func _on_fly_through_3d_pressed() -> void:
    MusicManager.play_music("ft_bgm")
-   get_tree().change_scene_to_packed(fly_through3D)
+   AssessmentGate.play(get_tree(), fly_through3D)
 
 func _on_jumpify_pressed() -> void:
   MusicManager.play_music("jy_bgm")
-  get_tree().change_scene_to_packed(jumpify)
+  AssessmentGate.play(get_tree(), jumpify)
 
 func _on_assessment_pressed() -> void:
-   get_tree().change_scene_to_packed(assesment)
+   AssessmentGate.assess(get_tree())
 
 func _on_results_pressed() -> void:
     get_tree().change_scene_to_packed(results)

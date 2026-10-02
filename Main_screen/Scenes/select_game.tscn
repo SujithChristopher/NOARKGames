@@ -544,16 +544,6 @@ theme = ExtResource("2_ghqbc")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Firefly Reach"
 
-[node name="reach_scan" type="Button" parent="." groups=["GameButtons"]]
-layout_mode = 0
-offset_left = 560.0
-offset_top = 291.0
-offset_right = 747.0
-offset_bottom = 366.0
-theme = ExtResource("2_ghqbc")
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
-text = "Reach Scan"
-
 [node name="Switch_3D" type="CheckButton" parent="."]
 layout_mode = 0
 offset_left = 426.0
@@ -640,7 +630,6 @@ text = "  Right hand  "
 [connection signal="pressed" from="logout" to="." method="_on_logout_pressed"]
 [connection signal="pressed" from="fruit_catcher" to="." method="_on_fruit_catcher_pressed"]
 [connection signal="pressed" from="firefly_reach" to="." method="_on_firefly_reach_pressed"]
-[connection signal="pressed" from="reach_scan" to="." method="_on_reach_scan_pressed"]
 [connection signal="toggled" from="Switch_3D" to="." method="_on_switch_3d_toggled"]
 [connection signal="pressed" from="HandSelectionPopup/HBoxContainer/LeftButton" to="." method="_on_LeftButton_pressed"]
 [connection signal="pressed" from="HandSelectionPopup/HBoxContainer/RightButton" to="." method="_on_RightButton_pressed"]

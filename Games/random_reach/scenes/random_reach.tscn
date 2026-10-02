@@ -1401,23 +1401,6 @@ theme = ExtResource("8_j2tbw")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 15
 
-[node name="AdaptRom" type="CheckButton" parent="."]
-layout_mode = 0
-offset_left = 481.9447
-offset_top = 28.5945
-offset_right = 638.9447
-offset_bottom = 59.594498
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_colors/font_focus_color = Color(0, 0, 0, 1)
-theme_override_colors/font_pressed_color = Color(0, 0, 0, 1)
-theme_override_colors/font_hover_color = Color(0, 0, 0, 1)
-theme_override_colors/font_hover_pressed_color = Color(0, 0, 0, 1)
-theme_override_colors/font_disabled_color = Color(0, 0, 0, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
-text = "Adapt PROM"
-flat = true
-
 [node name="Apple_Score" type="TextureRect" parent="."]
 layout_mode = 0
 offset_left = 14.967219
@@ -1452,52 +1435,6 @@ offset_top = 6.902128
 offset_right = 1060.6772
 offset_bottom = 39.440735
 script = ExtResource("14_ehmh4")
-
-[node name="Assesment" type="TextureRect" parent="."]
-visible = false
-layout_mode = 0
-offset_left = 306.32916
-offset_top = 188.3295
-offset_right = 857.12286
-offset_bottom = 438.77814
-texture = ExtResource("16_t38m8")
-expand_mode = 1
-
-[node name="Label" type="Label" parent="Assesment"]
-layout_mode = 0
-offset_left = 43.90387
-offset_top = 56.203026
-offset_right = 508.88565
-offset_bottom = 146.9167
-theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
-theme_override_fonts/font = ExtResource("17_3vvhp")
-theme_override_font_sizes/font_size = 16
-text = "ASSESSMENT NOT COMPLETED YET!
-PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="HBoxContainer" type="HBoxContainer" parent="Assesment"]
-layout_mode = 0
-offset_left = 157.6547
-offset_top = 143.95859
-offset_right = 384.6547
-offset_bottom = 189.31543
-theme_override_constants/separation = 20
-
-[node name="do_asses" type="Button" parent="Assesment/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("18_72q7b")
-theme_override_fonts/font = ExtResource("11_7fnnd")
-theme_override_font_sizes/font_size = 14
-text = "   Do assessment   "
-
-[node name="close_asses" type="Button" parent="Assesment/HBoxContainer"]
-layout_mode = 2
-theme = ExtResource("18_72q7b")
-theme_override_fonts/font = ExtResource("11_7fnnd")
-theme_override_font_sizes/font_size = 14
-text = "   Close   "
 
 [node name="Paused" type="TextureRect" parent="."]
 visible = false
@@ -1553,9 +1490,6 @@ text = "Paused"
 [connection signal="timeout" from="Dummy" to="Player" method="_on_dummy_timeout"]
 [connection signal="pressed" from="Zero" to="Player" method="_on_zero_pressed"]
 [connection signal="pressed" from="logout" to="Player" method="_on_logout_pressed"]
-[connection signal="toggled" from="AdaptRom" to="Player" method="_on_adapt_rom_toggled"]
-[connection signal="pressed" from="Assesment/HBoxContainer/do_asses" to="Player" method="_on_do_asses_pressed"]
-[connection signal="pressed" from="Assesment/HBoxContainer/close_asses" to="Player" method="_on_close_asses_pressed"]
 [connection signal="pressed" from="Paused/Home" to="Player" method="_on_home_pressed"]
 [connection signal="pressed" from="Paused/Resume" to="Player" method="_on_resume_pressed"]
 [connection signal="pressed" from="Paused/Restart" to="Player" method="_on_restart_pressed"]
