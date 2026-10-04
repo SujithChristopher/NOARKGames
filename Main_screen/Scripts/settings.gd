@@ -88,6 +88,9 @@ func _load() -> void:
 		return
 	# First run.
 	data = DEFAULTS.duplicate()
+	# A tablet cannot run tracker.py, so it can only reach the board over BLE.
+	if OS.get_name() == "Android":
+		data["stream_type"] = "ble"
 	if FileAccess.file_exists(LEGACY_PATH):
 		var legacy = JSON.parse_string(FileAccess.get_file_as_string(LEGACY_PATH))
 		if typeof(legacy) == TYPE_DICTIONARY:

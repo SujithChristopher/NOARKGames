@@ -226,7 +226,7 @@ GATT peripheral). Never both; the tracker and Godot each read the key.
   itself through `sudo -n hcitool`; that needs `/etc/sudoers.d/noark-ble`
   (`radxa ALL=(root) NOPASSWD: /usr/bin/hcitool`), set up per board.
 - `uv run pyscripts/ble_test.py` advertises the same service with a fake hand
-  circle, no cameras. `GdAndroidBLE/` (submodule) is the Android plugin; its
+  circle, no cameras. `external/GdAndroidBLE/` (submodule) is the Android plugin; its
   `plugin/demo` is a test app for the tracker over BLE. Build with
   `./gradlew assemble` there (Java 17 + Android SDK — not on the Radxa).
 
