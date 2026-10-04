@@ -4,6 +4,6 @@
 [submodule "external/rapidtag"]
 	path = external/rapidtag
 	url = https://github.com/SujithChristopher/rapidtag.git
-[submodule "GdAndroidBLE"]
-	path = GdAndroidBLE
+[submodule "external/GdAndroidBLE"]
+	path = external/GdAndroidBLE
 	url = https://github.com/SujithChristopher/GdAndroidBLE
