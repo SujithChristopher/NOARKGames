@@ -3,20 +3,21 @@ extends Control
 @onready var logged_in_as = $Logo/LoggedInAs
 @onready var training_label = $TrainingLabel
 
-# Preload all scenes at start (loads into memory for faster switching)
-var random_reach_scene = preload("res://Games/random_reach/scenes/random_reach.tscn")
-var flappy_scene = preload("res://Games/flappy_bird/Scenes/flappy_main.tscn")
-var pingpong_scene = preload("res://Games/ping_pong/Scenes/PingPong.tscn")
-var fruit_catcher = preload("res://Games/fruit_catcher/Scenes/Game/Game.tscn")
-var firefly_reach_scene = preload("res://Games/firefly_reach/firefly_main.tscn")
+# Loaded in the background once the menu is up (AssessmentGate.warm), not
+# preloaded: preloading every game here held the menu back 10-15 s.
+const RANDOM_REACH = "res://Games/random_reach/scenes/random_reach.tscn"
+const FLAPPY = "res://Games/flappy_bird/Scenes/flappy_main.tscn"
+const PINGPONG = "res://Games/ping_pong/Scenes/PingPong.tscn"
+const FRUIT_CATCHER = "res://Games/fruit_catcher/Scenes/Game/Game.tscn"
+const FIREFLY_REACH = "res://Games/firefly_reach/firefly_main.tscn"
+const RESULTS = "res://Results/scenes/user_progress.tscn"
 const AssessmentGate = preload("res://Main_screen/Scripts/assessment_gate.gd")
-var results_scene = preload("res://Results/scenes/user_progress.tscn")
-var main_menu_scene = preload("res://Main_screen/Scenes/main.tscn")
 var endgame : bool
 
 
 
 func _ready() -> void:
+    AssessmentGate.warm([RANDOM_REACH, FLAPPY, PINGPONG, FRUIT_CATCHER, FIREFLY_REACH, RESULTS])
     logged_in_as.text = "Patient: " + PatientDB.current_patient_id
     add_child(preload("res://Main_screen/Scripts/dose_progress.gd").new())
     var affected_hand = GlobalSignals.affected_hand
@@ -54,22 +55,22 @@ func _process(delta: float) -> void:
 
 func _on_game_reach_pressed() -> void:
     MusicManager.play_music("rr_bgm")
-    AssessmentGate.play(get_tree(), random_reach_scene)
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(RANDOM_REACH))
 
 func _on_game_flappy_pressed() -> void:
     MusicManager.play_music("ft_bgm")
-    AssessmentGate.play(get_tree(), flappy_scene)
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(FLAPPY))
 
 func _on_game_pingpong_pressed() -> void:
     MusicManager.play_music("pp_bgm")
-    AssessmentGate.play(get_tree(), pingpong_scene)
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(PINGPONG))
     
 
 func _on_assessment_pressed() -> void:
     AssessmentGate.assess(get_tree())
 
 func _on_results_pressed() -> void:
-    get_tree().change_scene_to_packed(results_scene)
+    get_tree().change_scene_to_packed(AssessmentGate.scene(RESULTS))
 
 func _on_logout_pressed() -> void:
     GlobalSignals.selected_training_hand == ""
@@ -84,7 +85,7 @@ func _on_exit_button_pressed() -> void:
 
 func _on_fruit_catcher_pressed() -> void:
     MusicManager.play_music("fc_bgm")
-    AssessmentGate.play(get_tree(), fruit_catcher)
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(FRUIT_CATCHER))
 
 
 func _on_switch_3d_toggled(toggled_on: bool) -> void:
@@ -92,5 +93,5 @@ func _on_switch_3d_toggled(toggled_on: bool) -> void:
     get_tree().change_scene_to_file("res://Main_screen/Scenes/3d_games.tscn")
 
 func _on_firefly_reach_pressed() -> void:
-    AssessmentGate.play(get_tree(), firefly_reach_scene)
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(FIREFLY_REACH))
 

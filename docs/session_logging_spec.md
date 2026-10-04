@@ -7,12 +7,12 @@ Modelled on the MARS robot's `sessions.csv` / `configdata.csv`
 
 ```
 {DOCUMENTS}/NOARK/data/{pid}/
-  session.csv          one row per trial, all games
+  sessions.csv          one row per trial, all games
   configdata.csv       therapy dose history (append-only)
   GameData/raw-sess{SS}-trial{TTT}-{Game}-{Mode}.csv   (+ _hand/_reach/_calibration for Firefly)
 ```
 
-## session.csv
+## sessions.csv
 
 ```
 :Location: <settings location>
@@ -71,7 +71,7 @@ A changed/new dose appends a row. Then the new session starts.
 ## Progress
 
 Game-select (2D and 3D) shows today's minutes per movement vs dose,
-summed from today's `MoveTime` in session.csv. Display only, never blocks.
+summed from today's `MoveTime` in sessions.csv. Display only, never blocks.
 
 ## Code shape
 
@@ -92,4 +92,4 @@ summed from today's `MoveTime` in session.csv. Display only, never blocks.
 - Stop time = last row epochtime. Metrics best-effort from columns
   (`gems_caught/missed`, `missed_count`, status transitions); else blank.
 - Rename raw files (and Firefly side files) to the new pattern; write
-  session.csv. Dry-run by default, `--apply` to write.
+  sessions.csv. Dry-run by default, `--apply` to write.

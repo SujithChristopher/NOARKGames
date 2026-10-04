@@ -1,5 +1,5 @@
 extends Node
-## User settings, stored outside the project at {DOCUMENTS}/NOARK/settings.json
+## User settings, stored outside the project at {DOCUMENTS}/NOARK_demo/settings.json
 ## (Android: the app's user dir) so they are writable in an exported build and
 ## survive an update. Must be the FIRST autoload: Manager and GlobalScript read
 ## it in their own _ready().
@@ -11,6 +11,9 @@ extends Node
 ## res://settings.json when one exists, otherwise from DEFAULTS.
 
 const LEGACY_PATH := "res://settings.json"
+## Every file the app writes lives under {DOCUMENTS}/<APP_DIR>. This is the demo
+## build, so it keeps clear of the real {DOCUMENTS}/NOARK data.
+const APP_DIR := "NOARK_demo"
 const DEFAULTS := {
 	"debug": false,
 	"location": "PMR",
@@ -30,14 +33,15 @@ const DEFAULTS := {
 	"recording_scale": 0.5,
 }
 
+var base_dir: String   # {DOCUMENTS}/NOARK_demo, or the app's user dir on Android
 var path: String
 var data: Dictionary = {}
 
 
 func _init() -> void:
-	var base := OS.get_user_data_dir() if OS.get_name() == "Android" \
-		else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS).path_join("NOARK")
-	path = base.path_join("settings.json")
+	base_dir = OS.get_user_data_dir() if OS.get_name() == "Android" \
+		else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS).path_join(APP_DIR)
+	path = base_dir.path_join("settings.json")
 	_load()
 
 

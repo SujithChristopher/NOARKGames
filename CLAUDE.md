@@ -24,7 +24,7 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Settings** live at `{DOCUMENTS}/NOARK/settings.json`, not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). `location` (the site written to session.csv and raw logs) is set from the login dose dialog. Godot passes the path to `tracker.py` with `--settings`.
+**Settings** live at `{DOCUMENTS}/NOARK_demo/settings.json` (this `demo` branch uses `NOARK_demo` — `Settings.APP_DIR` — so the real `{DOCUMENTS}/NOARK` data is never touched), not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). `location` (the site written to sessions.csv and raw logs) is set from the login dose dialog. Godot passes the path to `tracker.py` with `--settings`.
 
 **Debug mode** — edit that file (a `debug.json` also exists but nothing reads it):
 ```json
@@ -61,8 +61,8 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | # | Name | Script | Purpose |
 |---|------|--------|---------|
 | 1 | Settings | `Main_screen/Scripts/settings.gd` | User settings file (must be first) |
-| 2 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Patient JSON database |
-| 3 | SessionLog | `Main_screen/Scripts/session_log.gd` | Per-patient session.csv, trial numbering, therapy dose |
+| 2 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Read-only patient list from the server's patients.json |
+| 3 | SessionLog | `Main_screen/Scripts/session_log.gd` | Per-patient sessions.csv, trial numbering, therapy dose |
 | 4 | Manager | `Main_screen/Scripts/manager.gd` | Raw trial CSV creation |
 | 5 | GlobalSignals | `Main_screen/Scripts/global_signals.gd` | Signal bus + shared state |
 | 6 | GlobalScript | `Main_screen/Scripts/global_script.gd` | UDP, screen scaling |
@@ -79,31 +79,31 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 
 ### Data Flow
 
-**Patient flow**: Registration UI → `PatientDB.add_patient()` → JSON at `{DOCUMENTS}/NOARK/records/patients.json`
+**Patient flow**: no registry in NOARK. When the main screen opens it runs `sender_raspberryPI.py --sync` on a thread, which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients only; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used.
 
-**Login flow**: patient login (registry, or Hosp-ID on the main screen) → `DoseDialog` confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in session.csv + 1)
+**Login flow**: patient id typed or picked from the suggestion list on the main screen → the dose screen (`Main_screen/Scenes/dose.tscn`, `dose_screen.gd`) confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen
 
-**Trial flow**: game start → `Manager.create_game_log_file(game_name, patient_id)` → `SessionLog.begin_trial` names the raw file → log rows every ~0.02s → game calls `SessionLog.hit()` / `miss()` → `SessionLog.end_trial()` at game over appends the session.csv row. Leaving the scene, starting another trial, or closing the app also ends the trial. MoveTime excludes pauses (`GlobalTimer.pause_timer` → `SessionLog.set_paused`).
+**Trial flow**: game start → `Manager.create_game_log_file(game_name, patient_id)` → `SessionLog.begin_trial` names the raw file → log rows every ~0.02s → game calls `SessionLog.hit()` / `miss()` → `SessionLog.end_trial()` at game over appends the sessions.csv row. Leaving the scene, starting another trial, or closing the app also ends the trial. Every row written starts `sender_raspberryPI.py --upload {pid}` in the background (`SessionLog.upload`, one at a time, later ones queued); closing the app (window X or an Exit button) shows "Saving the session to the server..." and quits only when the upload is done. Games must not call `get_tree().quit()` on close themselves — `GlobalScript` does it. MoveTime excludes pauses (`GlobalTimer.pause_timer` → `SessionLog.set_paused`).
 
-**Score flow**: Game end → `ScoreManager.update_top_score(patient_id, game_name, score)` → JSON at `{DOCUMENTS}/NOARK/records/scores.json`
+**Score flow**: Game end → `ScoreManager.update_top_score(patient_id, game_name, score)` → JSON at `{DOCUMENTS}/NOARK_demo/records/scores.json`
 
 **File paths**:
 ```
-{DOCUMENTS}/NOARK/
-  records/patients.json        # patient database
+{DOCUMENTS}/NOARK_demo/
+  patients.json                # from the server (sender_raspberryPI.py --sync); NOARK never writes it
   records/scores.json          # high scores per patient per game
-  data/{patient_id}/session.csv     # one row per trial (MARS sessions.csv format)
+  data/{patient_id}/sessions.csv     # one row per trial (same name/format as the other robots)
   data/{patient_id}/configdata.csv  # therapy dose history; last row is active
   data/{patient_id}/GameData/       # raw trial CSVs
 ```
 
-See `docs/session_logging_spec.md` for the session.csv / configdata.csv columns.
+See `docs/session_logging_spec.md` for the sessions.csv / configdata.csv columns.
 Movement per game: FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach, FireflyReach = MLAP (`SessionLog.MOVEMENT`).
 
 **Raw filename format**: `raw-sess{NN}-trial{NNN}-{Game}-{Mode}.csv` (trial = nth of that game+mode in the session)
 **Raw CSV header**: 7 lines — `headerrows, game_name, h_id, device_location, device_version, protocol_version, start_time`
 
-`pyscripts/rebuild_sessions.py` converts pre-session.csv data (old `{game}_S*_T*_{date}.csv` files): dry run by default, `--apply` renames and writes.
+`pyscripts/rebuild_sessions.py` converts pre-sessions.csv data (old `{game}_S*_T*_{date}.csv` files): dry run by default, `--apply` renames and writes.
 
 ### Games
 
@@ -192,13 +192,13 @@ See `pyscripts/README.md` for the calibration workflow.
 
 ### Patient Data Access
 ```gdscript
-PatientDB.add_patient(data)
+PatientDB.load_database()       # re-read patients.json after a sync
 PatientDB.get_patient(hospital_id)
-PatientDB.list_all_patients()   # returns Array of Dicts
+PatientDB.list_all_patients()   # Array of {hospital_id, name, affected_hand}
 PatientDB.current_patient_id
 
 GlobalSignals.current_patient_id  # mirrors PatientDB
-GlobalSignals.data_path           # {DOCUMENTS}/NOARK/data
+GlobalSignals.data_path           # {DOCUMENTS}/NOARK_demo/data
 GlobalSignals.selected_game_mode  # "2D" or "3D"
 ```
 

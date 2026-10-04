@@ -4,7 +4,6 @@ extends Node
 static var instance
 
 # Constants
-const RECORDS_DIR = "NOARK//records"
 const SCORES_FILE = "scores.json"
 
 # Score database structure: { "patient_id": { "game_name": top_score } }
@@ -21,30 +20,18 @@ func _init():
 	load_scores()
 
 func _setup_paths() -> void:
-	# Get platform-appropriate documents directory
-	var documents_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
-
-	# Build paths using platform-appropriate separator
-	if OS.get_name() == "Windows":
-		records_path = documents_dir + "\\" + RECORDS_DIR.replace("//", "\\")
-		scores_file_path = records_path + "\\" + SCORES_FILE
-	else:
-		records_path = documents_dir + "/" + RECORDS_DIR.replace("//", "/")
-		scores_file_path = records_path + "/" + SCORES_FILE
+	records_path = Settings.base_dir.path_join("records")
+	scores_file_path = records_path.path_join(SCORES_FILE)
 
 	print("Scores database path: ", scores_file_path)
 
 func _ensure_directory_exists() -> void:
-	var dir = DirAccess.open(OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS))
-	if dir:
-		if not dir.dir_exists(records_path):
-			var result = DirAccess.make_dir_recursive_absolute(records_path)
-			if result == OK:
-				print("Created records directory: ", records_path)
-			else:
-				push_error("Failed to create records directory: ", records_path)
-	else:
-		push_error("Failed to access documents directory")
+	if not DirAccess.dir_exists_absolute(records_path):
+		var result = DirAccess.make_dir_recursive_absolute(records_path)
+		if result == OK:
+			print("Created records directory: ", records_path)
+		else:
+			push_error("Failed to create records directory: ", records_path)
 
 func load_scores() -> bool:
 	if not FileAccess.file_exists(scores_file_path):

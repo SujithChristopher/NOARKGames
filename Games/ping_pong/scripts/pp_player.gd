@@ -271,7 +271,6 @@ func _notification(what: int) -> void:
         if game_log_file:
             game_log_file.close()
         GlobalTimerManager.remove_timer_selector_from_game()
-        get_tree().quit()
 
 func _on_logout_pressed() -> void:
     MusicManager.play_music("main")

@@ -6,12 +6,13 @@ extends Node
 # outline is used and the game's own scan is skipped; otherwise the scan runs
 # here and its outline is saved for next time.
 # Score = fireflies caught in the play rounds (ScoreManager, "FireflyReach").
-# Esc leaves for the menu at any time.
+# Esc or the Back button leaves for the menu at any time.
 
 const RoundRunner := preload("res://Games/firefly_reach/round_runner.gd")
 const ReachStore := preload("res://Games/firefly_reach/reach_store.gd")
 const Protocol := preload("res://Games/firefly_reach/protocol.gd")
 const TuningPanel := preload("res://Games/random_reach/Scripts/tuning_panel.gd")
+const BackButton := preload("res://Games/firefly_reach/back_button.gd")
 
 const MENU := "res://Main_screen/Scenes/select_game.tscn"
 const LEVEL_INDEX := 1   # Protocol.LEVELS[1]: the middle level
@@ -44,6 +45,9 @@ func _ready() -> void:
 	_runner.leave.connect(_leave)
 	add_child(_runner)
 	add_child(TuningPanel.new())   # live tracker tuning: F2 or the Tune button
+	var back := BackButton.new()
+	back.pressed.connect(_leave)
+	add_child(back)
 
 
 func _save_score() -> void:

@@ -1,161 +1,86 @@
 extends Node
+## The patient list, read from {DOCUMENTS}/NOARK_demo/patients.json. That file
+## belongs to sender_raspberryPI.py, which fetches it from the server
+## (`--sync`); NOARK never writes it and has no registry of its own. The ids are
+## the server's user_id.
+##
+## Server format:
+##   {"version": 2, "updated_at": "...", "patients": [
+##       {"user_id": "AG12312", "status": "active", "side": "left", "devices": [...]}]}
 
 # Singleton instance for global access
 static var instance
 
-# Constants
-const RECORDS_DIR = "NOARK//records"
 const DB_FILE = "patients.json"
 
-# Patient database
+# The server's "side" -> the affected hand the games train.
+const SIDES := {"left": "Left", "right": "Right", "both": "Both"}
+const AFFECTED_SIDES := ["Left", "Right", "Both"]
+
+# Patient database: user_id -> {name, affected_hand, status}
 var patient_register: Dictionary = {}
 var current_patient_id: String = ""
+var version: int = 0
 
 # File paths
-var records_path: String
 var database_file_path: String
 
 func _init():
 	instance = self
-	_setup_paths()
-	_ensure_directory_exists()
+	database_file_path = Settings.base_dir.path_join(DB_FILE)
+	print("Patient database path: ", database_file_path)
 	load_database()
 
-func _setup_paths() -> void:
-	var base_dir = OS.get_user_data_dir() if OS.get_name() == "Android" else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS) + "/NOARK"
-	
-	records_path = base_dir.path_join("records")
-	database_file_path = records_path.path_join(DB_FILE)
-
-	print("Patient database path: ", database_file_path)
-
-func _ensure_directory_exists() -> void:
-	if not DirAccess.dir_exists_absolute(records_path):
-		var result = DirAccess.make_dir_recursive_absolute(records_path)
-		if result == OK:
-			print("Created patient records directory: ", records_path)
-		else:
-			push_error("Failed to create patient records directory: ", records_path)
-
-# The side the patient trains; required at registration.
-const AFFECTED_SIDES := ["Left", "Right", "Both"]
-
 func load_database() -> bool:
+	patient_register = {}
+	version = 0
 	if not FileAccess.file_exists(database_file_path):
-		print("Patient database not found, creating new one")
-		patient_register = {}
-		current_patient_id = ""
-		save_database()
-		return true
-
-	var file = FileAccess.open(database_file_path, FileAccess.READ)
-	if not file:
-		push_error("Failed to open patient database file: ", database_file_path)
+		print("No patients.json yet; it arrives with the first server sync")
 		return false
 
-	var json_string = file.get_as_text()
-	file.close()
-
-	var json = JSON.new()
-	var parse_result = json.parse(json_string)
-
-	if parse_result != OK:
-		push_error("Failed to parse patient database JSON: ", json.get_error_message())
+	var data = JSON.parse_string(FileAccess.get_file_as_string(database_file_path))
+	if typeof(data) != TYPE_DICTIONARY or typeof(data.get("patients")) != TYPE_ARRAY:
+		push_error("Invalid patient database format: ", database_file_path)
 		return false
 
-	var data = json.get_data()
-	if typeof(data) == TYPE_DICTIONARY:
-		patient_register = data.get("patient_register", {})
-		current_patient_id = data.get("current_patient_id", "")
-		print("Loaded patient database with ", patient_register.size(), " patients")
-		_fill_missing_affected_side()
-		return true
-	else:
-		push_error("Invalid patient database format")
-		return false
+	version = int(data.get("version", 0))
+	for p in data["patients"]:
+		if typeof(p) != TYPE_DICTIONARY or str(p.get("user_id", "")) == "":
+			continue
+		if str(p.get("status", "active")).to_lower() != "active":
+			continue
+		var id := str(p["user_id"])
+		var side: String = SIDES.get(str(p.get("side", "")).to_lower(), "")
+		if side == "":
+			side = "Both"
+			push_warning("Patient %s has no usable side (%s); training Both" % [id, p.get("side")])
+		patient_register[id] = {"name": id, "affected_hand": side, "status": p.get("status", "")}
+	print("Loaded patient database v%d with %d patients" % [version, patient_register.size()])
+	return true
 
-# Patients registered before the affected side was required get one at random,
-# so every patient has a training side. Saved at once, so it is assigned only once.
-func _fill_missing_affected_side() -> void:
-	var changed := false
-	for id in patient_register:
-		var patient: Dictionary = patient_register[id]
-		if patient.get("affected_hand", "") not in AFFECTED_SIDES:
-			patient["affected_hand"] = AFFECTED_SIDES.pick_random()
-			push_warning("Patient %s had no affected side; assigned %s at random" % [id, patient["affected_hand"]])
-			changed = true
-	if changed:
-		save_database()
-
+# The file is the server's; the logged-in patient lives only in memory.
 func save_database() -> bool:
-	var data = {
-		"patient_register": patient_register,
-		"current_patient_id": current_patient_id
-	}
-
-	var json_string = JSON.stringify(data, "\t")
-
-	var file = FileAccess.open(database_file_path, FileAccess.WRITE)
-	if not file:
-		push_error("Failed to save patient database file: ", database_file_path)
-		return false
-
-	file.store_string(json_string)
-	file.close()
-	print("Patient database saved successfully")
 	return true
 
-# Function to add a patient to the register
-func add_patient(hospital_id: String, patient_name: String, age: int, gender: String,
-				stroke_time: int, dominant_hand: String, affected_hand: String, comments: String = "") -> bool:
-	if hospital_id in patient_register:
-		print("Patient with this hospital ID already exists!")
-		return false
-
-	patient_register[hospital_id] = {
-		"name": patient_name,
-		"age": age,
-		"gender": gender,
-		"stroke_time": stroke_time,
-		"dominant_hand": dominant_hand,
-		"affected_hand": affected_hand,
-		"comments": comments
-	}
-
-	save_database()
-	return true
-
-# Function to remove a patient from the register
-func remove_patient(hospital_id: String) -> bool:
-	if hospital_id in patient_register:
-		patient_register.erase(hospital_id)
-		save_database()
-		return true
-	print("No patient with this hospital ID found!")
-	return false
-
-# Function to get a patient's details
 func get_patient(hospital_id: String) -> Dictionary:
 	if hospital_id in patient_register:
 		return patient_register[hospital_id]
 	print("No patient with this hospital ID found!")
 	return {}
 
-# Function to list all patients
+# Sorted ids, for the main screen's dropdown.
+func patient_ids() -> Array:
+	var ids := patient_register.keys()
+	ids.sort()
+	return ids
+
 func list_all_patients() -> Array:
 	var patients = []
-	for hospital_id in patient_register.keys():
+	for hospital_id in patient_ids():
+		var p: Dictionary = patient_register[hospital_id]
 		patients.append({
 			"hospital_id": hospital_id,
-			"name": patient_register[hospital_id]["name"],
-			"age": patient_register[hospital_id]["age"],
-			"gender": patient_register[hospital_id]["gender"],
-			"stroke_time": patient_register[hospital_id]["stroke_time"],
-			"dominant_hand": patient_register[hospital_id]["dominant_hand"],
-			"affected_hand": patient_register[hospital_id]["affected_hand"],
-			"comments": patient_register[hospital_id]["comments"],
+			"name": p["name"],
+			"affected_hand": p["affected_hand"],
 		})
 	return patients
-
-# Note: If migrating from old patient_register.tres, manually copy data or
-# re-register patients. The old PatientDetails class has been removed.

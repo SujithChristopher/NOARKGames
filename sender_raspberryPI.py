@@ -14,12 +14,12 @@ from pathlib import Path
 SERVER_IP = "192.168.0.101"
 SERVER_PORT = 5000
 
-DEVICE_ID = "MARS"
+DEVICE_ID = "NOARK"
 
 # Parent folder that holds one sub-folder per patient:
 #   ROOT_DIR/<patient_id>/sessions.csv
 #   ROOT_DIR/<patient_id>/configdata.csv
-ROOT_DIR = Path("/home/pi/NeuroDash/patients")
+ROOT_DIR = Path("/home/radxa/Documents/NOARK_demo/data")
 
 # Kept OUTSIDE the root folder so it is never mistaken for a patient
 PATIENTS_FILE = ROOT_DIR.parent / "patients.json"
@@ -299,7 +299,7 @@ def local_patients_version():
 
 def sync_patients():
     """Fetch patients.json changes. Also tells the server this Pi is
-    online (heartbeat)."""
+    online (heartbeat). Returns False if the server could not be asked."""
 
     version = local_patients_version()
 
@@ -312,15 +312,15 @@ def sync_patients():
 
     except Exception as error:
         print(f"Sync failed: {error}")
-        return
+        return False
 
     if not response.get("success"):
         print(f"Sync error: {response.get('message')}")
-        return
+        return False
 
     if response["up_to_date"]:
         print(f"Patients up to date (v{response['version']})")
-        return
+        return True
 
     PATIENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -339,6 +339,8 @@ def sync_patients():
         f"Patients updated: v{version} -> v{response['version']} "
         f"({len(response['patients'])} for {DEVICE_ID})"
     )
+
+    return True
 
 
 # =========================================================
@@ -418,8 +420,12 @@ def hold_session(patient_id):
 # =========================================================
 # MAIN
 #
+#   sender_raspberryPI.py --sync
 #   sender_raspberryPI.py --login  [patient_id]
 #   sender_raspberryPI.py --upload [patient_id]
+#
+# --sync only fetches patients.json (the game runs it when the main
+# screen opens). Exit codes: 0 ok, 3 server unreachable.
 #
 # Exit codes for --login:  0 granted, 2 patient already training
 # elsewhere, 3 server unreachable, 4 no patient found.
@@ -429,12 +435,15 @@ if __name__ == "__main__":
 
     mode = sys.argv[1] if len(sys.argv) > 1 else "--upload"
 
-    patient_id = sys.argv[2] if len(sys.argv) > 2 else current_patient_id()
-
-    if mode not in ("--login", "--upload"):
+    if mode not in ("--sync", "--login", "--upload"):
         print(f"Unknown mode: {mode}")
-        print("Usage: sender_raspberryPI.py [--login | --upload] [patient_id]")
+        print("Usage: sender_raspberryPI.py [--sync | --login | --upload] [patient_id]")
         sys.exit(1)
+
+    if mode == "--sync":
+        sys.exit(0 if sync_patients() else 3)
+
+    patient_id = sys.argv[2] if len(sys.argv) > 2 else current_patient_id()
 
     if not patient_id:
         print(f"No patient folder found in {ROOT_DIR}")

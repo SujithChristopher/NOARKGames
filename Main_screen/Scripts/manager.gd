@@ -10,7 +10,7 @@ func _ready():
 
 # Opens a trial's raw data file. SessionLog picks the name
 # (GameData/raw-sessNN-trialNNN-{Game}-{Mode}.csv) and logs the trial's row in
-# session.csv when it ends.
+# sessions.csv when it ends.
 func create_game_log_file(game, p_id):
     var game_file_path = SessionLog.begin_trial(game, p_id)
     var game_file = FileAccess.open(game_file_path, FileAccess.WRITE)

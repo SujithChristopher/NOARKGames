@@ -7,8 +7,9 @@ extends Node2D
 #   reach scan -> warm-up -> calibration rounds -> calibration check -> play rounds.
 # One target (a firefly; "apple" in the code and the files) at a time at one of
 # the three fixed pairs; hold inside it for HOLD_S to catch it. The warm-up
-# rewards speed with points (3 / 2 / 1, diamonds on the target) and waits up to
-# the cap; its movement times start the calibration. Calibration is timed like
+# rewards speed with points (3 / 2 / 1, diamonds on the target, one going out
+# each second) and waits up to WARMUP_CAP_S, the bat flying in during the last
+# diamond; its movement times start the calibration. Calibration is timed like
 # play but kept encouraging: a staircase holds each pair at about 85 % caught;
 # the day's lifetime per pair is the p-th percentile of the Kaplan–Meier
 # movement-time curve from those fireflies (staircase.gd, since 2026-09-28).
@@ -21,8 +22,9 @@ extends Node2D
 #   - Holds are judged per tracker sample on the camera's capture clock, so at
 #     100 Hz rather than at the frame rate.
 #   - MT = hold start − spawn, which equals catch − spawn − hold (design.md §4.6).
-#   - An apple's "window" is how long a hold may take to start: the cap in the
-#     warm-up, the lifetime in calibration and play. At the end of the window
+#   - An apple's "window" is how long a hold may take to start: WARMUP_CAP_S in
+#     the warm-up, POINT_CAP_S for a reposition apple, the lifetime in
+#     calibration and play. At the end of the window
 #     the apple goes unless a hold is under way, which then finishes (caught)
 #     or breaks (missed). So it is caught exactly when MT <= lifetime (§3.3),
 #     and an apple on screen can always still be caught.
@@ -258,6 +260,7 @@ func _header_lines() -> Array:
 		"calibration,km (timed at >= %.2f catch rate; level = Kaplan-Meier percentile; staircase.gd)"
 			% Staircase.calibration_rate(_level_p()),
 		"point_cap_s,%s" % Protocol.POINT_CAP_S,
+		"warmup_cap_s,%s" % Protocol.WARMUP_CAP_S,
 		"screen_mapped,%s" % _ts.mapped,
 		"px_per_mm_x_y,%.3f %.3f" % [ppm.x, ppm.y],
 		"timing,frame rate (one hand sample per frame)",
@@ -315,7 +318,9 @@ func _process(delta: float) -> void:
 			Stage.ROUND:
 				_stage_left -= delta
 				if _apple.is_empty():
-					if _now() >= _spawn_after:   # after the last catch's hitstop
+					# After the last catch's hitstop, and once the bat has a missed firefly
+					# (from its perch a swoop takes over a second).
+					if _now() >= _spawn_after and not _bat.is_taking():
 						_spawn()
 				elif _apple_expired():
 					_finish_apple("timeout", _window_end())
@@ -407,9 +412,9 @@ func _on_sample(t: float, mm: Vector2) -> void:
 		if float(_apple["hold_start"]) >= 0.0:
 			_mark("hold_break", int(_apple["n"]))
 			# Still time left: the bat, which had turned away, hunts again.
-			if _apple["timed"] and t - spawn <= float(_apple["window"]):
+			if _apple["kind"] == "pair" and t - spawn <= float(_apple["window"]):
 				_bat.hunt(_ts.mm_to_screen(_apple["centre"]), _target_size(float(_apple["w_mm"])).x * 0.5,
-					spawn, float(_apple["window"]), _now(), true)
+					spawn, float(_apple["window"]), _now(), true, _hunt_from(spawn, _apple["timed"]))
 		_apple["hold_start"] = -1.0
 		return
 	var hold_start: float = _apple["hold_start"]
@@ -633,7 +638,7 @@ func _new_apple(kind: String, k: int, centre: Vector2, w: float) -> void:
 	var phase := _phase_name()
 	var in_play := phase == "play" and kind == "pair"
 	var timed := (phase == "play" or phase == "calibration") and kind == "pair"
-	var window: float = Protocol.POINT_CAP_S
+	var window: float = Protocol.WARMUP_CAP_S if kind == "pair" else Protocol.POINT_CAP_S
 	if in_play:
 		window = _lifetimes[k]
 	elif timed:
@@ -649,8 +654,14 @@ func _new_apple(kind: String, k: int, centre: Vector2, w: float) -> void:
 	_mark("spawn" if kind == "pair" else "spawn_reposition", _apple_n)
 	var pos := _ts.mm_to_screen(centre)
 	_snd.firefly_appears(pos)
-	if timed:
-		_bat.hunt(pos, _target_size(w).x * 0.5, t, window, t)
+	if kind == "pair":
+		_bat.hunt(pos, _target_size(w).x * 0.5, t, window, t, false, _hunt_from(t, timed))
+
+
+# Timed fireflies are hunted from the spawn; warm-up ones only during the last
+# diamond, so the bat is there to take it as that diamond goes out.
+func _hunt_from(spawn: float, timed: bool) -> float:
+	return 0.0 if timed else spawn + float(Protocol.POINT_LIMITS_S[1])
 
 
 func _window_end() -> float:
@@ -817,8 +828,14 @@ func _finish_apple(outcome: String, t: float) -> void:
 		_bat.missed(pos, _fly_len(size), float(a["look"]), _now())
 		_spawn_after = _now() + MISS_PAUSE_S
 	elif outcome == "timeout":
-		_fx.miss_at(pos, size)
-		_snd.missed()
+		# Warm-up and reposition fireflies: at the cap the bat takes the
+		# firefly, as for a timed miss — from close by in the warm-up (it flew
+		# in during the last diamond), from its perch for a reposition one.
+		# (They used to just fade, and on the board it read as the bat failing
+		# to eat it.)
+		_snd.missed(pos)
+		_bat.missed(pos, _fly_len(size), float(a["look"]), _now())
+		_spawn_after = _now() + MISS_PAUSE_S
 	else:
 		_bat.caught()   # aborted: the bat just goes back
 
@@ -897,7 +914,8 @@ func _lamp_level(now: float, holding: bool) -> float:
 # The target: a firefly (since 2026-09-29 a real-looking beetle, Art.draw_firefly,
 # before a glowing disc) inside a thin ring that marks the catch circle, W.
 #   its lantern flashes about 0.3 s each second, faster as the lifetime runs out;
-#   warm-up:     three diamonds above it, one going out at each point limit (3 -> 2 -> 1);
+#   warm-up:     three diamonds above it, one going out each second (3 -> 2 -> 1 -> gone,
+#                and the bat, which came in during the last one, takes it);
 #   holding:     it folds its wings, its light stays on and a bright ring closes
 #                around it — full = caught;
 #   calibration and play: the ring drains over the lifetime (and the bat comes, bat.gd).
@@ -939,6 +957,8 @@ func _draw_apple() -> void:
 	# Warm-up: three diamonds above it, the points still to be had (3 -> 2 -> 1).
 	if not _apple["timed"] and _apple["kind"] == "pair":
 		var worth := _worth(now) if hold_start < 0.0 else Protocol.points_for(hold_start - float(_apple["spawn_time"]))
+		if hold_start < 0.0 and now >= _window_end():
+			worth = 0   # the last one goes out at the cap, not after the grace
 		for i in 3:
 			Art.draw_diamond(self, c + Vector2((float(i) - 1.0) * 24.0, -size.y * 0.5 - 28.0), 7.5, i < worth)
 

@@ -1,6 +1,6 @@
 extends CanvasLayer
 ## Game-select banner: today's minutes of play per movement against the
-## patient's daily dose, from session.csv MoveTime. Display only, never blocks.
+## patient's daily dose, from sessions.csv MoveTime. Display only, never blocks.
 
 const FONT_SIZE := 26
 

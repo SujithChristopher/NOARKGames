@@ -4,10 +4,11 @@ extends Node
 # (reach_scan.gd) and nothing else. It is the workspace assessment for every
 # game, required once a day (assessment_gate.gd). Saves the outline
 # (reach_store.gd), then starts the game the patient chose, or returns to the
-# menu when opened from the Assessment button. Esc leaves without saving.
+# menu when opened from the Assessment button. Esc or Back leaves without saving.
 
 const RoundRunner := preload("res://Games/firefly_reach/round_runner.gd")
 const ReachStore := preload("res://Games/firefly_reach/reach_store.gd")
+const BackButton := preload("res://Games/firefly_reach/back_button.gd")
 
 const MENU_2D := "res://Main_screen/Scenes/select_game.tscn"
 const MENU_3D := "res://Main_screen/Scenes/3d_games.tscn"
@@ -39,13 +40,20 @@ func _ready() -> void:
 		else:
 			_to_menu())
 	add_child(runner)
+	var back := BackButton.new()
+	back.pressed.connect(_cancel)
+	add_child(back)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
-		GlobalSignals.pending_game = null   # no scan, no game
-		_to_menu()
+		_cancel()
+
+
+func _cancel() -> void:
+	GlobalSignals.pending_game = null   # no scan, no game
+	_to_menu()
 
 
 func _to_menu() -> void:

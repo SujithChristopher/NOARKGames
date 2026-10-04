@@ -137,7 +137,7 @@ def _pin_to_cpus(spec) -> None:
 
 # Where Godot's Settings autoload keeps the file (Linux/Windows/macOS; on Android the
 # tracker does not run). Godot passes the exact path with --settings.
-DEFAULT_SETTINGS_PATH = Path.home() / "Documents" / "NOARK" / "settings.json"
+DEFAULT_SETTINGS_PATH = Path.home() / "Documents" / "NOARK_demo" / "settings.json"
 
 
 def _load_settings(path: Path = DEFAULT_SETTINGS_PATH) -> dict:
@@ -829,7 +829,7 @@ class TrackerClass:
     def _select_hospitalid(self) -> None:
         if self.save_path is None:
             self.save_path = os.path.join(
-                os.path.expanduser("~/Documents/NOARK/data"),
+                os.path.expanduser("~/Documents/NOARK_demo/data"),
                 self._hid,
                 self._curr_session,
             )
@@ -1090,7 +1090,7 @@ class TrackerClass:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH,
-                        help="The user settings file (default: ~/Documents/NOARK/settings.json).")
+                        help="The user settings file (default: ~/Documents/NOARK_demo/settings.json).")
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
     parser.add_argument("--fps", type=int, default=60, choices=[15, 30, 60, 90, 100],
                          help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")

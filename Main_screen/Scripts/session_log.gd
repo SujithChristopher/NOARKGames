@@ -2,7 +2,7 @@ extends Node
 ## Per-patient session log and therapy dose, after the MARS robot's
 ## sessions.csv / configdata.csv (external/references/, docs/session_logging_spec.md).
 ##
-##   {data}/{pid}/session.csv     one row per trial, written when the trial ends
+##   {data}/{pid}/sessions.csv     one row per trial, written when the trial ends
 ##   {data}/{pid}/configdata.csv  dose history; the last row is the active dose
 ##   {data}/{pid}/GameData/raw-sessNN-trialNNN-{Game}-{Mode}.csv  (Manager writes these)
 ##
@@ -10,6 +10,12 @@ extends Node
 ## its log file (Manager.create_game_log_file -> begin_trial) and ends at game
 ## over (end_trial), when the next trial starts, when the game scene is left, or
 ## when the app closes — so an early quit still gets its row.
+##
+## Each row written is sent to the server: sender_raspberryPI.py --upload {pid}
+## runs in the background (one at a time; a trial ending meanwhile queues its
+## patient). Closing the app waits for it (global_script.gd).
+
+signal uploads_finished
 
 const DEVICE := "NOARK"
 
@@ -38,11 +44,26 @@ var session_start: String = ""
 var _trial: Dictionary = {}   # the open trial; empty when none
 var _trial_scene: Node = null
 var _paused: bool = false
+var _upload_pid: int = 0        # OS pid of the running upload, 0 when none
+var _upload_queue: Array = []   # patients still to upload after it
+
+
+func _ready() -> void:
+	# Uploads are polled in _process, which must keep running while a game is
+	# paused (and while the app waits for them to close). MoveTime checks pause itself.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
 func _process(delta: float) -> void:
 	if not _trial.is_empty() and not _paused and not get_tree().paused:
 		_trial["move_time"] += delta
+	if _upload_pid != 0 and not OS.is_process_running(_upload_pid):
+		print("[upload] finished (exit %d)" % OS.get_process_exit_code(_upload_pid))
+		_upload_pid = 0
+		if not _upload_queue.is_empty():
+			_start_upload(_upload_queue.pop_front())
+		else:
+			uploads_finished.emit()
 
 
 func _notification(what: int) -> void:
@@ -61,7 +82,7 @@ func patient_dir(pid: String) -> String:
 
 
 func session_path(pid: String) -> String:
-	return patient_dir(pid).path_join("session.csv")
+	return patient_dir(pid).path_join("sessions.csv")
 
 
 func dose_path(pid: String) -> String:
@@ -70,7 +91,7 @@ func dose_path(pid: String) -> String:
 
 # ── session ───────────────────────────────────────────────────────────────────
 
-## Called at login: the next SessionNumber is one past the highest in session.csv.
+## Called at login: the next SessionNumber is one past the highest in sessions.csv.
 func start_session(pid: String) -> void:
 	end_trial()
 	patient_id = effective_id(pid)
@@ -171,9 +192,37 @@ func end_trial() -> void:
 		t["file"],
 	]
 	_append(session_path(patient_id), _session_header(patient_id), row)
+	upload(patient_id)
 
 
-## Today's minutes of play per movement, from session.csv: {"ML": 12.5, ...}.
+# ── server upload ─────────────────────────────────────────────────────────────
+
+## Sends pid's sessions.csv and configdata.csv to the server in the background.
+## The debug patient (vvv) is not a real patient, so it stays local.
+func upload(pid: String) -> void:
+	if pid == "" or Settings.get_value("debug", false):
+		return
+	if _upload_pid == 0:
+		_start_upload(pid)
+	elif not pid in _upload_queue:
+		_upload_queue.append(pid)
+
+
+func is_uploading() -> bool:
+	return _upload_pid != 0
+
+
+func _start_upload(pid: String) -> void:
+	_upload_pid = OS.create_process(GlobalScript.python(), [GlobalScript.sender_path(), "--upload", pid])
+	if _upload_pid <= 0:
+		push_error("[upload] could not start sender_raspberryPI.py for %s" % pid)
+		_upload_pid = 0
+		uploads_finished.emit()
+	else:
+		print("[upload] sending %s's session files" % pid)
+
+
+## Today's minutes of play per movement, from sessions.csv: {"ML": 12.5, ...}.
 func today_minutes(pid: String) -> Dictionary:
 	var out := {"ML": 0.0, "AP": 0.0, "MLAP": 0.0}
 	var today := _now().substr(0, 10)
