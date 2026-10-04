@@ -222,17 +222,27 @@ signal tracker_config_applied(text: String)
 
 func handle_udp_packet() -> void:
 	var packet    = udp.get_packet()
-	# Text ack from the tracker for a CFG command (position packets are 44 bytes).
-	if packet.size() != 44 and packet.slice(0, 4).get_string_from_ascii() == "CFG:":
-		tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
-		return
-	# Trunk status from the tracker (TrunkMonitor). Text, so never 44 bytes.
-	if packet.size() != 44 and packet.slice(0, 4).get_string_from_ascii() == "TRK:":
-		TrunkMonitor.on_packet.call_deferred(packet.get_string_from_ascii())
+	if _handle_text_packet(packet):
 		return
 	var my_floats = PackedByteArray(packet).to_float32_array()
 	udp.put_packet(_outgoing_message.to_utf8_buffer())
 	_apply_position_packet(my_floats)
+
+
+# The tracker's text packets, the same over UDP (a datagram) and BLE (a
+# notification on the position characteristic); position packets are 44 bytes.
+# Deferred: UDP calls this from the network thread.
+func _handle_text_packet(packet: PackedByteArray) -> bool:
+	if packet.size() == 44:
+		return false
+	match packet.slice(0, 4).get_string_from_ascii():
+		"CFG:":   # ack for a CFG command
+			tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
+		"TRK:":   # trunk status (TrunkMonitor)
+			TrunkMonitor.on_packet.call_deferred(packet.get_string_from_ascii())
+		_:
+			return false
+	return true
 
 
 # ── BLE ───────────────────────────────────────────────────────────────────────
@@ -332,7 +342,10 @@ func _on_ble_device_discovered(device_info: Dictionary) -> void:
 	if dname == ble_device_name and daddr != "":
 		_ble_target_address = daddr
 		print("[BLE] Target found — stopping scan…")
-		_ble_manager.stop_scan()
+		if _ble_android_plugin:
+			_ble_android_plugin.stop_scan()
+		else:
+			_ble_manager.stop_scan()
 
 
 func _on_ble_scan_stopped() -> void:
@@ -497,6 +510,8 @@ func _on_ble_services_discovered(services: Array) -> void:
 
 func _on_ble_characteristic_notified(char_uuid: String, data: PackedByteArray) -> void:
 	if char_uuid.to_lower() != BLE_POSITION_UUID:
+		return
+	if _handle_text_packet(data):
 		return
 
 	if data.size() < 44 or (data.size() % 4) != 0:

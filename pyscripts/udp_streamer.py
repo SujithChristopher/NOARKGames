@@ -13,7 +13,7 @@ from typing import Optional
 
 
 class UDPStreamer:
-    """Synchronous UDP socket wrapper that mirrors the BLEStreamer interface."""
+    """Synchronous UDP socket wrapper; BLEStreamer (ble_streamer.py) has the same interface."""
 
     def __init__(self, ip: str = "localhost", port: int = 8000) -> None:
         self.ip = ip

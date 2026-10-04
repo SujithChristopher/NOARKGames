@@ -17,6 +17,11 @@ const APP_DIR := "NOARK_demo"
 const DEFAULTS := {
 	"debug": false,
 	"location": "PMR",
+	# How the tracker reaches the app: "udp" (Godot on the tracker board spawns
+	# tracker.py) or "ble" (Godot on a tablet; tracker.py runs on the board and
+	# advertises as ble_device_name). One or the other — tracker.py reads it too.
+	"stream_type": "udp",
+	"ble_device_name": "NOARK_Tracker",
 	"udp_port": 8000,
 	"display": false,
 	"tracker_cpus": "4-7",

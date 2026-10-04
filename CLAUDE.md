@@ -207,6 +207,29 @@ neutral cloud → flexion / lateral / axial and a state machine
   `Main_screen/Scripts/trunk_feedback.gd` is the overlay any game can add.
 - `uv run pyscripts/trunk_live.py --show` tests it without Godot (stop the tracker first).
 
+### BLE transport
+
+`stream_type` in settings.json is `udp` (Godot on the board spawns `tracker.py`)
+or `ble` (Godot on an Android tablet; `tracker.py` runs on the board and is a
+GATT peripheral). Never both; the tracker and Godot each read the key.
+
+- One notify characteristic carries everything the UDP socket does: the 44-byte
+  position packet and the text `TRK:` / `CFG:` packets, told apart by size and
+  prefix (`global_script.gd` `_handle_text_packet`). Commands (heartbeat,
+  `TRUNK:neutral`, `USER:`, `STOP`) are writes to the command characteristic.
+- Over BLE the tracker outlives the app: STOP or 3 s without a heartbeat closes
+  the session and it waits for the next connection instead of exiting.
+- **Advertising on the Radxa:** the AIC8800's BlueZ advertising fails — the
+  kernel rejects the advertising data (MGMT Add Extended Advertising Data →
+  Invalid Parameters, on 7.0.11-6/-7-qcom) though the controller accepts it.
+  `ble_streamer.py` falls back to `RawAdvertiser`, which sends the HCI commands
+  itself through `sudo -n hcitool`; that needs `/etc/sudoers.d/noark-ble`
+  (`radxa ALL=(root) NOPASSWD: /usr/bin/hcitool`), set up per board.
+- `uv run pyscripts/ble_test.py` advertises the same service with a fake hand
+  circle, no cameras. `GdAndroidBLE/` (submodule) is the Android plugin; its
+  `plugin/demo` is a test app for the tracker over BLE. Build with
+  `./gradlew assemble` there (Java 17 + Android SDK — not on the Radxa).
+
 ### Network Position (UDP Input)
 - `GlobalScript` listens on `127.0.0.1:8000`, receives `net_x, net_y, net_z, net_a`
 - 2D scalers: `PLAYER_POS_SCALER_X`, `PLAYER_POS_SCALER_Z`

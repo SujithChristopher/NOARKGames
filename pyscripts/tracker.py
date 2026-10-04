@@ -319,6 +319,14 @@ class TrackerClass:
         camera_section = ac.get("camera", {})
         self.udp_ip            = settings.get("udp_ip",   stream.get("ip", "127.0.0.1"))
         self.udp_port          = int(settings.get("udp_port", stream.get("port", 8000)))
+        # One transport or the other, never both: "udp" when Godot runs on this
+        # board and spawns us, "ble" when it runs on a tablet. Godot reads the
+        # same key (its own settings.json) to pick its side.
+        self.stream_type       = settings.get("stream_type", "udp")
+        if self.stream_type not in ("udp", "ble"):
+            print(f"[NET] Unknown stream_type {self.stream_type!r}, using udp.")
+            self.stream_type = "udp"
+        self.ble_device_name   = settings.get("ble_device_name", "NOARK_Tracker")
         self.display           = settings.get(
             "display", ac.get("display", {}).get("display", False)
         )
@@ -484,7 +492,7 @@ class TrackerClass:
         #
         # Binding first costs nothing: nothing reads the socket until the loop
         # starts, and the kernel buffers whatever arrives meanwhile.
-        self._init_udp_socket()
+        self._init_transport()
         self._watch_for_stop()
 
         if platform.system() == "Linux":
@@ -533,7 +541,7 @@ class TrackerClass:
             return
         self._trunk_sent_seq = st.seq
         f, l, a = st.angles
-        self.udp_streamer.send_raw(
+        self.streamer.send_raw(
             f"TRK:{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
             f"{st.reason},{st.capture_result}".encode())
@@ -560,7 +568,7 @@ class TrackerClass:
                     # Godot's address.
                     self.received_message = cmd
                     self._last_command_at = time.time()
-                    if cmd == b"STOP":
+                    if cmd == b"STOP" and self.stream_type == "udp":
                         self._stop_requested = True
                         return
                 time.sleep(0.05)
@@ -636,9 +644,24 @@ class TrackerClass:
 
     # ── Transport ─────────────────────────────────────────────────────────────
 
-    def _init_udp_socket(self) -> None:
-        self.udp_streamer = UDPStreamer(ip=self.udp_ip, port=self.udp_port)
-        self.udp_streamer.start()
+    def _init_transport(self) -> None:
+        if self.stream_type == "ble":
+            # Imported here so a UDP-only install never needs bless.
+            from ble_streamer import BLEStreamer
+            self.streamer = BLEStreamer(self.ble_device_name)
+        else:
+            self.streamer = UDPStreamer(ip=self.udp_ip, port=self.udp_port)
+        self.streamer.start()
+
+    def _end_ble_session(self, why: str) -> None:
+        """Over BLE the tracker outlives the app: it runs as a service on this
+        board while Godot runs on the tablet, which comes and goes. So a STOP or
+        a lost heartbeat closes the session and waits for the next central
+        instead of exiting, which would leave nothing to reconnect to."""
+        print(f"[BLE] {why}; session closed, waiting for the next connection.")
+        self._stop_session_recording()
+        self.received_message = b""
+        self.streamer.reset()
 
     def _apply_config(self, cmd: bytes) -> None:
         """Live tuning from Godot: `CFG:<key>=<value>` (30-byte datagram limit).
@@ -670,10 +693,10 @@ class TrackerClass:
         print(f"[CFG] {key} = {value}")
         # Ack so the UI can show it took effect (position packets are 44 bytes;
         # this one is text and starts with "CFG:").
-        self.udp_streamer.send_raw(f"CFG:{key}={value}".encode())
+        self.streamer.send_raw(f"CFG:{key}={value}".encode())
 
     def _recv_command(self) -> bytes:
-        return self.udp_streamer.get_command()
+        return self.streamer.get_command()
 
     def _send_coordinates(
         self,
@@ -688,7 +711,7 @@ class TrackerClass:
             [code_map.get(command, 2.0), *centroid, *ref_rvec, *ref_tvec, float(ref_id)],
             dtype=np.float32,
         )
-        self.udp_streamer.send(data.tolist())
+        self.streamer.send(data.tolist())
         self._send_count += 1
 
     # ── Pose estimation ───────────────────────────────────────────────────────
@@ -997,7 +1020,10 @@ class TrackerClass:
             self.received_message = cmd
             self._last_command_at = time.time()
             if cmd == b"STOP":
-                self._stop_requested = True
+                if self.stream_type == "ble":
+                    self._end_ble_session("STOP from the app")
+                else:
+                    self._stop_requested = True
             # Opening the session is latched here too, for the same reason STOP
             # is: it used to live in the marker-visible branch below, so a
             # session with nothing in view opened no log and started no
@@ -1086,8 +1112,12 @@ class TrackerClass:
                 try:
                     self.process_frame()
                     if time.time() - self._last_command_at > 3.0:
-                        print("Lost connection to Godot, exiting…")
-                        break
+                        if self.stream_type == "udp":
+                            print("Lost connection to Godot, exiting…")
+                            break
+                        if self.received_message:
+                            self._end_ble_session("No heartbeat for 3 s")
+                        self._last_command_at = time.time()
                 except Exception as exc:
                     print(f"Error: {exc} — Godot likely closed")
                     break
@@ -1133,17 +1163,26 @@ class TrackerClass:
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
+            # Each step on its own: one failing (the trunk worker already gone
+            # after a Ctrl-C) must not skip the rest — a skipped streamer.stop()
+            # leaves the BLE advertisement on with nothing behind it.
+            steps = []
             if self.record_frames and self._rec_file0 is not None:
-                self._close_rec_files()
-            self._stop_session_recording()
+                steps.append(self._close_rec_files)
+            steps.append(self._stop_session_recording)
             if getattr(self, "trunk", None) is not None:
-                self.trunk.stop()
+                steps.append(self.trunk.stop)
             if getattr(self, "capture", None) is not None:
-                self.capture.close()
-            if hasattr(self, "udp_streamer"):
-                self.udp_streamer.stop()
+                steps.append(self.capture.close)
+            if hasattr(self, "streamer"):
+                steps.append(self.streamer.stop)
             if self.display:
-                cv2.destroyAllWindows()
+                steps.append(cv2.destroyAllWindows)
+            for step in steps:
+                try:
+                    step()
+                except Exception as exc:
+                    print(f"[EXIT] {getattr(step, '__qualname__', step)}: {exc!r}")
 
 
 if __name__ == "__main__":
