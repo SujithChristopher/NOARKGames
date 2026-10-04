@@ -20,6 +20,7 @@ func _ready() -> void:
     AssessmentGate.warm([RANDOM_REACH, FLAPPY, PINGPONG, FRUIT_CATCHER, FIREFLY_REACH, RESULTS])
     logged_in_as.text = "Patient: " + PatientDB.current_patient_id
     add_child(preload("res://Main_screen/Scripts/dose_progress.gd").new())
+    add_child(preload("res://Main_screen/Scripts/trunk_panel.gd").new())
     var affected_hand = GlobalSignals.affected_hand
     
     if affected_hand == "Left":

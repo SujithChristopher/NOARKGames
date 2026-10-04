@@ -226,6 +226,10 @@ func handle_udp_packet() -> void:
 	if packet.size() != 44 and packet.slice(0, 4).get_string_from_ascii() == "CFG:":
 		tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
 		return
+	# Trunk status from the tracker (TrunkMonitor). Text, so never 44 bytes.
+	if packet.size() != 44 and packet.slice(0, 4).get_string_from_ascii() == "TRK:":
+		TrunkMonitor.on_packet.call_deferred(packet.get_string_from_ascii())
+		return
 	var my_floats = PackedByteArray(packet).to_float32_array()
 	udp.put_packet(_outgoing_message.to_utf8_buffer())
 	_apply_position_packet(my_floats)

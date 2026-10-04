@@ -20,6 +20,7 @@ dependencies = [
 	# Optional at runtime (frame_recorder degrades to a zero sync column without
 	# it), but declared so `uv sync` stops pruning it.
 	"gpiod>=2.5",
+	"onnxruntime-qnn>=2.4.0",
 ]
 
 [tool.uv.sources]

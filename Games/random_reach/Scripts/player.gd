@@ -83,6 +83,15 @@ var rom_y_bot: int
 # Preloaded resources
 var apple = preload("res://Games/random_reach/scenes/apple.tscn")
 
+# Trunk compensation (TrunkMonitor): play pauses while the trunk is past the
+# compensation threshold and resumes once it has been back under the warning
+# threshold for TRUNK_RESUME_S. A target reached while compensating does not
+# score. An occluded or untracked trunk never pauses the game.
+const TRUNK_RESUME_S := 0.5
+var trunk_paused := false
+var _trunk_ok_ms := -1
+var _trunk_feedback: CanvasLayer
+
 # Debug and config
 var json = JSON.new()
 var path = "res://debug.json"
@@ -99,6 +108,8 @@ func _ready() -> void:
 	_auto_select_mode()  # Must be called BEFORE _update_top_score_display() to set correct game_name
 	_update_top_score_display()
 	_setup_global_timer()
+	_trunk_feedback = preload("res://Main_screen/Scripts/trunk_feedback.gd").new()
+	get_parent().add_child.call_deferred(_trunk_feedback)
 
 func _setup_global_timer() -> void:
 	# Add the global timer selector to this game
@@ -184,6 +195,7 @@ func _on_global_countdown_updated(time_left: int) -> void:
 	
 	
 func _physics_process(delta):
+	_update_trunk()
 	if not game_started:
 		return
 
@@ -288,7 +300,55 @@ func _update_timer_display() -> void:
 func _on_PauseButton_pressed() -> void:
 	_pause_game()
 
+static func _trunk_compensating() -> bool:
+	return TrunkMonitor.available() and TrunkMonitor.state == TrunkMonitor.TRACKING \
+		and TrunkMonitor.level == TrunkMonitor.COMPENSATING
+
+func _update_trunk() -> void:
+	if trunk_paused:
+		# Occluded, untracked or no neutral: nothing to wait for, so play on.
+		if not TrunkMonitor.available() or TrunkMonitor.state != TrunkMonitor.TRACKING:
+			_trunk_resume()
+		elif TrunkMonitor.level == TrunkMonitor.OK:
+			if _trunk_ok_ms < 0:
+				_trunk_ok_ms = Time.get_ticks_msec()
+			elif Time.get_ticks_msec() - _trunk_ok_ms >= TRUNK_RESUME_S * 1000:
+				_trunk_resume()
+		else:
+			_trunk_ok_ms = -1
+	elif game_started and _trunk_compensating():
+		_trunk_pause()
+
+func _trunk_pause() -> void:
+	trunk_paused = true
+	_trunk_ok_ms = -1
+	GlobalTimer.pause_timer()
+	GlobalTimerManager.pause_countdown()
+	game_started = false
+	pause_state = 0
+	_freeze_targets(true)
+	TrunkMonitor.play_beep()
+	_trunk_feedback.paused_for_trunk = true
+
+func _trunk_resume() -> void:
+	trunk_paused = false
+	_trunk_feedback.paused_for_trunk = false
+	_resume_game()
+
+## Stop the target's own countdown and its eating timer while play is paused.
+func _freeze_targets(frozen: bool) -> void:
+	_timer_nodes.my_timer.paused = frozen
+	if current_apple != null:
+		current_apple.process_mode = Node.PROCESS_MODE_DISABLED if frozen \
+			else Node.PROCESS_MODE_INHERIT
+
 func _pause_game() -> void:
+	if trunk_paused:
+		# Already paused for the trunk: the manual pause takes over from it.
+		trunk_paused = false
+		_trunk_feedback.paused_for_trunk = false
+		_ui_nodes.Paused.show()
+		return
 	_ui_nodes.Paused.show()
 	GlobalTimer.pause_timer()
 	GlobalTimerManager.pause_countdown()
@@ -298,6 +358,7 @@ func _pause_game() -> void:
 func _resume_game() -> void:
 	GlobalTimer.resume_timer()
 	GlobalTimerManager.resume_countdown()
+	_freeze_targets(false)
 	game_started = true
 	pause_state = 1
 
@@ -345,7 +406,8 @@ func _setup_game_logging() -> void:
 	game_log_file.store_csv_line(PackedStringArray([
 		'epochtime', 'score', 'status', 'error_status', 'packets',
 		'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
-		'player_x', 'player_y', 'player_z', 'pause_state'
+		'player_x', 'player_y', 'player_z', 'pause_state',
+		'trunk_state', 'trunk_level', 'trunk_flexion', 'trunk_lateral', 'trunk_axial'
 	]))
 
 func _on_log_timer_timeout() -> void:
@@ -353,8 +415,16 @@ func _on_log_timer_timeout() -> void:
 		game_log_file.store_csv_line(PackedStringArray([
 			Time.get_unix_time_from_system(), score, status, error_status, packets,
 			str(pos_x), str(pos_y), str(pos_z), str(target_x), str(target_y), str(target_z),
-			str(game_x), str(game_y), str(game_z), str(pause_state)
-		]))
+			str(game_x), str(game_y), str(game_z), str(pause_state),
+		] + _trunk_columns()))
+
+## Trunk state/level/angles for the raw log; empty while the tracker sends none.
+static func _trunk_columns() -> Array:
+	if not TrunkMonitor.available():
+		return ["", "", "", "", ""]
+	var a := TrunkMonitor.angles
+	return [str(TrunkMonitor.state), str(TrunkMonitor.level),
+		"%.2f" % a.x, "%.2f" % a.y, "%.2f" % a.z]
 
 func _on_reach_game_ready() -> void:
 	rom_x_top = 20
@@ -368,6 +438,10 @@ func _on_apple_removed() -> void:
 	current_apple = null
 
 func _on_apple_eaten() -> void:
+	if _trunk_compensating():
+		# Reached by leaning, not by the arm: no score.
+		status = "compensated"
+		return
 	SessionLog.hit()
 	if score < max_score:
 		score += 1

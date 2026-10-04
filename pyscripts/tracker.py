@@ -26,6 +26,7 @@ from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
 from stereo_capture import StereoCapture
+from trunk.tracker import TrunkProcess
 from udp_streamer import UDPStreamer
 
 
@@ -490,6 +491,52 @@ class TrackerClass:
             self._init_cameras()
         else:
             raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
+        self._init_trunk(settings)
+
+    # ── Trunk ─────────────────────────────────────────────────────────────────
+    # The same pair also sees the patient's torso. trunk/ turns it into trunk
+    # angles from a captured neutral on its own thread; the hand loop only
+    # hands it the newest pair, so trunk work never delays hand tracking.
+
+    def _init_trunk(self, settings: dict) -> None:
+        self.trunk: Optional[TrunkProcess] = None
+        self._trunk_sent_seq = -1
+        if not settings.get("trunk_enabled", True):
+            print("[TRUNK] Disabled (settings.json trunk_enabled).")
+            return
+        try:
+            self.trunk = TrunkProcess(
+                self.K0, self.D0, self.K1, self.D1, self.R_st, self.T_st,
+                self.frame_size, settings,
+            )
+        except Exception as exc:
+            # No NPU, no model, no onnxruntime-qnn: hand tracking carries on.
+            print(f"[TRUNK] Unavailable, hand tracking only: {exc}")
+            return
+        print(f"[TRUNK] Tracking from stream{1 if self.trunk.swap else 0} "
+              f"at {self.trunk.size[0]}x{self.trunk.size[1]} in its own process.")
+
+    def _trunk_command(self, cmd: bytes) -> None:
+        """`TRUNK:neutral` starts a neutral capture."""
+        if cmd[6:].strip() == b"neutral" and self.trunk is not None:
+            print("[TRUNK] Neutral capture requested.")
+            self.trunk.capture_neutral()
+
+    def _send_trunk(self) -> None:
+        """One text datagram per trunk update:
+        TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
+            reason,capture_result
+        (trunk/tracker.py has the states and levels.)
+        """
+        st = self.trunk.status()
+        if st.seq == self._trunk_sent_seq:
+            return
+        self._trunk_sent_seq = st.seq
+        f, l, a = st.angles
+        self.udp_streamer.send_raw(
+            f"TRK:{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
+            f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
+            f"{st.reason},{st.capture_result}".encode())
 
     # ── Cameras ───────────────────────────────────────────────────────────────
     # Phase alignment, queue pairing and drift resync all live in
@@ -896,6 +943,9 @@ class TrackerClass:
             # whatever the recording is configured to keep.
             self.recorder.add(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._frame_count += 1
+        if self.trunk is not None:
+            # Before the flip: the stereo calibration describes the sensor image.
+            self.trunk.submit(raw0, raw1)
         if self.flip_frames:
             raw0 = cv2.flip(raw0, 1)
             raw1 = cv2.flip(raw1, 1)
@@ -937,6 +987,10 @@ class TrackerClass:
             if nxt.startswith(b"CFG:"):
                 self._apply_config(nxt)
                 self._last_command_at = time.time()
+            elif nxt.startswith(b"TRUNK:"):
+                # Drained here like CFG, or the next heartbeat would overwrite it.
+                self._trunk_command(nxt)
+                self._last_command_at = time.time()
             else:
                 cmd = nxt
         if cmd:
@@ -955,6 +1009,9 @@ class TrackerClass:
                 self._hid = cmd.decode().split(":", 1)[1]
                 self._select_hospitalid()
                 self.record = True
+
+        if self.trunk is not None:
+            self._send_trunk()
 
         # Pose estimation. With a calibrated body it is one joint solve over
         # every visible corner; without one, a pose per marker whose tip offsets
@@ -1079,6 +1136,8 @@ class TrackerClass:
             if self.record_frames and self._rec_file0 is not None:
                 self._close_rec_files()
             self._stop_session_recording()
+            if getattr(self, "trunk", None) is not None:
+                self.trunk.stop()
             if getattr(self, "capture", None) is not None:
                 self.capture.close()
             if hasattr(self, "udp_streamer"):

@@ -31,6 +31,13 @@ const DEFAULTS := {
 	"recording_fps": 30,
 	"recording_chunk_frames": 900,
 	"recording_scale": 0.5,
+	# Trunk tracking (pyscripts/trunk/): thresholds are degrees from the neutral
+	# captured in the game menu, a number for every axis or a dictionary
+	# {"flexion": .., "lateral": .., "axial": ..}.
+	"trunk_enabled": true,
+	"trunk_cpus": "7",
+	"trunk_warn_deg": 8,
+	"trunk_comp_deg": 15,
 }
 
 var base_dir: String   # {DOCUMENTS}/NOARK_demo, or the app's user dir on Android

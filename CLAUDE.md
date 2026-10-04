@@ -76,6 +76,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | 14 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
 | 15 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
 | 16 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
+| 17 | TrunkMonitor | `Main_screen/Scripts/trunk_monitor.gd` | Trunk posture from the tracker (`TRK:` packets) |
 
 ### Data Flow
 
@@ -179,6 +180,32 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
   `pyscripts/bench_solvers.py` does the same for the two solvers.
 
 See `pyscripts/README.md` for the calibration workflow.
+
+### Trunk Tracking
+
+The same camera pair sees the patient's torso. `pyscripts/trunk/` turns it into
+trunk angles from a captured neutral pose — the realtime port of
+`NOARK_backbone/trunkpose/dual_notebooks/07_icp_trunk.py`:
+trunk_seg W8A8 on the NPU (torso mask, arms removed) → half-resolution fisheye
+SGBM over the torso's box → front-shell cloud → point-to-plane ICP to the
+neutral cloud → flexion / lateral / axial and a state machine
+(NO_NEUTRAL, CAPTURING, TRACKING, OCCLUDED; per axis OK / WARN / COMPENSATING).
+
+- It runs in **its own process** (`TrunkProcess`), pinned to `trunk_cpus` (core 7).
+  A thread was not enough: ICP holds the GIL and took hand tracking from 31 to
+  25 fps. As a process it costs hand tracking 1-3 fps at ~11 Hz of trunk updates.
+- ICP registers about the neutral centroid, not the camera origin — about the
+  origin a 15° lean converged to 64°.
+- Thresholds live in `settings.json` (`trunk_warn_deg` 8, `trunk_comp_deg` 15;
+  a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off.
+  No NPU / model → the tracker carries on with hand tracking only.
+- Godot → tracker `TRUNK:neutral` (the game menus' "Capture neutral posture");
+  tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result`.
+- Random Reach: WARN shows a cue; COMPENSATING beeps, pauses play (and the
+  target) and a hit does not score; play resumes after 0.5 s back under WARN.
+  Occluded never pauses. Trunk state/level/angles are appended to its raw CSV.
+  `Main_screen/Scripts/trunk_feedback.gd` is the overlay any game can add.
+- `uv run pyscripts/trunk_live.py --show` tests it without Godot (stop the tracker first).
 
 ### Network Position (UDP Input)
 - `GlobalScript` listens on `127.0.0.1:8000`, receives `net_x, net_y, net_z, net_a`
