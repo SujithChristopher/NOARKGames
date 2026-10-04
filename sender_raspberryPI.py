@@ -11,7 +11,7 @@ from pathlib import Path
 # CONFIGURATION
 # =========================================================
 
-SERVER_IP = "172.17.227.246"
+SERVER_IP = "192.168.0.101"
 SERVER_PORT = 5000
 
 DEVICE_ID = "MARS"
