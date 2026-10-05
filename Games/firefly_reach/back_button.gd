@@ -8,6 +8,10 @@ signal pressed
 
 const CURSOR_SHOW_S := 3.0
 
+# Set before add_child for a button other than Back (the assessment's Save).
+var label := "Back"
+var corner := Control.PRESET_TOP_RIGHT
+
 var _hide_at: float = 0.0
 
 
@@ -15,7 +19,7 @@ func _ready() -> void:
 	layer = 50
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var b := Button.new()
-	b.text = "Back"
+	b.text = label
 	b.focus_mode = Control.FOCUS_NONE
 	b.custom_minimum_size = Vector2(150, 60)
 	b.add_theme_font_size_override("font_size", 28)
@@ -29,7 +33,11 @@ func _ready() -> void:
 	hover.bg_color = Color(0.12, 0.2, 0.38, 0.9)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", hover)
-	b.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
+	b.set_anchors_and_offsets_preset(corner, Control.PRESET_MODE_MINSIZE, 16)
+	# Grow from the corner inwards: the size is only final once the theme applies,
+	# and growing outwards pushed the button past the screen edge on the tablet.
+	b.grow_horizontal = Control.GROW_DIRECTION_BEGIN if b.anchor_left == 1.0 else Control.GROW_DIRECTION_END
+	b.grow_vertical = Control.GROW_DIRECTION_BEGIN if b.anchor_top == 1.0 else Control.GROW_DIRECTION_END
 	b.pressed.connect(pressed.emit)
 	add_child(b)
 

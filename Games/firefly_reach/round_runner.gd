@@ -271,6 +271,13 @@ func _level_p() -> float:
 	return Protocol.LEVELS[int(config["level_index"])]
 
 
+# The Save button (reach_assessment.gd): Enter for a touch screen. Only once the
+# polygon is out, so a tap during the hold cannot save the starting circle.
+func accept_scan() -> void:
+	if _stage == Stage.SCAN and _scan.is_stretching():
+		_scan.finish()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return

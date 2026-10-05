@@ -70,6 +70,11 @@ func is_done() -> bool:
 	return _step == Step.DONE
 
 
+# The polygon is out and being pushed (past the hold in the centre ring).
+func is_stretching() -> bool:
+	return _step == Step.STRETCH
+
+
 func on_sample(t: float, hand: Vector2) -> void:
 	_hand = hand
 	match _step:
