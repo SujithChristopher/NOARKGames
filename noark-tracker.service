@@ -1,12 +1,12 @@
 [Unit]
-Description=NOARK ArUco Tracker
-After=network.target
+Description=NOARK tracker (BLE)
+After=network.target bluetooth.target
 
 [Service]
 Type=simple
-User=sujith
-WorkingDirectory=/home/sujith/Documents/NOARKGames
-ExecStart=/home/sujith/.local/bin/uv run pyscripts/tracker.py
+User=radxa
+WorkingDirectory=/home/radxa/Documents/NOARKGames
+ExecStart=/home/radxa/.local/bin/uv run pyscripts/tracker.py
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
