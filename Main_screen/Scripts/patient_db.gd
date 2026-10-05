@@ -17,6 +17,10 @@ const DB_FILE = "patients.json"
 const SIDES := {"left": "Left", "right": "Right", "both": "Both"}
 const AFFECTED_SIDES := ["Left", "Right", "Both"]
 
+# The tablet build has no server sync (sender_raspberryPI.py cannot run there),
+# so it carries one patient of its own to log in with.
+const ANDROID_TEST_PATIENT := "test"
+
 # Patient database: user_id -> {name, affected_hand, status}
 var patient_register: Dictionary = {}
 var current_patient_id: String = ""
@@ -34,6 +38,9 @@ func _init():
 func load_database() -> bool:
 	patient_register = {}
 	version = 0
+	if OS.get_name() == "Android":
+		patient_register[ANDROID_TEST_PATIENT] = {
+			"name": ANDROID_TEST_PATIENT, "affected_hand": "Both", "status": "active"}
 	if not FileAccess.file_exists(database_file_path):
 		print("No patients.json yet; it arrives with the first server sync")
 		return false
