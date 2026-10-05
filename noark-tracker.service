@@ -1,13 +1,23 @@
 [Unit]
-Description=NOARK ArUco Tracker
-After=network.target
+Description=NOARK tracker (BLE): hand + trunk tracking for the tablet app
+# Only for stream_type "ble". With "udp", Godot on this board starts tracker.py
+# itself, and a second copy would fight it for the cameras — so ExecCondition
+# skips the start (the unit shows "condition failed", not an error).
+After=bluetooth.service
+Wants=bluetooth.service
 
 [Service]
 Type=simple
-User=sujith
-WorkingDirectory=/home/sujith/Documents/NOARKGames
-ExecStart=/home/sujith/.local/bin/uv run pyscripts/tracker.py
-Restart=on-failure
+User=radxa
+WorkingDirectory=/home/radxa/Documents/NOARKGames
+Environment=HOME=/home/radxa PYTHONUNBUFFERED=1
+ExecCondition=/home/radxa/Documents/NOARKGames/.venv/bin/python -c "import json,pathlib,sys; p=pathlib.Path.home()/'Documents'/'NOARK_demo'/'settings.json'; sys.exit(0 if json.loads(p.read_text()).get('stream_type')=='ble' else 1)"
+ExecStart=/home/radxa/Documents/NOARKGames/.venv/bin/python pyscripts/tracker.py
+# SIGINT, like Ctrl+C: tracker.py's cleanup turns the BLE advertisement off.
+KillSignal=SIGINT
+TimeoutStopSec=15
+# always, not on-failure: a camera error ends the loop with exit 0.
+Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal

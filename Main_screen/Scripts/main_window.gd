@@ -32,6 +32,13 @@ func _exit_tree() -> void:
         sync_thread.wait_to_finish()
 
 
+func _on_refresh_pressed() -> void:
+    if sync_thread.is_started():
+        return  # a sync is already running
+    sync_status.text = "Fetching patients..."
+    sync_thread.start(_sync_patients)
+
+
 func _sync_patients() -> void:
     var output := []
     var code := OS.execute(GlobalScript.python(), [GlobalScript.sender_path(), "--sync"], output, true)

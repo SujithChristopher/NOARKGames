@@ -332,6 +332,15 @@ theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9764706)
 theme_override_font_sizes/font_size = 13
 text = "Fetching patients..."
 
+[node name="RefreshButton" type="Button" parent="TextureRect"]
+layout_mode = 0
+offset_left = 780.0
+offset_top = 286.0
+offset_right = 870.0
+offset_bottom = 316.0
+theme_override_font_sizes/font_size = 14
+text = "Refresh"
+
 [node name="PlayButton" type="Button" parent="." unique_id=2029755704]
 layout_mode = 0
 offset_left = 412.0
@@ -502,6 +511,7 @@ script = ExtResource("10_setpn")
 
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
 [connection signal="text_submitted" from="TextureRect/HospID" to="PlayButton" method="_on_hosp_id_text_submitted"]
+[connection signal="pressed" from="TextureRect/RefreshButton" to="PlayButton" method="_on_refresh_pressed"]
 [connection signal="pressed" from="PlayButton" to="PlayButton" method="_on_pressed"]
 [connection signal="pressed" from="SetOriginButton" to="PlayButton" method="_on_set_origin_pressed"]
 [connection signal="pressed" from="DefineTableButton" to="PlayButton" method="_on_define_table_pressed"]
