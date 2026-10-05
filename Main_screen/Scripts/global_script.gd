@@ -240,6 +240,8 @@ func _handle_text_packet(packet: PackedByteArray) -> bool:
 			tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
 		"TRK:":   # trunk status (TrunkMonitor)
 			TrunkMonitor.on_packet.call_deferred(packet.get_string_from_ascii())
+		"IMG:":   # a chunk of the subject picker's snapshot (TrunkMonitor)
+			TrunkMonitor.on_image_chunk.call_deferred(packet)
 		_:
 			return false
 	return true

@@ -5,7 +5,7 @@ extends Node
 ## tracker.py sends a text datagram per trunk update (~10 Hz), which
 ## GlobalScript hands to on_packet():
 ##   TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-##       reason,capture_result
+##       reason,capture_result,people,locked
 ## The thresholds, hysteresis and dwell are applied in Python
 ## (settings.json trunk_warn_deg / trunk_comp_deg); this only reports them.
 ##
@@ -15,6 +15,9 @@ extends Node
 signal updated
 signal state_changed(state: int)
 signal level_changed(level: int)
+## The subject picker's image: people[i] is the outline (PackedVector2Array, in
+## image pixels) of person i, locked the one being followed (-1 = none).
+signal snapshot_ready(texture: ImageTexture, people: Array, locked: int)
 
 enum { NO_NEUTRAL, CAPTURING, TRACKING, OCCLUDED }
 enum { OK, WARN, COMPENSATING }
@@ -31,9 +34,15 @@ var progress := 0.0                 # neutral capture, 0..1
 var has_neutral := false
 var reason := ""                    # why OCCLUDED
 var capture_result := ""            # "", "ok", "moving", "not_visible"
+var people := 0                     # torsos the tracker sees
+var locked := false                 # following a picked person
 var _last_packet_ms := -100000
 
 var _beep: AudioStreamPlayer
+# Snapshot chunks being collected: "IMG:" id index total data (trunk/snapshot_packet.py)
+var _snap_id := -1
+var _snap_total := 0
+var _snap_chunks := {}
 
 
 func _ready() -> void:
@@ -52,6 +61,57 @@ func capture_neutral() -> void:
 	GlobalScript._send_transport_message("TRUNK:neutral")
 
 
+## Ask the tracker for the picker image; it arrives as snapshot_ready.
+func request_snapshot() -> void:
+	GlobalScript._send_transport_message("TRUNK:snapshot")
+
+
+## Follow person `index` of the last snapshot (-1 = the centre-most again). A new
+## person has no neutral: has_neutral goes false and it must be captured again.
+func select_person(index: int) -> void:
+	GlobalScript._send_transport_message("TRUNK:select=%d" % index)
+
+
+## One chunk of a snapshot. Called (deferred) from GlobalScript.
+func on_image_chunk(packet: PackedByteArray) -> void:
+	if packet.size() < 8:
+		return
+	var id := packet[4]
+	var index := packet[5]
+	var total := packet[6]
+	if id != _snap_id:
+		_snap_id = id
+		_snap_total = total
+		_snap_chunks.clear()
+	_snap_chunks[index] = packet.slice(7)
+	if _snap_chunks.size() < _snap_total:
+		return
+	var blob := PackedByteArray()
+	for i in _snap_total:
+		if not _snap_chunks.has(i):
+			return
+		blob.append_array(_snap_chunks[i])
+	_snap_id = -1
+	_snap_chunks.clear()
+	_decode_snapshot(blob)
+
+
+func _decode_snapshot(blob: PackedByteArray) -> void:
+	var meta_len := blob.decode_u16(0)
+	var meta = JSON.parse_string(blob.slice(2, 2 + meta_len).get_string_from_utf8())
+	var image := Image.new()
+	if typeof(meta) != TYPE_DICTIONARY or image.load_jpg_from_buffer(blob.slice(2 + meta_len)) != OK:
+		push_warning("[Trunk] bad snapshot")
+		return
+	var outlines := []
+	for poly in meta.get("people", []):
+		var pts := PackedVector2Array()
+		for pt in poly:
+			pts.append(Vector2(pt[0], pt[1]))
+		outlines.append(pts)
+	snapshot_ready.emit(ImageTexture.create_from_image(image), outlines, int(meta.get("locked", -1)))
+
+
 ## Called (deferred) from GlobalScript's network thread.
 func on_packet(text: String) -> void:
 	var f := text.substr(4).split(",")
@@ -66,6 +126,9 @@ func on_packet(text: String) -> void:
 	has_neutral = f[9] == "1"
 	reason = f[10]
 	capture_result = f[11]
+	if f.size() >= 14:
+		people = int(f[12])
+		locked = f[13] == "1"
 	if new_state != state:
 		state = new_state
 		state_changed.emit(state)
@@ -106,7 +169,7 @@ func status_text() -> String:
 		CAPTURING:
 			return "Hold still... %d%%" % int(progress * 100)
 		OCCLUDED:
-			return "Trunk occluded"
+			return "Tracked person lost: select again" if reason == "lost_subject" else "Trunk occluded"
 	return "Trunk  fwd %+.0f°  side %+.0f°  twist %+.0f°" % [angles.x, angles.y, angles.z]
 
 

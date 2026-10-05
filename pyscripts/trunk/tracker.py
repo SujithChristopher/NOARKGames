@@ -38,6 +38,7 @@ import numpy as np
 
 from .geometry import StereoShell, voxel_downsample
 from .icp import Neutral, Registration, trunk_angles
+from .segment import mask_iou, pick_subject
 
 NO_NEUTRAL, CAPTURING, TRACKING, OCCLUDED = 0, 1, 2, 3
 STATE_NAMES = ("NO_NEUTRAL", "CAPTURING", "TRACKING", "OCCLUDED")
@@ -57,6 +58,8 @@ DEFAULTS = {
     "trunk_cloud_points": 1500,        # per-frame cloud cap fed to ICP
     "trunk_neutral_points": 6000,
     "trunk_max_hz": 15.0,
+    "trunk_lock_iou": 0.3,         # min overlap with the last mask to stay on the subject
+    "trunk_snapshot_w": 160,       # picker image width, px
     # Cores for the trunk worker. The prime core (7) is the measured choice on
     # this board: with the hand tracker on 4-7 it cost hand tracking 1-3 fps
     # (~33.5 -> 31-34) at 11-12 Hz of trunk updates. Little cores (0-3) kept
@@ -81,6 +84,18 @@ def _parse_cpus(spec):
 
 
 @dataclass
+class Snapshot:
+    """What the subject picker shows: a small frame and one outline per person.
+
+    `people[i]` is the polygon (snapshot pixels) of person i; `select(i)` locks
+    onto that same person, whatever has moved since."""
+    jpeg: bytes
+    size: tuple                           # (w, h) of the image and polygons
+    people: list                          # [[(x, y), ...], ...]
+    locked: int = -1                      # index of the followed person, -1 = none
+
+
+@dataclass
 class TrunkStatus:
     state: int = NO_NEUTRAL
     level: int = OK                       # worst axis, TRACKING only
@@ -91,6 +106,8 @@ class TrunkStatus:
     has_neutral: bool = False
     capture_result: str = ""              # "", "ok", or why the last capture failed
     npts: int = 0
+    people: int = 0                       # torsos in the last frame
+    locked: bool = False                  # following a picked subject, not the centre-most
     rms_mm: float = float("nan")
     how: str = ""                         # direct / odometry
     seq: int = 0
@@ -115,6 +132,10 @@ class TrunkEngine:
         self.comp = _per_axis(cfg["trunk_comp_deg"])
         self.shell = StereoShell(K0, D0, K1, D1, R, T, size)
         self.seg = TorsoSegmenter()
+        self._lock_mask = None            # the followed person's last mask; None = centre-most
+        self._seen = None                 # (left image, [masks]) of the last frame
+        self._offered = []                # the masks the last snapshot numbered
+        self._people = 0
         self.rng = np.random.default_rng(0)
         self.last_view = None             # (left image, mask) of the last frame
 
@@ -138,12 +159,16 @@ class TrunkEngine:
 
     def _cloud(self, ls, rs, timing):
         t1 = time.perf_counter()
-        mask = self.seg(ls, self.shell.size)
+        masks = self.seg.instances(ls, self.shell.size)
         t2 = time.perf_counter()
         timing["seg"] = (t2 - t1) * 1e3
+        self._seen, self._people = (ls, masks), len(masks)
+        mask, _ = pick_subject(masks, self._lock_mask, self.cfg["trunk_lock_iou"])
         self.last_view = (ls, mask)
         if mask is None:
-            return None, "no_torso"
+            return None, "no_torso" if self._lock_mask is None or not masks else "lost_subject"
+        if self._lock_mask is not None:
+            self._lock_mask = mask       # follow them as they move
         pts = self.shell.shell(ls, rs, mask)
         cloud = voxel_downsample(pts, max_pts=int(self.cfg["trunk_cloud_points"]),
                                  rng=self.rng)
@@ -165,7 +190,8 @@ class TrunkEngine:
 
         if start_capture:
             self._capture = (now, [], [], 0)
-        st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, timing_ms=timing)
+        st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, timing_ms=timing,
+                         people=self._people, locked=self._lock_mask is not None)
         if self._capture is not None and self._capture_step(now, cloud, bad, st):
             pass
         elif self._neutral is None:
@@ -175,6 +201,62 @@ class TrunkEngine:
         st.has_neutral = self._neutral is not None
         st.capture_result = self._capture_result
         return st
+
+    def snapshot(self):
+        """The last frame with each person outlined, or None before the first.
+
+        The people are numbered here and kept, so a `select` that arrives a
+        moment later means the person the user saw, not whoever is 0 by then."""
+        if self._seen is None:
+            return None
+        ls, masks = self._seen
+        self._offered = masks
+        w = int(self.cfg["trunk_snapshot_w"])
+        h = max(1, round(ls.shape[0] * w / ls.shape[1]))
+        small = cv2.resize(ls, (w, h), interpolation=cv2.INTER_AREA)
+        ok, jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        people, followed = [], -1
+        for i, m in enumerate(masks):
+            ms = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
+            cnts, _ = cv2.findContours(ms, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                people.append([])
+                continue
+            c = cv2.approxPolyDP(max(cnts, key=cv2.contourArea), 1.0, True)
+            people.append([(int(x), int(y)) for x, y in c.reshape(-1, 2)])
+            if self._lock_mask is not None and followed < 0 and np.array_equal(m, self._lock_mask):
+                followed = i
+        return Snapshot(jpeg.tobytes() if ok else b"", (w, h), people, followed)
+
+    def select(self, index):
+        """Follow person `index` of the last snapshot; -1 goes back to the centre-most.
+
+        The neutral is one torso's cloud, so picking somebody else drops it (the
+        state goes to NO_NEUTRAL until the next capture); picking the person
+        already followed keeps it."""
+        if index is None or index < 0:
+            new = None
+        elif index < len(self._offered):
+            new = self._offered[index]
+        else:
+            return False
+        cur = self._lock_mask if self._lock_mask is not None else (
+            self.last_view[1] if self.last_view else None)
+        if new is not None and cur is not None and \
+                mask_iou(new, cur) >= self.cfg["trunk_lock_iou"]:
+            self._lock_mask = new          # same person: keep the neutral
+            return True
+        if new is None and self._lock_mask is None:
+            return True
+        self._lock_mask = new
+        if self._neutral is not None or self._capture is not None:
+            print("[TRUNK] subject changed: neutral cleared", flush=True)
+        self._neutral = self._reg = self._capture = None
+        self._fail_since, self._last = None, None
+        self._levels[:] = OK
+        self._pending[:] = OK
+        self._capture_result = ""
+        return True
 
     def _track(self, now, cloud, bad, timing, st):
         if bad:
@@ -317,6 +399,14 @@ class TrunkThread:
         with self._lock:
             self._capture_requested = True
 
+    def snapshot(self):
+        with self._lock:
+            return self.engine.snapshot()
+
+    def select(self, index):
+        with self._lock:
+            return self.engine.select(index)
+
     def status(self) -> TrunkStatus:
         with self._lock:
             return self._status
@@ -373,6 +463,12 @@ def _process_main(shm_name, shape, lock, seq, new, cmds, out, calib, settings):
                     return
                 if cmd == "neutral":
                     capture = True
+                elif cmd == "snapshot":
+                    snap = engine.snapshot()
+                    if snap is not None:
+                        out.put(snap)
+                elif isinstance(cmd, tuple) and cmd[0] == "select":
+                    engine.select(cmd[1])
             if not new.wait(0.5):
                 continue
             last = _throttle(cfg, last)
@@ -416,6 +512,7 @@ class TrunkProcess:
         self._seq = ctx.Value("Q", 0, lock=False)
         self._cmds, self._out = ctx.Queue(), ctx.Queue()
         self._status = TrunkStatus()
+        self._snapshot = None
         # The child imports numpy afresh: keep its BLAS pool to one thread so
         # nothing it does wakes threads on the hand tracker's cores.
         os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -449,6 +546,20 @@ class TrunkProcess:
     def capture_neutral(self):
         self._cmds.put("neutral")
 
+    def request_snapshot(self):
+        """Ask for the picker image; it arrives through `take_snapshot`."""
+        self._cmds.put("snapshot")
+
+    def select(self, index):
+        """Follow person `index` of the last snapshot; -1 = centre-most again."""
+        self._cmds.put(("select", int(index)))
+
+    def take_snapshot(self):
+        """The newest snapshot not yet taken, or None."""
+        self.status()
+        snap, self._snapshot = self._snapshot, None
+        return snap
+
     def status(self) -> TrunkStatus:
         while True:
             try:
@@ -457,6 +568,8 @@ class TrunkProcess:
                 return self._status
             if isinstance(item, TrunkStatus):
                 self._status = item
+            elif isinstance(item, Snapshot):
+                self._snapshot = item
 
     def stop(self):
         try:

@@ -101,18 +101,18 @@ class TorsoSegmenter:
         blob = np.repeat((canvas.astype(np.float32) / 255.0)[None, None], 3, axis=1)
         return blob, (r, px, py, nw, nh)
 
-    def __call__(self, gray, out_size):
-        """Torso mask (uint8 0/255) at out_size (W, H), or None if no torso.
+    def instances(self, gray, out_size):
+        """Every torso in frame, as masks (uint8 0/255, arms removed) at out_size.
 
-        A second person in frame gets their own torso instance; the subject is
-        the one whose centroid sits nearest the image centre. Arm masks are
-        subtracted after a dilation so an arm across the chest does not bleed
-        into the torso surface."""
+        Arm masks are subtracted after a dilation so an arm across the chest
+        does not bleed into the torso surface. Which instance is the subject is
+        `pick_subject`'s call, not the model's: the class can flip between
+        frames, the geometry does not."""
         blob, (r, px, py, nw, nh) = self._letterbox(gray)
         boxes, scores, coeffs, proto = self.sess.run(None, {"images": blob})
         dets = _decode(boxes, scores, coeffs)
         if not len(dets):
-            return None
+            return []
         masks = _masks160(dets, proto)
         cls = dets[:, 5].astype(int)
 
@@ -126,23 +126,58 @@ class TorsoSegmenter:
             return cv2.resize(m[y0:y1, x0:x1].astype(np.uint8), (W, H),
                               interpolation=cv2.INTER_NEAREST)
 
-        best, best_d = None, None
-        for i in np.flatnonzero(cls == TORSO):
-            m = masks[i][y0:y1, x0:x1]
-            ys, xs = np.nonzero(m)
-            if not len(xs):
-                continue
-            d = float(np.hypot(xs.mean() / m.shape[1] - 0.5, ys.mean() / m.shape[0] - 0.5))
-            if best_d is None or d < best_d:
-                best, best_d = i, d
-        if best is None:
-            return None
-        torso = up(masks[best]) * 255
-        arms = np.zeros_like(torso)
+        arms = np.zeros((H, W), np.uint8)
         for i in np.flatnonzero(cls == ARM):
             arms |= up(masks[i])
         if arms.any():
             k = max(3, int(round(ARM_EXCLUDE_DILATE_PX * W / 1280)) | 1)
             kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-            torso[cv2.dilate(arms, kern) > 0] = 0
-        return torso
+            arms = cv2.dilate(arms, kern)
+        out = []
+        for i in np.flatnonzero(cls == TORSO):
+            torso = up(masks[i]) * 255
+            torso[arms > 0] = 0
+            if torso.any():
+                out.append(torso)
+        return out
+
+    def __call__(self, gray, out_size):
+        """Torso mask of the centre-most person, or None. No subject lock."""
+        return pick_subject(self.instances(gray, out_size))[0]
+
+
+def _centroid(mask):
+    m = cv2.moments(mask, binaryImage=True)
+    if not m["m00"]:
+        return None
+    return m["m10"] / m["m00"], m["m01"] / m["m00"]
+
+
+def mask_iou(a, b):
+    both = np.count_nonzero((a > 0) & (b > 0))
+    return both / max(np.count_nonzero((a > 0) | (b > 0)), 1)
+
+
+def pick_subject(masks, lock=None, min_iou=0.3):
+    """(mask, index) of the subject among `masks`, or (None, None).
+
+    With no `lock`, the person whose centroid is nearest the image centre.
+    With one (the subject's previous mask), the person overlapping it most, and
+    only if the overlap is at least `min_iou`: somebody else walking into the
+    centre is then not mistaken for the subject, the subject is reported lost."""
+    if not masks:
+        return None, None
+    if lock is not None:
+        ious = [mask_iou(m, lock) for m in masks]
+        best = int(np.argmax(ious))
+        return (masks[best], best) if ious[best] >= min_iou else (None, None)
+    best, best_d = None, None
+    for i, m in enumerate(masks):
+        c = _centroid(m)
+        if c is None:
+            continue
+        h, w = m.shape
+        d = float(np.hypot(c[0] / w - 0.5, c[1] / h - 0.5))
+        if best_d is None or d < best_d:
+            best, best_d = i, d
+    return (masks[best], best) if best is not None else (None, None)

@@ -26,6 +26,7 @@ from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
 from stereo_capture import StereoCapture
+from trunk.snapshot_packet import encode_snapshot
 from trunk.tracker import TrunkProcess
 from udp_streamer import UDPStreamer
 
@@ -525,18 +526,50 @@ class TrackerClass:
               f"at {self.trunk.size[0]}x{self.trunk.size[1]} in its own process.")
 
     def _trunk_command(self, cmd: bytes) -> None:
-        """`TRUNK:neutral` starts a neutral capture."""
-        if cmd[6:].strip() == b"neutral" and self.trunk is not None:
+        """`TRUNK:neutral` starts a neutral capture; `TRUNK:snapshot` sends the
+        subject picker's image; `TRUNK:select=<n>` follows person n of it (-1 =
+        the centre-most again)."""
+        if self.trunk is None:
+            return
+        arg = cmd[6:].strip()
+        if arg == b"neutral":
             print("[TRUNK] Neutral capture requested.")
             self.trunk.capture_neutral()
+        elif arg == b"snapshot":
+            self.trunk.request_snapshot()
+        elif arg.startswith(b"select="):
+            try:
+                self.trunk.select(int(arg[7:]))
+            except ValueError:
+                print(f"[TRUNK] Bad select: {cmd!r}")
+
+    def _send_snapshot(self) -> None:
+        """Ship a snapshot the trunk process has produced, if any.
+
+        Chunks are paced: BlueZ drops a notification whose value is replaced
+        before it went out, and a burst of 25 would."""
+        snap = self.trunk.take_snapshot()
+        if snap is None:
+            return
+        self._snap_id = (getattr(self, "_snap_id", 0) + 1) & 0xFF
+        chunks = encode_snapshot(snap, self._snap_id)
+
+        def run():
+            for c in chunks:
+                self.streamer.send_raw(c)
+                time.sleep(0.015)
+        threading.Thread(target=run, name="snapshot-send", daemon=True).start()
+        print(f"[TRUNK] Snapshot sent: {len(snap.people)} people, "
+              f"{len(snap.jpeg)} B jpeg, {len(chunks)} chunks")
 
     def _send_trunk(self) -> None:
         """One text datagram per trunk update:
         TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-            reason,capture_result
+            reason,capture_result,people,locked
         (trunk/tracker.py has the states and levels.)
         """
         st = self.trunk.status()
+        self._send_snapshot()
         if st.seq == self._trunk_sent_seq:
             return
         self._trunk_sent_seq = st.seq
@@ -544,7 +577,7 @@ class TrackerClass:
         self.streamer.send_raw(
             f"TRK:{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
-            f"{st.reason},{st.capture_result}".encode())
+            f"{st.reason},{st.capture_result},{st.people},{int(st.locked)}".encode())
 
     # ── Cameras ───────────────────────────────────────────────────────────────
     # Phase alignment, queue pairing and drift resync all live in

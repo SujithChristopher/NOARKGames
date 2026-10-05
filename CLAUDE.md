@@ -200,7 +200,16 @@ neutral cloud → flexion / lateral / axial and a state machine
   a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off.
   No NPU / model → the tracker carries on with hand tracking only.
 - Godot → tracker `TRUNK:neutral` (the game menus' "Capture neutral posture");
-  tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result`.
+  tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result`,people,locked`.
+- **Several people in view:** the subject is the centre-most torso unless picked.
+  `TRUNK:snapshot` → the tracker sends a ~160 px JPEG with one outline per person as
+  chunked `IMG:` packets (`trunk/snapshot_packet.py`, same over UDP and BLE;
+  `TrunkMonitor` reassembles → `snapshot_ready`); `TRUNK:select=<n>` (-1 = centre-most)
+  locks onto person n. The lock follows them by mask overlap (IoU ≥ `trunk_lock_iou`
+  0.3 with their last mask), not by class, which can flip; below that they are
+  `lost_subject`. Picking a different person clears the neutral — pick, then capture
+  neutral. `person_picker.gd` is the tap-a-mask UI; `trunk_panel.gd` opens it
+  by itself when `people > 1` and nobody is picked.
 - Random Reach: WARN shows a cue; COMPENSATING beeps, pauses play (and the
   target) and a hit does not score; play resumes after 0.5 s back under WARN.
   Occluded never pauses. Trunk state/level/angles are appended to its raw CSV.
