@@ -24,11 +24,20 @@ ROOT_DIR = Path("/home/radxa/Documents/NOARK_demo/data")
 # Kept OUTSIDE the root folder so it is never mistaken for a patient
 PATIENTS_FILE = ROOT_DIR.parent / "patients.json"
 
-# Identifies this Raspberry Pi for the training lock
-LAPTOP_ID = socket.gethostname()
+# Identifies THIS Raspberry Pi for the training lock. DEVICE_ID is the kind of device (several Pis can all be "MARS"),
+# so the lock needs this to tell two of them apart. Defaults to the Pi's hostname: give every Pi a different one,
+# or set NEURODASH_CLIENT_ID.
+CLIENT_ID = os.environ.get("NEURODASH_CLIENT_ID") or socket.gethostname()
+LAPTOP_ID = CLIENT_ID  # older name
 
-# Renew the training lock this often (server expires it after 90 s)
+# Renew the training lock this often while "--login" is holding a patient. The server frees a patient after
+# ACTIVE_WINDOW_SECONDS (default 900) without a sign of life, so this only has to be well below that.
 LOCK_RENEW_SECONDS = 30
+
+# How long one lock request (claim / check / release) waits for the server before giving up
+LOCK_TIMEOUT_SECONDS = 3
+
+NUDGE_PORT = 5001   # must match patients_store.NUDGE_PORT
 
 CSV_NAMES = ["sessions.csv", "configdata.csv"]
 
@@ -111,6 +120,7 @@ def send_file(CSV_FILE):
 
     header = {
         "device_id": DEVICE_ID,
+        "client_id": CLIENT_ID,
         "filename": CSV_FILE.name,
         "file_size": file_size
     }
@@ -297,9 +307,20 @@ def local_patients_version():
         return 0
 
 
+def local_view():
+    """The 'view' token the server gave with the list this Pi holds (which patients it was shown)."""
+
+    try:
+        with open(PATIENTS_FILE, "r", encoding="utf-8") as f:
+            return str(json.load(f).get("view", ""))
+    except (FileNotFoundError, ValueError):
+        return ""
+
+
 def sync_patients():
     """Fetch patients.json changes. Also tells the server this Pi is
-    online (heartbeat). Returns False if the server could not be asked."""
+    online (heartbeat). The server leaves out patients another device is
+    training right now."""
 
     version = local_patients_version()
 
@@ -307,20 +328,22 @@ def sync_patients():
         response = server_request({
             "action": "sync",
             "device_id": DEVICE_ID,
-            "patients_version": version
+            "client_id": CLIENT_ID,
+            "patients_version": version,
+            "view": local_view()
         })
 
     except Exception as error:
         print(f"Sync failed: {error}")
-        return False
+        return
 
     if not response.get("success"):
         print(f"Sync error: {response.get('message')}")
-        return False
+        return
 
     if response["up_to_date"]:
         print(f"Patients up to date (v{response['version']})")
-        return True
+        return
 
     PATIENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -330,6 +353,7 @@ def sync_patients():
         json.dump({
             "version": response["version"],
             "updated_at": response["updated_at"],
+            "view": response.get("view"),
             "patients": response["patients"]
         }, f, indent=2)
 
@@ -340,41 +364,111 @@ def sync_patients():
         f"({len(response['patients'])} for {DEVICE_ID})"
     )
 
-    return True
+
+# =========================================================
+# NUDGES (the server pushes "something changed")
+# =========================================================
+
+def listen_for_nudge():
+    """Refresh the patient list the moment the server says a patient started or stopped training elsewhere."""
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("", NUDGE_PORT))
+
+    print(f"Listening for server nudges on UDP {NUDGE_PORT}")
+
+    while True:
+
+        try:
+            data, address = sock.recvfrom(1024)
+            message = json.loads(data.decode("utf-8"))
+        except (OSError, ValueError):
+            continue
+
+        if (
+            message.get("type") == "patients_changed"
+            and int(message.get("version", 0)) > local_patients_version()
+        ) or message.get("type") == "presence_changed":
+            print(f"Nudge from {address[0]}")
+            sync_patients()
+
+
+# =========================================================
+# FOR agent.py (so the same agent runs on a Raspberry Pi)
+# =========================================================
+
+def sessions_file_for(patient_id):
+    """The sessions.csv of this patient (None when no patient is held): agent.py watches it to notice a trial ending."""
+
+    return find_file(ROOT_DIR / patient_id, "sessions.csv") if patient_id else None
+
+
+def _load_csv_files():
+    """Files of the patient playing right now (most recently changed folder)."""
+
+    try:
+        patient = current_patient_id()
+    except OSError:
+        return []
+
+    return patient_csv_files(patient) if patient else []
 
 
 # =========================================================
 # TRAINING LOCK (one device per patient at a time)
 # =========================================================
 
+class PatientInUse(Exception):
+    """Another device already holds this patient. `.holder` is {"device", "client", "seconds_ago"}."""
+
+    def __init__(self, user_id, holder):
+        self.user_id = user_id
+        self.holder = holder or {}
+        super().__init__(
+            f"{user_id} is being trained on {self.holder.get('device', 'another device')}"
+            f"{' (laptop ' + self.holder['client'] + ')' if self.holder.get('client') else ''} "
+            f"({self.holder.get('seconds_ago', '?')} s since its last activity)."
+        )
+
+
+def _ask_server(action, user_id):
+    """One lock request. Returns the reply dict, or None if the server cannot be reached."""
+
+    try:
+        return server_request({
+            "action": action,
+            "device_id": DEVICE_ID,
+            "client_id": CLIENT_ID,
+            "user_id": user_id
+        }, timeout=LOCK_TIMEOUT_SECONDS)
+
+    except Exception as error:
+        print(f"Could not reach the server: {error}")
+        return None
+
+
 def claim_patient(patient_id):
     """Returns (ok, message). Also renews a lock this Pi holds."""
 
-    try:
-        response = server_request({
-            "action": "claim",
-            "device_id": DEVICE_ID,
-            "laptop_id": LAPTOP_ID,
-            "user_id": patient_id
-        }, timeout=10)
+    reply = _ask_server("claim_user", patient_id)
 
-    except Exception as error:
-        return False, f"Cannot reach server: {error}"
+    if reply is None:
+        return False, "Cannot reach server"
 
-    return bool(response.get("success")), response.get("message", "")
+    if not reply.get("success"):
+        return False, reply.get("message", "The server refused the request")
+
+    if reply.get("claimed"):
+        return True, ""
+
+    return False, str(PatientInUse(patient_id, reply.get("in_use_by")))
 
 
 def release_patient(patient_id):
 
-    try:
-        server_request({
-            "action": "release",
-            "device_id": DEVICE_ID,
-            "laptop_id": LAPTOP_ID,
-            "user_id": patient_id
-        }, timeout=10)
-    except Exception as error:
-        print(f"Release failed (lock will expire by itself): {error}")
+    if _ask_server("release", patient_id) is None:
+        print("Release failed (the lock will expire by itself)")
 
 
 def hold_session(patient_id):
@@ -420,36 +514,44 @@ def hold_session(patient_id):
 # =========================================================
 # MAIN
 #
-#   sender_raspberryPI.py --sync
-#   sender_raspberryPI.py --login  [patient_id]
-#   sender_raspberryPI.py --upload [patient_id]
-#
-# --sync only fetches patients.json (the game runs it when the main
-# screen opens). Exit codes: 0 ok, 3 server unreachable.
+#   sender_raspberryPI.py --login  [patient_id]   claim the patient and keep the lock alive until stopped
+#   sender_raspberryPI.py --upload [patient_id]   upload the patient's CSVs, then sync the patient list
+#   sender_raspberryPI.py --check  patient_id     only asks: is this patient being trained on another device?
 #
 # Exit codes for --login:  0 granted, 2 patient already training
 # elsewhere, 3 server unreachable, 4 no patient found.
+# Exit codes for --check:  0 free, 2 in use on another device.
+#
+# Better: run agent.py all day (it uses this file when there is no sender.py next to it). It holds the lock for you
+# through a local web call and checks in only when a patient starts or stops and when a trial ends.
 # =========================================================
 
 if __name__ == "__main__":
 
     mode = sys.argv[1] if len(sys.argv) > 1 else "--upload"
 
-    if mode not in ("--sync", "--login", "--upload"):
-        print(f"Unknown mode: {mode}")
-        print("Usage: sender_raspberryPI.py [--sync | --login | --upload] [patient_id]")
-        sys.exit(1)
-
-    if mode == "--sync":
-        sys.exit(0 if sync_patients() else 3)
-
     patient_id = sys.argv[2] if len(sys.argv) > 2 else current_patient_id()
+
+    if mode not in ("--login", "--upload", "--check"):
+        print(f"Unknown mode: {mode}")
+        print("Usage: sender_raspberryPI.py [--login | --upload | --check] [patient_id]")
+        sys.exit(1)
 
     if not patient_id:
         print(f"No patient folder found in {ROOT_DIR}")
         sys.exit(4)
 
-    if mode == "--login":
+    if mode == "--check":
+
+        reply = _ask_server("check_user", patient_id)
+
+        if reply and reply.get("success") and reply.get("in_use"):
+            print(f"{patient_id} is IN USE: {PatientInUse(patient_id, reply.get('in_use_by'))}")
+            sys.exit(2)
+
+        print(f"{patient_id} is free.")
+
+    elif mode == "--login":
 
         # Called when a patient logs in: pull patient list, then take
         # the training lock. Stays running to keep the lock alive, so
