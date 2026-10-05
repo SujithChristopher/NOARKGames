@@ -476,6 +476,20 @@ theme = ExtResource("2_ghqbc")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Assessment"
 
+[node name="TrunkAngles" type="Button" parent="." groups=["GameButtons"]]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -440.0
+offset_top = 291.0
+offset_right = -254.0
+offset_bottom = 368.0
+grow_horizontal = 2
+theme = ExtResource("2_ghqbc")
+theme_override_fonts/font = SubResource("FontFile_o1ivk")
+text = "Trunk Angles"
+
 [node name="Results" type="Button" parent="." groups=["GameButtons"]]
 layout_mode = 1
 anchors_preset = 5
@@ -625,6 +639,7 @@ text = "  Right hand  "
 [connection signal="pressed" from="game_flappy" to="." method="_on_game_flappy_pressed"]
 [connection signal="pressed" from="game_pingpong" to="." method="_on_game_pingpong_pressed"]
 [connection signal="pressed" from="Assessment" to="." method="_on_assessment_pressed"]
+[connection signal="pressed" from="TrunkAngles" to="." method="_on_trunk_angles_pressed"]
 [connection signal="pressed" from="Results" to="." method="_on_results_pressed"]
 [connection signal="pressed" from="Exit_button" to="." method="_on_exit_button_pressed"]
 [connection signal="pressed" from="logout" to="." method="_on_logout_pressed"]

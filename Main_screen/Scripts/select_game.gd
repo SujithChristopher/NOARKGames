@@ -70,6 +70,9 @@ func _on_game_pingpong_pressed() -> void:
 func _on_assessment_pressed() -> void:
     AssessmentGate.assess(get_tree())
 
+func _on_trunk_angles_pressed() -> void:
+    get_tree().change_scene_to_file("res://Main_screen/Scenes/trunk_view.tscn")
+
 func _on_results_pressed() -> void:
     get_tree().change_scene_to_packed(AssessmentGate.scene(RESULTS))
 
