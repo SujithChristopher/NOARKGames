@@ -781,6 +781,7 @@ func _notification(what: int) -> void:
 			get_tree().paused = true
 			_show_upload_notice()
 			await SessionLog.uploads_finished
+		await DeviceAgent.stop()   # release the patient for the other devices
 		get_tree().quit()
 
 
@@ -831,7 +832,12 @@ func python() -> String:
 
 ## sender_raspberryPI.py: patient sync (--sync) and session upload (--upload).
 func sender_path() -> String:
-	return _project_root().path_join(SENDER_SCRIPT)
+	return project_file(SENDER_SCRIPT)
+
+
+## A helper script deployed next to the game (agent.py, sender_raspberryPI.py).
+func project_file(name: String) -> String:
+	return _project_root().path_join(name)
 
 
 func _project_root() -> String:

@@ -73,6 +73,7 @@ func _on_results_pressed() -> void:
     get_tree().change_scene_to_packed(AssessmentGate.scene(RESULTS))
 
 func _on_logout_pressed() -> void:
+    DeviceAgent.stop()   # release the patient for the other devices
     GlobalSignals.selected_training_hand == ""
     GlobalSignals.affected_hand = ""
     get_tree().change_scene_to_file("res://Main_screen/Scenes/main.tscn")
@@ -81,7 +82,6 @@ func _on_exit_button_pressed() -> void:
     GlobalScript._notification(NOTIFICATION_WM_CLOSE_REQUEST)
     GlobalSignals.selected_training_hand == ""
     GlobalSignals.affected_hand = ""
-    get_tree().quit()
 
 func _on_fruit_catcher_pressed() -> void:
     MusicManager.play_music("fc_bgm")

@@ -139,7 +139,6 @@ func _on_hosp_id_gui_input(event: InputEvent) -> void:
 func _on_exit_button_pressed():
     GlobalScript._notification(NOTIFICATION_WM_CLOSE_REQUEST)
     GlobalSignals.SignalBus.emit()
-    get_tree().quit()
 
 func _on_pressed():
     _login()

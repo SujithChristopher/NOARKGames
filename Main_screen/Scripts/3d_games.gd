@@ -56,9 +56,9 @@ func _on_exit_pressed() -> void:
    GlobalScript._notification(NOTIFICATION_WM_CLOSE_REQUEST)
    GlobalSignals.selected_training_hand == ""
    GlobalSignals.affected_hand = ""
-   get_tree().quit()
 
 func _on_logout_pressed() -> void:
+    DeviceAgent.stop()   # release the patient for the other devices
     MusicManager.play_music("main")
     GlobalSignals.selected_training_hand == ""
     GlobalSignals.affected_hand = ""

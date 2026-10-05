@@ -320,7 +320,7 @@ def local_view():
 def sync_patients():
     """Fetch patients.json changes. Also tells the server this Pi is
     online (heartbeat). The server leaves out patients another device is
-    training right now."""
+    training right now. Returns True when the server answered."""
 
     version = local_patients_version()
 
@@ -335,15 +335,15 @@ def sync_patients():
 
     except Exception as error:
         print(f"Sync failed: {error}")
-        return
+        return False
 
     if not response.get("success"):
         print(f"Sync error: {response.get('message')}")
-        return
+        return False
 
     if response["up_to_date"]:
         print(f"Patients up to date (v{response['version']})")
-        return
+        return True
 
     PATIENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -363,6 +363,8 @@ def sync_patients():
         f"Patients updated: v{version} -> v{response['version']} "
         f"({len(response['patients'])} for {DEVICE_ID})"
     )
+
+    return True
 
 
 # =========================================================
@@ -514,6 +516,7 @@ def hold_session(patient_id):
 # =========================================================
 # MAIN
 #
+#   sender_raspberryPI.py --sync                  fetch the patient list (exit 0 if the server answered, 3 if not)
 #   sender_raspberryPI.py --login  [patient_id]   claim the patient and keep the lock alive until stopped
 #   sender_raspberryPI.py --upload [patient_id]   upload the patient's CSVs, then sync the patient list
 #   sender_raspberryPI.py --check  patient_id     only asks: is this patient being trained on another device?
@@ -530,11 +533,15 @@ if __name__ == "__main__":
 
     mode = sys.argv[1] if len(sys.argv) > 1 else "--upload"
 
+    if mode == "--sync":
+        # Called when the main screen opens: needs no patient.
+        sys.exit(0 if sync_patients() else 3)
+
     patient_id = sys.argv[2] if len(sys.argv) > 2 else current_patient_id()
 
     if mode not in ("--login", "--upload", "--check"):
         print(f"Unknown mode: {mode}")
-        print("Usage: sender_raspberryPI.py [--login | --upload | --check] [patient_id]")
+        print("Usage: sender_raspberryPI.py [--sync | --login | --upload | --check] [patient_id]")
         sys.exit(1)
 
     if not patient_id:

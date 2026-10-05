@@ -49,8 +49,8 @@ def load_sender(name=None):
     """The module with this device's settings and server calls (DEVICE_ID, CLIENT_ID, PatientInUse, _ask_server,
     sync_patients, listen_for_nudge, and sessions_file_for(patient) or _load_csv_files()).
 
-    Chosen automatically: a Windows laptop has sender.py next to the agent; a Raspberry Pi has only sender_rapberryPI.py,
-    which is used when there is no sender.py. To force one, run `python agent.py --sender sender_rapberryPI` or set
+    Chosen automatically: a Windows laptop has sender.py next to the agent; a Raspberry Pi has only sender_raspberryPI.py,
+    which is used when there is no sender.py. To force one, run `python agent.py --sender sender_raspberryPI` or set
     NEURODASH_SENDER."""
 
     name = name or os.environ.get("NEURODASH_SENDER")
@@ -67,7 +67,7 @@ def load_sender(name=None):
         if error.name != "sender":  # sender.py exists but one of ITS imports is missing: say so
             raise
 
-        return importlib.import_module("sender_rapberryPI")
+        return importlib.import_module("sender_raspberryPI")
 
 
 sender = load_sender()
