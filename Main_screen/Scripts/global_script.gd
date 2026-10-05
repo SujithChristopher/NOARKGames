@@ -231,9 +231,13 @@ func handle_udp_packet() -> void:
 
 # The tracker's text packets, the same over UDP (a datagram) and BLE (a
 # notification on the position characteristic); position packets are 44 bytes.
+# Told apart by prefix, not size: a TRK: packet is 44 bytes about a third of the
+# time, and read as a position it is a centroid of ~0 — the cursor jumps. A
+# position packet cannot start with one of these (its first float is a small
+# message code, whose bytes are not letters).
 # Deferred: UDP calls this from the network thread.
 func _handle_text_packet(packet: PackedByteArray) -> bool:
-	if packet.size() == 44:
+	if packet.size() < 4:
 		return false
 	match packet.slice(0, 4).get_string_from_ascii():
 		"CFG:":   # ack for a CFG command
