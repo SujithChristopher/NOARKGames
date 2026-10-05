@@ -158,19 +158,35 @@ def mask_iou(a, b):
     return both / max(np.count_nonzero((a > 0) | (b > 0)), 1)
 
 
-def pick_subject(masks, lock=None, min_iou=0.3):
+def pick_subject(masks, lock=None, min_iou=0.3, max_dist=0.3):
     """(mask, index) of the subject among `masks`, or (None, None).
 
     With no `lock`, the person whose centroid is nearest the image centre.
-    With one (the subject's previous mask), the person overlapping it most, and
-    only if the overlap is at least `min_iou`: somebody else walking into the
-    centre is then not mistaken for the subject, the subject is reported lost."""
+    With one (the subject's previous mask), the person overlapping it most. If
+    nobody overlaps it by `min_iou` (a fast move, a short occlusion), the person
+    whose centroid is nearest the lock's, as long as that is within `max_dist`
+    of the image width: somebody on the far side of the room is then not taken
+    for the subject, who is reported lost."""
     if not masks:
         return None, None
     if lock is not None:
         ious = [mask_iou(m, lock) for m in masks]
         best = int(np.argmax(ious))
-        return (masks[best], best) if ious[best] >= min_iou else (None, None)
+        if ious[best] >= min_iou:
+            return masks[best], best
+        c0 = _centroid(lock)
+        if c0 is None or not max_dist:
+            return None, None
+        w = lock.shape[1]
+        near, near_d = None, None
+        for i, m in enumerate(masks):
+            c = _centroid(m)
+            if c is None:
+                continue
+            d = float(np.hypot(c[0] - c0[0], c[1] - c0[1])) / w
+            if near_d is None or d < near_d:
+                near, near_d = i, d
+        return (masks[near], near) if near is not None and near_d <= max_dist else (None, None)
     best, best_d = None, None
     for i, m in enumerate(masks):
         c = _centroid(m)

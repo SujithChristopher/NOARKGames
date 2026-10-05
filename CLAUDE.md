@@ -206,8 +206,9 @@ neutral cloud → flexion / lateral / axial and a state machine
   chunked `IMG:` packets (`trunk/snapshot_packet.py`, same over UDP and BLE;
   `TrunkMonitor` reassembles → `snapshot_ready`); `TRUNK:select=<n>` (-1 = centre-most)
   locks onto person n. The lock follows them by mask overlap (IoU ≥ `trunk_lock_iou`
-  0.3 with their last mask), not by class, which can flip; below that they are
-  `lost_subject`. Picking a different person clears the neutral — pick, then capture
+  0.3 with their last mask), not by class, which can flip; if nobody overlaps that much (a fast move, a short occlusion) the lock
+  moves to the person nearest its last position, within `trunk_lock_dist` (0.3 of the image
+  width); only if nobody is that close are they `lost_subject`. Picking a different person clears the neutral — pick, then capture
   neutral. `person_picker.gd` is the tap-a-mask UI; `trunk_panel.gd` opens it
   by itself when `people > 1` and nobody is picked.
 - Random Reach: WARN shows a cue; COMPENSATING beeps, pauses play (and the

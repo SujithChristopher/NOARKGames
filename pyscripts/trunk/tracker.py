@@ -59,6 +59,7 @@ DEFAULTS = {
     "trunk_neutral_points": 6000,
     "trunk_max_hz": 15.0,
     "trunk_lock_iou": 0.3,         # min overlap with the last mask to stay on the subject
+    "trunk_lock_dist": 0.3,        # else: nearest person within this fraction of the image width
     "trunk_snapshot_w": 160,       # picker image width, px
     # Cores for the trunk worker. The prime core (7) is the measured choice on
     # this board: with the hand tracker on 4-7 it cost hand tracking 1-3 fps
@@ -135,6 +136,7 @@ class TrunkEngine:
         self._lock_mask = None            # the followed person's last mask; None = centre-most
         self._seen = None                 # (left image, [masks]) of the last frame
         self._offered = []                # the masks the last snapshot numbered
+        self._by_position = False         # the lock last moved by position, not overlap
         self._people = 0
         self.rng = np.random.default_rng(0)
         self.last_view = None             # (left image, mask) of the last frame
@@ -163,7 +165,13 @@ class TrunkEngine:
         t2 = time.perf_counter()
         timing["seg"] = (t2 - t1) * 1e3
         self._seen, self._people = (ls, masks), len(masks)
-        mask, _ = pick_subject(masks, self._lock_mask, self.cfg["trunk_lock_iou"])
+        mask, _ = pick_subject(masks, self._lock_mask, self.cfg["trunk_lock_iou"],
+                               self.cfg["trunk_lock_dist"])
+        if mask is not None and self._lock_mask is not None and not self._by_position and \
+                mask_iou(mask, self._lock_mask) < self.cfg["trunk_lock_iou"]:
+            print("[TRUNK] subject re-acquired by position", flush=True)
+        self._by_position = (mask is not None and self._lock_mask is not None and
+                             mask_iou(mask, self._lock_mask) < self.cfg["trunk_lock_iou"])
         self.last_view = (ls, mask)
         if mask is None:
             return None, "no_torso" if self._lock_mask is None or not masks else "lost_subject"
