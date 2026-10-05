@@ -161,33 +161,34 @@ class Registration:
             # that converged to a plausible pose has nothing to climb out of.
             if best[2] < SEED_EXIT_RMS_M:
                 break
-        got, how, rms = None, None, np.nan
+        got, how, rms, frac = None, None, np.nan, np.nan
         if best is not None:
             got, how, rms = (best[0], best[1]), "direct", best[2]
+            frac = best[3] / len(src)
             self.key, self.odo_run = None, 0
         elif not gated:
-            got, rms = self._odometry(src)
+            got, rms, frac = self._odometry(src)
             how = "odometry" if got is not None else None
         if got is None:
-            return None, dict(how="gated" if gated else "failed", rms=rms)
+            return None, dict(how="gated" if gated else "failed", rms=rms, frac=frac)
         if rot_deg(got[0]) > ROT_MAX_DEG:
-            return None, dict(how="gated", rms=rms)
+            return None, dict(how="gated", rms=rms, frac=frac)
         self.A = got
         self.last_good = (src, got)
-        return got[0].T, dict(how=how, rms=rms)
+        return got[0].T, dict(how=how, rms=rms, frac=frac)
 
     def _odometry(self, src):
         if self.key is None and self.last_good is not None:
             kc, kA = self.last_good
             self.key = (cKDTree(kc), kc, kA, estimate_normals(kc))
         if self.key is None or self.odo_run >= ODO_MAX_RUN:
-            return None, np.nan
+            return None, np.nan, np.nan
         ktree, kc, (Rk, tk), kn = self.key
         res = icp(src, kc, ktree, kn, Rk.T @ self.A[0], Rk.T @ (self.A[1] - tk))
         if not res or res[2] > ODO_RMS_M or res[3] < ODO_FRAC * len(src):
-            return None, np.nan
+            return None, np.nan, np.nan
         got = (Rk @ res[0], Rk @ res[1] + tk)
         self.odo_run += 1
         if rot_deg(res[0]) > KEY_ROT_DEG:
             self.key = (cKDTree(src), src, got, estimate_normals(src))
-        return got, res[2]
+        return got, res[2], res[3] / len(src)

@@ -5,7 +5,8 @@ extends Node
 ## tracker.py sends a text datagram per trunk update (~10 Hz), which
 ## GlobalScript hands to on_packet():
 ##   TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-##       reason,capture_result,people,locked
+##       reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
+## (the last six describe this frame's own quality, for the raw log)
 ## The thresholds, hysteresis and dwell are applied in Python
 ## (settings.json trunk_warn_deg / trunk_comp_deg); this only reports them.
 ##
@@ -36,6 +37,12 @@ var reason := ""                    # why OCCLUDED
 var capture_result := ""            # "", "ok", "moving", "not_visible"
 var people := 0                     # torsos the tracker sees
 var locked := false                 # following a picked person
+var q_how := ""                     # this frame: direct/odometry/failed/gated/no_torso/...
+var q_rms_mm := NAN                 # this frame's ICP residual
+var q_frac := NAN                   # share of the cloud that matched
+var raw_pts := 0                    # shell points before the cloud cap
+var mask_px := 0                    # torso mask area
+var held := false                   # angles are the last good ones, not this frame's
 var _last_packet_ms := -100000
 
 var _beep: AudioStreamPlayer
@@ -129,6 +136,13 @@ func on_packet(text: String) -> void:
 	if f.size() >= 14:
 		people = int(f[12])
 		locked = f[13] == "1"
+	if f.size() >= 20:
+		q_how = f[14]
+		q_rms_mm = float(f[15])
+		q_frac = float(f[16])
+		raw_pts = int(f[17])
+		mask_px = int(f[18])
+		held = f[19] == "1"
 	if new_state != state:
 		state = new_state
 		state_changed.emit(state)

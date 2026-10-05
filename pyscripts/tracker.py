@@ -510,6 +510,7 @@ class TrackerClass:
     def _init_trunk(self, settings: dict) -> None:
         self.trunk: Optional[TrunkProcess] = None
         self._trunk_sent_seq = -1
+        self._trunk_logged = None
         if not settings.get("trunk_enabled", True):
             print("[TRUNK] Disabled (settings.json trunk_enabled).")
             return
@@ -565,7 +566,7 @@ class TrackerClass:
     def _send_trunk(self) -> None:
         """One text datagram per trunk update:
         TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-            reason,capture_result,people,locked
+            reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
         (trunk/tracker.py has the states and levels.)
         """
         st = self.trunk.status()
@@ -577,7 +578,19 @@ class TrackerClass:
         self.streamer.send_raw(
             f"TRK:{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
-            f"{st.reason},{st.capture_result},{st.people},{int(st.locked)}".encode())
+            f"{st.reason},{st.capture_result},{st.people},{int(st.locked)},"
+            f"{st.q_how},{st.q_rms_mm:.1f},{st.q_frac:.2f},{st.raw_pts},{st.mask_px},"
+            f"{int(st.held)}".encode())
+        # One journal line whenever the state, level or this frame's outcome
+        # changes, with the quality numbers: why a reading was bad (a shrunk
+        # mask or cloud, a poor fit) is not visible from the angles alone.
+        key = (st.state, st.level, st.q_how)
+        if key != self._trunk_logged:
+            self._trunk_logged = key
+            print(f"[TRUNK] {st.state_name} lvl={st.level} how={st.q_how or '-'} "
+                  f"held={int(st.held)} ang=({f:+.1f},{l:+.1f},{a:+.1f}) "
+                  f"rms={st.q_rms_mm:.1f}mm frac={st.q_frac:.2f} "
+                  f"pts={st.raw_pts} mask={st.mask_px} people={st.people}", flush=True)
 
     # ── Cameras ───────────────────────────────────────────────────────────────
     # Phase alignment, queue pairing and drift resync all live in

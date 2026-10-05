@@ -200,7 +200,11 @@ neutral cloud → flexion / lateral / axial and a state machine
   a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off.
   No NPU / model → the tracker carries on with hand tracking only.
 - Godot → tracker `TRUNK:neutral` (the game menus' "Capture neutral posture");
-  tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result`,people,locked`.
+  tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held`.
+  The last six are *this frame's* quality (how it fit or why it did not, ICP residual, matched
+  share, shell points, mask area, whether the angles are held from the last good frame). Random
+  Reach writes them to its raw CSV (`trunk_how` … `trunk_held`) and the tracker prints a journal
+  line on every state / level / outcome change, for working out why a reading paused the game.
 - **Several people in view:** the subject is the centre-most torso unless picked.
   `TRUNK:snapshot` → the tracker sends a ~160 px JPEG with one outline per person as
   chunked `IMG:` packets (`trunk/snapshot_packet.py`, same over UDP and BLE;

@@ -110,7 +110,15 @@ class TrunkStatus:
     people: int = 0                       # torsos in the last frame
     locked: bool = False                  # following a picked subject, not the centre-most
     rms_mm: float = float("nan")
-    how: str = ""                         # direct / odometry
+    how: str = ""                         # direct / odometry (of the last good fit)
+    # This frame's own quality, for working out why a reading was bad:
+    q_how: str = ""                       # direct / odometry / failed / gated / no_torso /
+                                          # small_cloud / lost_subject
+    q_rms_mm: float = float("nan")        # ICP residual of this frame's fit
+    q_frac: float = float("nan")          # share of the frame's cloud that matched
+    raw_pts: int = 0                      # shell points before the cloud cap
+    mask_px: int = 0                      # torso mask area (working-size pixels)
+    held: bool = False                    # angles are the last good ones, not this frame's
     seq: int = 0
     hz: float = 0.0
     timing_ms: dict = field(default_factory=dict)
@@ -136,6 +144,7 @@ class TrunkEngine:
         self._lock_mask = None            # the followed person's last mask; None = centre-most
         self._seen = None                 # (left image, [masks]) of the last frame
         self._offered = []                # the masks the last snapshot numbered
+        self._q = (0, 0)                  # raw shell points, mask pixels of the last frame
         self._by_position = False         # the lock last moved by position, not overlap
         self._people = 0
         self.rng = np.random.default_rng(0)
@@ -165,6 +174,7 @@ class TrunkEngine:
         t2 = time.perf_counter()
         timing["seg"] = (t2 - t1) * 1e3
         self._seen, self._people = (ls, masks), len(masks)
+        self._q = (0, 0)
         mask, _ = pick_subject(masks, self._lock_mask, self.cfg["trunk_lock_iou"],
                                self.cfg["trunk_lock_dist"])
         if mask is not None and self._lock_mask is not None and not self._by_position and \
@@ -178,6 +188,7 @@ class TrunkEngine:
         if self._lock_mask is not None:
             self._lock_mask = mask       # follow them as they move
         pts = self.shell.shell(ls, rs, mask)
+        self._q = (len(pts), int(np.count_nonzero(mask)))
         cloud = voxel_downsample(pts, max_pts=int(self.cfg["trunk_cloud_points"]),
                                  rng=self.rng)
         timing["stereo"] = (time.perf_counter() - t2) * 1e3
@@ -199,7 +210,8 @@ class TrunkEngine:
         if start_capture:
             self._capture = (now, [], [], 0)
         st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, timing_ms=timing,
-                         people=self._people, locked=self._lock_mask is not None)
+                         people=self._people, locked=self._lock_mask is not None,
+                         raw_pts=self._q[0], mask_px=self._q[1])
         if self._capture is not None and self._capture_step(now, cloud, bad, st):
             pass
         elif self._neutral is None:
@@ -273,6 +285,10 @@ class TrunkEngine:
             t = time.perf_counter()
             R_body, info = self._reg.step(cloud)
             timing["icp"] = (time.perf_counter() - t) * 1e3
+        st.q_how = info["how"]
+        st.q_rms_mm = info.get("rms", float("nan")) * 1e3
+        st.q_frac = info.get("frac", float("nan"))
+        st.held = R_body is None
         if R_body is not None:
             self._fail_since = None
             angles = trunk_angles(R_body @ self._neutral.R_neu, self._neutral.R_neu)

@@ -407,7 +407,8 @@ func _setup_game_logging() -> void:
 		'epochtime', 'score', 'status', 'error_status', 'packets',
 		'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
 		'player_x', 'player_y', 'player_z', 'pause_state',
-		'trunk_state', 'trunk_level', 'trunk_flexion', 'trunk_lateral', 'trunk_axial'
+		'trunk_state', 'trunk_level', 'trunk_flexion', 'trunk_lateral', 'trunk_axial',
+		'trunk_how', 'trunk_rms_mm', 'trunk_frac', 'trunk_pts', 'trunk_mask_px', 'trunk_held'
 	]))
 
 func _on_log_timer_timeout() -> void:
@@ -418,13 +419,15 @@ func _on_log_timer_timeout() -> void:
 			str(game_x), str(game_y), str(game_z), str(pause_state),
 		] + _trunk_columns()))
 
-## Trunk state/level/angles for the raw log; empty while the tracker sends none.
+## Trunk state/level/angles and this frame's quality for the raw log; empty while the tracker sends none.
 static func _trunk_columns() -> Array:
 	if not TrunkMonitor.available():
-		return ["", "", "", "", ""]
+		return ["", "", "", "", "", "", "", "", "", "", ""]
 	var a := TrunkMonitor.angles
 	return [str(TrunkMonitor.state), str(TrunkMonitor.level),
-		"%.2f" % a.x, "%.2f" % a.y, "%.2f" % a.z]
+		"%.2f" % a.x, "%.2f" % a.y, "%.2f" % a.z,
+		TrunkMonitor.q_how, "%.1f" % TrunkMonitor.q_rms_mm, "%.2f" % TrunkMonitor.q_frac,
+		str(TrunkMonitor.raw_pts), str(TrunkMonitor.mask_px), str(int(TrunkMonitor.held))]
 
 func _on_reach_game_ready() -> void:
 	rom_x_top = 20
