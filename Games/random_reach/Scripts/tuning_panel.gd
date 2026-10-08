@@ -57,6 +57,22 @@ func _ready() -> void:
 		row.add_child(pick)
 		_box.add_child(row)
 
+	# Same switch as the main Settings panel; applies at once.
+	var trunk_row := HBoxContainer.new()
+	var trunk_label := Label.new()
+	trunk_label.text = "trunk"
+	trunk_label.custom_minimum_size.x = 80
+	trunk_row.add_child(trunk_label)
+	var trunk_box := CheckButton.new()
+	trunk_box.focus_mode = Control.FOCUS_NONE
+	trunk_box.button_pressed = TrunkMonitor.enabled()
+	trunk_box.toggled.connect(func(on: bool):
+		TrunkMonitor.set_enabled(on)
+		_set_status("trunk tracking %s" % ("on" if on else "off"), Color.LIME_GREEN))
+	TrunkMonitor.enabled_changed.connect(func(on: bool): trunk_box.set_pressed_no_signal(on))
+	trunk_row.add_child(trunk_box)
+	_box.add_child(trunk_row)
+
 
 func _set_status(text: String, color: Color) -> void:
 	_status.text = text

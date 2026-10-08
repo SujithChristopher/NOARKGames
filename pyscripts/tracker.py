@@ -511,7 +511,11 @@ class TrackerClass:
         self.trunk: Optional[TrunkProcess] = None
         self._trunk_sent_seq = -1
         self._trunk_logged = None
-        if not settings.get("trunk_enabled", True):
+        self._trunk_settings = settings
+        # Live switch (CFG:trunk=on|off): off stops feeding and reporting the
+        # trunk process; on after a start with it disabled loads it then.
+        self.trunk_on = bool(settings.get("trunk_enabled", True))
+        if not self.trunk_on:
             print("[TRUNK] Disabled (settings.json trunk_enabled).")
             return
         try:
@@ -526,11 +530,21 @@ class TrackerClass:
         print(f"[TRUNK] Tracking from stream{1 if self.trunk.swap else 0} "
               f"at {self.trunk.size[0]}x{self.trunk.size[1]} in its own process.")
 
+    def _set_trunk(self, on: bool) -> None:
+        """Turn trunk tracking on or off mid-session. The first `on` after a
+        start with it disabled loads the model (a brief stall in the loop)."""
+        self.trunk_on = on
+        if on and self.trunk is None:
+            self._trunk_settings = {**self._trunk_settings, "trunk_enabled": True}
+            self._init_trunk(self._trunk_settings)
+            self.trunk_on = self.trunk is not None
+        print(f"[TRUNK] {'On' if self.trunk_on else 'Off'} (live).")
+
     def _trunk_command(self, cmd: bytes) -> None:
         """`TRUNK:neutral` starts a neutral capture; `TRUNK:snapshot` sends the
         subject picker's image; `TRUNK:select=<n>` follows person n of it (-1 =
         the centre-most again)."""
-        if self.trunk is None:
+        if self.trunk is None or not self.trunk_on:
             return
         arg = cmd[6:].strip()
         if arg == b"neutral":
@@ -731,6 +745,8 @@ class TrackerClass:
                 self._primary = 1 if value == "cam1" else 0
             elif key == "deadband":
                 self.stabilizer.threshold_px = max(0.0, float(value))
+            elif key == "trunk" and value in ("on", "off"):
+                self._set_trunk(value == "on")
             else:
                 raise ValueError("unknown key or value")
         except Exception as exc:
@@ -1012,7 +1028,7 @@ class TrackerClass:
             # whatever the recording is configured to keep.
             self.recorder.add(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._frame_count += 1
-        if self.trunk is not None:
+        if self.trunk is not None and self.trunk_on:
             # Before the flip: the stereo calibration describes the sensor image.
             self.trunk.submit(raw0, raw1)
         if self.flip_frames:
@@ -1082,7 +1098,7 @@ class TrackerClass:
                 self._select_hospitalid()
                 self.record = True
 
-        if self.trunk is not None:
+        if self.trunk is not None and self.trunk_on:
             self._send_trunk()
 
         # Pose estimation. With a calibrated body it is one joint solve over

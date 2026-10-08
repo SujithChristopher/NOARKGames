@@ -197,7 +197,7 @@ neutral cloud → flexion / lateral / axial and a state machine
 - ICP registers about the neutral centroid, not the camera origin — about the
   origin a 15° lean converged to 64°.
 - Thresholds live in `settings.json` (`trunk_warn_deg` 8, `trunk_comp_deg` 15;
-  a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off.
+  a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off — one switch: `TrunkMonitor.enabled()` gates `available()`, which every panel, cue, pause and CSV column asks. Flip it in the main Settings panel or the in-game Tune panel (F2) via `TrunkMonitor.set_enabled()`: saved, and sent as `CFG:trunk=on|off` so the tracker stops/starts trunk work live (first `on` after a disabled start loads the model).
   No NPU / model → the tracker carries on with hand tracking only.
 - Godot → tracker `TRUNK:neutral` (the game menus' "Capture neutral posture");
   tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held`.

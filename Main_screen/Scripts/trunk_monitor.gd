@@ -14,6 +14,8 @@ extends Node
 ## patient's left, axial + = turning to the patient's right.
 
 signal updated
+## trunk_enabled was switched (settings panel or the in-game Tune panel).
+signal enabled_changed(on: bool)
 signal state_changed(state: int)
 signal level_changed(level: int)
 ## The subject picker's image: people[i] is the outline (PackedVector2Array, in
@@ -59,9 +61,31 @@ func _ready() -> void:
 	add_child(_beep)
 
 
-## True while the tracker is sending trunk updates.
+## The settings.json switch. Everything trunk-related (panels, cues, pausing,
+## raw-CSV columns) asks available(), so this one flag turns all of it off.
+func enabled() -> bool:
+	return bool(Settings.get_value("trunk_enabled", true))
+
+
+## True while trunk tracking is on and the tracker is sending updates.
 func available() -> bool:
-	return Time.get_ticks_msec() - _last_packet_ms < STALE_S * 1000
+	return enabled() and Time.get_ticks_msec() - _last_packet_ms < STALE_S * 1000
+
+
+## Switch trunk tracking on or off: saved to settings.json and sent to the
+## running tracker, so it takes effect now rather than next launch.
+func set_enabled(on: bool) -> void:
+	if on == enabled():
+		return
+	Settings.set_value("trunk_enabled", on)
+	Settings.save()
+	GlobalScript.send_tracker_config("trunk", "on" if on else "off")
+	if not on:
+		_last_packet_ms = -100000
+		state = NO_NEUTRAL
+		level = OK
+		has_neutral = false
+	enabled_changed.emit(on)
 
 
 func capture_neutral() -> void:
@@ -175,6 +199,8 @@ func cue_text() -> String:
 
 
 func status_text() -> String:
+	if not enabled():
+		return ""
 	if not available():
 		return "Trunk tracking off"
 	match state:

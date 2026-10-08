@@ -14,6 +14,7 @@ const FIELDS := [
 	["recording", "Record camera frames", "bool", []],
 	["recording_fps", "Recording fps", "choice", ["15", "30", "60"]],
 	["recording_scale", "Recording scale", "choice", ["0.25", "0.5", "1"]],
+	["trunk_enabled", "Trunk tracking", "bool", []],
 	["display", "Show tracker window", "bool", []],
 	["tracker_solver", "Pose solver", "choice", ["joint", "ransac"]],
 	["tracker_refine", "Corner refine", "choice", ["subpix", "crop", "none"]],
@@ -88,6 +89,10 @@ func _row(f: Array) -> HBoxContainer:
 
 
 func _changed(key: String, value: Variant) -> void:
+	if key == "trunk_enabled":
+		TrunkMonitor.set_enabled(value)   # saves, and tells the tracker now
+		_status.text = "Saved trunk_enabled = %s (applied now)" % value
+		return
 	Settings.set_value(key, value)
 	var ok := Settings.save()
 	var live := ""

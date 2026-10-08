@@ -40,6 +40,7 @@ func _ready() -> void:
 	_build_pause_panel()
 
 	TrunkMonitor.updated.connect(_refresh)
+	TrunkMonitor.enabled_changed.connect(func(_on): _refresh())
 	_refresh()
 
 
