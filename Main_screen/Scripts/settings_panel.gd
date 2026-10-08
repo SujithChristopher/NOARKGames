@@ -17,7 +17,7 @@ const FIELDS := [
 	["trunk_enabled", "Trunk tracking", "bool", []],
 	["display", "Show tracker window", "bool", []],
 	["tracker_solver", "Pose solver", "choice", ["joint", "ransac"]],
-	["tracker_refine", "Corner refine", "choice", ["subpix", "crop", "none"]],
+	["tracker_refine", "Corner refine", "choice", ["contour", "subpix", "crop", "none"]],
 	["tracker_camera", "Cameras", "choice", ["both", "cam0", "cam1"]],
 	["corner_deadband_px", "Corner deadband (px)", "choice", ["0", "0.5", "1", "2"]],
 ]

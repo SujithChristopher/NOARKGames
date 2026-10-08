@@ -4,7 +4,7 @@ extends CanvasLayer
 
 const OPTIONS := {
 	"solver": ["joint", "ransac"],
-	"refine": ["crop", "subpix", "none"],
+	"refine": ["contour", "subpix", "crop", "none"],
 	"camera": ["both", "cam0", "cam1"],
 	"deadband": ["0", "0.5", "1", "2"],
 }

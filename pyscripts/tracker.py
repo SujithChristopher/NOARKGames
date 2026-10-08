@@ -70,6 +70,18 @@ if _CROP_REFINE:
 else:
     print("[RIG] rapidtag lacks april_tag_refine_full_resolution; using cornerSubPix.")
 
+def _set_detector_refine(mode: str) -> None:
+    """Point the shared detector at one refinement: crop (rapidtag's border
+    refit), contour (lines fitted to the tag's threshold contour, in rapidtag),
+    or neither — subpix and none leave the detector alone; subpix runs
+    cornerSubPix afterwards."""
+    if _CROP_REFINE:
+        _DETECTOR_PARAMS.april_tag_refine_full_resolution = mode == "crop"
+    _DETECTOR_PARAMS.corner_refinement_method = (
+        rapidtag.CORNER_REFINE_CONTOUR if mode == "contour" else rapidtag.CORNER_REFINE_NONE
+    )
+
+
 _SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.01)
 
 # Stabilizer key for the whole-body pose, kept out of the marker-id space.
@@ -432,11 +444,15 @@ class TrackerClass:
             threshold_px=settings.get("corner_deadband_px", 0)  # 0 = stabilizer off: every frame is solved
         )
         self.marker_offsets = MARKER_OFFSETS
-        # Crop refine (rapidtag 0.1.10) gave garbage poses on this rig, so it is opt-in:
-        # settings.json tracker_refine = "crop". Default is the cornerSubPix pass.
-        want = (settings.get("tracker_refine") or "subpix").strip().lower()
-        self.refine_mode = "crop" if want == "crop" and _CROP_REFINE else "subpix"
-        _DETECTOR_PARAMS.april_tag_refine_full_resolution = self.refine_mode == "crop"
+        # Contour is the default. Crop refine (rapidtag 0.1.10) gave garbage poses on
+        # this rig, so it is opt-in: settings.json tracker_refine = "crop". Track with
+        # the refinement the rigid body was calibrated with (rigidbody.toml meta.refine).
+        want = (settings.get("tracker_refine") or "contour").strip().lower()
+        if want == "crop" and _CROP_REFINE:
+            self.refine_mode = "crop"
+        else:
+            self.refine_mode = "subpix" if want == "subpix" else "contour"
+        _set_detector_refine(self.refine_mode)
 
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
@@ -726,7 +742,7 @@ class TrackerClass:
     def _apply_config(self, cmd: bytes) -> None:
         """Live tuning from Godot: `CFG:<key>=<value>` (30-byte datagram limit).
 
-        Keys: solver (joint|ransac), refine (crop|subpix|none),
+        Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
         camera (both|cam0|cam1), deadband (px; 0 = stabilizer off).
         Bad values are reported and ignored, never fatal mid-session.
         """
@@ -734,11 +750,11 @@ class TrackerClass:
             key, value = cmd[4:].decode().strip().split("=", 1)
             if key == "solver" and value in RigidBody.POSE_SOLVERS:
                 self.solver = value
-            elif key == "refine" and value in ("crop", "subpix", "none"):
+            elif key == "refine" and value in ("crop", "contour", "subpix", "none"):
                 if value == "crop" and not _CROP_REFINE:
                     raise ValueError("rapidtag build has no crop refine")
                 self.refine_mode = value
-                _DETECTOR_PARAMS.april_tag_refine_full_resolution = value == "crop"
+                _set_detector_refine(value)
             elif key == "camera" and value in _CAMERA_CHOICES:
                 self.camera_choice = value
                 self.stereo_refine = value == "both"

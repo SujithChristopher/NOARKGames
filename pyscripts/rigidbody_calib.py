@@ -52,10 +52,12 @@ from rigid_body import (
 from stereo_capture import StereoCapture
 from tracker import (
     _APRILTAG_DICT,
+    _DETECTOR_PARAMS,
     _MARKER_PTS,
     MARKER_OFFSETS,
     _draw_markers,
     _refine_corners,
+    _set_detector_refine,
 )
 
 _SCRIPT_DIR = Path(__file__).parent
@@ -375,7 +377,8 @@ def _progress(collector, brightness, tag_px, remaining, tag_ids, reference_id) -
 
 def capture(seconds: float, frame_size, display: bool, tag_ids=(),
             reference_id=None, exposure_us: int = 10000,
-            gain: float = 4.0, isp: Optional[str] = None) -> CornerCollector:
+            gain: float = 4.0, isp: Optional[str] = None,
+            refine: str = "contour") -> CornerCollector:
     """Detect tags in both cameras for `seconds`, keeping only the corners.
 
     Captures through StereoCapture, the same synchronised source the tracker
@@ -388,6 +391,10 @@ def capture(seconds: float, frame_size, display: bool, tag_ids=(),
     capture_source = StereoCapture(
         frame_size=frame_size, exposure_us=exposure_us, gain=gain, isp=isp
     )
+    # Detector-side refinements (contour, crop) happen inside detect; only
+    # "subpix" runs cornerSubPix afterwards.
+    _set_detector_refine(refine)
+    params = _DETECTOR_PARAMS
     collector = CornerCollector()
     print(
         f"[CALIB] Capturing {seconds:.0f}s. Rotate the device slowly so every "
@@ -404,7 +411,7 @@ def capture(seconds: float, frame_size, display: bool, tag_ids=(),
             now_frame = time.perf_counter()
             raw0, raw1, _ts0, _ts1, paired = capture_source.next_pair()
             frames = (raw0, raw1)
-            detected = rapidtag.detect_markers_batch(list(frames), _APRILTAG_DICT)
+            detected = rapidtag.detect_markers_batch(list(frames), _APRILTAG_DICT, params)
 
             per_camera = []
             for frame, (corners, ids) in zip(frames, detected):
@@ -413,7 +420,8 @@ def capture(seconds: float, frame_size, display: bool, tag_ids=(),
                     # Sub-pixel refinement matters more here than in tracking:
                     # this error is baked into the calibration that every later
                     # frame inherits, rather than averaging out over time.
-                    refined = _refine_corners(frame, corners)
+                    refined = (_refine_corners(frame, corners)
+                               if refine == "subpix" else corners)
                     for mid, c in zip(np.asarray(ids).flatten(), refined):
                         detections[int(mid)] = np.asarray(
                             c, dtype=np.float64
@@ -919,7 +927,7 @@ def tip_offsets(transforms, tip_ref) -> dict:
 
 
 def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames,
-               isp=None) -> None:
+               isp=None, refine="contour") -> None:
     transforms = result["transforms"]
     offsets = tip_offsets(transforms, tip_ref)
     payload = {
@@ -933,6 +941,7 @@ def write_toml(path: Path, result, reference_id, tip_ref, cameras_path, frames,
             "tip_in_reference_m": list(map(float, tip_ref)),
             "stereo_calibration": str(cameras_path),
             "isp": isp or "raw",
+            "refine": refine,
             "frames": frames,
             "bundle_views": result["bundle"]["views"],
             "bundle_initial_rmse_px": result["bundle"]["initial_rmse_px"],
@@ -1121,6 +1130,13 @@ if __name__ == "__main__":
                         help="Analogue gain 1.0-16.0, overriding device.toml. "
                              "Raise exposure first where the motion allows: gain "
                              "amplifies the noise that corner accuracy depends on.")
+    parser.add_argument("--refine", choices=("contour", "subpix", "crop", "none"),
+                        default="contour",
+                        help="Corner refinement for the take. contour fits lines to "
+                             "each tag's threshold contour (rapidtag; the default); "
+                             "subpix is cornerSubPix. Track with the same "
+                             "refinement (settings.json tracker_refine): the "
+                             "corner bias of each differs and is baked in here.")
     parser.add_argument("--force", action="store_true",
                         help="Write the calibration even if it fails its checks.")
     parser.add_argument("--display", action=argparse.BooleanOptionalAction,
@@ -1167,7 +1183,7 @@ if __name__ == "__main__":
     if args.list:
         seconds = 5.0 if args.seconds == 60.0 else args.seconds
         seen = capture(seconds, frame_size, args.display, tag_ids,
-                       exposure_us=exposure_us, gain=gain, isp=isp)
+                       exposure_us=exposure_us, gain=gain, isp=isp, refine=args.refine)
         counts = seen.counts()
         expected = {mid: n for mid, n in counts.items() if mid in set(tag_ids)}
         unexpected = {mid: n for mid, n in counts.items() if mid not in set(tag_ids)}
@@ -1217,7 +1233,8 @@ if __name__ == "__main__":
     else:
         collector = capture(args.seconds, frame_size, args.display,
                             tag_ids, device["reference_id"],
-                            exposure_us=exposure_us, gain=gain, isp=isp)
+                            exposure_us=exposure_us, gain=gain, isp=isp,
+                            refine=args.refine)
         # Kept somewhere durable unless refused: /tmp is cleared on reboot and
         # by periodic cleanup, and a take lost that way costs another session
         # in front of the cameras. Re-solving one is free.
@@ -1306,7 +1323,7 @@ if __name__ == "__main__":
     args.out.parent.mkdir(parents=True, exist_ok=True)
     write_toml(
         args.out, result, reference, tip_ref,
-        _SCRIPT_DIR / "calibration" / "sterio_calibration.toml", frames, isp,
+        _SCRIPT_DIR / "calibration" / "sterio_calibration.toml", frames, isp, args.refine,
     )
     report_against_hardcoded(result["transforms"], tip_ref)
     print(f"\n[CALIB] Wrote {args.out}")

@@ -46,17 +46,19 @@ offset_m = [0.00, 0.01, -0.069]
 # CAM3, regardless of probe order or /dev/video numbering. Only physically
 # moving a cable changes it.
 #
-# The stereo calibration labels its own cam0/cam1, and on this rig that
-# labelling is the REVERSE of rcam's order. Getting it wrong is not a small
-# error: the two cameras then describe the same point 141 mm apart, and the
-# stereo pose jumps as different marker faces come into view.
+# The stereo calibration labels its own cam0/cam1, and they need not match
+# rcam's order. Getting it wrong is not a small error: the two cameras then
+# describe the same point ~140 mm apart, and the stereo pose jumps as different
+# marker faces come into view.
 #
 # Verify on live frames — it scores both mappings in one take and needs no
 # ground truth, only that both cameras agree about where the device is:
 #     uv run pyscripts/bench_cameras.py --seconds 20
-# Measured on this rig: this mapping 3.1 mm median, the other 140.9 mm.
-stream0 = "cam1"
-stream1 = "cam0"
+# It has flipped on this rig: until 2026-09 the reverse (cam1, cam0) measured
+# 3.1 mm against 140.9 mm; on 2026-10-08 this mapping measured 2.1 mm and the
+# reverse 137.5 mm (cameras unplugged/swapped at the connectors in between?).
+stream0 = "cam0"
+stream1 = "cam1"
 
 # Exposure and gain for both cameras.
 #

@@ -28,7 +28,7 @@ const DEFAULTS := {
 	"game_cpus": "0-3",
 	"tracker_solver": "joint",
 	"tracker_camera": "both",
-	"tracker_refine": "subpix",
+	"tracker_refine": "contour",
 	"corner_deadband_px": 0,
 	"recording": false,
 	"sync_chip": "gpiochip4",
