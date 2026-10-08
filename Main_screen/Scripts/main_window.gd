@@ -149,8 +149,45 @@ func _on_window_close_requested() -> void:
     popup.hide()
 
 
-func _on_set_origin_pressed() -> void:
-    GlobalScript.set_origin()
+# Origin now comes from "Define Table"; this button creates a patient on this
+# device (PatientDB.add_local_patient): just the id and the training hand.
+func _on_new_patient_pressed() -> void:
+    var dialog := ConfirmationDialog.new()
+    dialog.title = "New Patient"
+    dialog.ok_button_text = "Create"
+    dialog.theme = hosp_id_edit.theme
+    var box := VBoxContainer.new()
+    box.add_theme_constant_override("separation", 12)
+    var id_edit := LineEdit.new()
+    id_edit.placeholder_text = "Patient ID"
+    id_edit.custom_minimum_size = Vector2(320, 0)
+    box.add_child(id_edit)
+    var hand := OptionButton.new()
+    hand.add_item("Training hand...")
+    hand.set_item_disabled(0, true)
+    for side in PatientDB.AFFECTED_SIDES:
+        hand.add_item(side)
+    box.add_child(hand)
+    var error := Label.new()
+    error.add_theme_color_override("font_color", Color.RED)
+    box.add_child(error)
+    dialog.add_child(box)
+    # Stay open on a bad entry, so the reason shows next to the fields.
+    dialog.get_ok_button().pressed.connect(func():
+        var side := hand.get_item_text(hand.selected) if hand.selected > 0 else ""
+        var why := PatientDB.add_local_patient(id_edit.text, side)
+        if why != "":
+            error.text = why
+            return
+        hosp_id_edit.text = id_edit.text.strip_edges()
+        sync_status.text = "Created patient %s (%s hand)" % [hosp_id_edit.text, side]
+        dialog.queue_free())
+    dialog.dialog_hide_on_ok = false
+    dialog.canceled.connect(dialog.queue_free)
+    id_edit.text_submitted.connect(func(_t): dialog.get_ok_button().pressed.emit())
+    get_parent().add_child(dialog)
+    dialog.popup_centered()
+    id_edit.grab_focus()
 
 
 func _on_define_table_pressed() -> void:

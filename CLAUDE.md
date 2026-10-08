@@ -80,7 +80,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 
 ### Data Flow
 
-**Patient flow**: no registry in NOARK. When the main screen opens it runs `sender_raspberryPI.py --sync` on a thread, which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients only; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used.
+**Patient flow**: When the main screen opens it runs `sender_raspberryPI.py --sync` on a thread, which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients only; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used. The main screen's **New Patient** button (where Set Origin was — the origin comes from Define Table) creates a patient on the device with just an id and training hand (left/right/both): `PatientDB.add_local_patient()` writes `local_patients.json` beside patients.json in the same shape, so a sync never overwrites it; a server patient with the same id wins.
 
 **Login flow**: patient id typed or picked from the suggestion list on the main screen → the dose screen (`Main_screen/Scenes/dose.tscn`, `dose_screen.gd`) confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen
 

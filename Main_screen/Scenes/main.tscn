@@ -343,7 +343,7 @@ theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Play"
 script = ExtResource("3_54gjo")
 
-[node name="SetOriginButton" type="Button" parent="." unique_id=981569524]
+[node name="NewPatientButton" type="Button" parent="." unique_id=981569524]
 layout_mode = 0
 offset_left = 412.0
 offset_top = 390.0
@@ -351,7 +351,7 @@ offset_right = 756.0
 offset_bottom = 455.0
 theme = ExtResource("3_oasjk")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
-text = "Set Origin"
+text = "New Patient"
 
 [node name="DefineTableButton" type="Button" parent="."]
 layout_mode = 0
@@ -503,7 +503,7 @@ script = ExtResource("10_setpn")
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
 [connection signal="text_submitted" from="TextureRect/HospID" to="PlayButton" method="_on_hosp_id_text_submitted"]
 [connection signal="pressed" from="PlayButton" to="PlayButton" method="_on_pressed"]
-[connection signal="pressed" from="SetOriginButton" to="PlayButton" method="_on_set_origin_pressed"]
+[connection signal="pressed" from="NewPatientButton" to="PlayButton" method="_on_new_patient_pressed"]
 [connection signal="pressed" from="DefineTableButton" to="PlayButton" method="_on_define_table_pressed"]
 [connection signal="pressed" from="Warning/Button" to="PlayButton" method="_on_window_close_requested"]
 [connection signal="pressed" from="Patient_notfound/patient_nf_ok" to="PlayButton" method="_on_patient_nf_ok_pressed"]
