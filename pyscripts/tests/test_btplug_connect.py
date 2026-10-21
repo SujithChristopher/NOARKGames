@@ -1,24 +1,30 @@
 import asyncio
-import struct
 import sys
 
 from bleak import BleakScanner, BleakClient
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import protocol  # noqa: E402
+
+HEARTBEAT = protocol.encode(protocol.HEARTBEAT)
+STOP = protocol.encode(protocol.STOP)
 
 DEVICE_NAME   = "NOARK_Tracker"
 SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
 POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
 COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 
-MSG_CODES = {2.0: "START", -99.0: "STOP", 5.0: "RESET", 0.0: "IDLE"}
 packet_count = 0
 
 def notification_handler(sender, data: bytearray):
     global packet_count
-    if len(data) < 16:
-        print(f"[RX] short packet ({len(data)} bytes): {data.hex()}")
+    kind, payload = protocol.decode(bytes(data))
+    if kind != protocol.POSITION:
+        print(f"[RX] message 0x{kind:02x}: {payload[:60]!r}")
         return
-    msg, x, y, z = struct.unpack_from("<ffff", data)
-    label = MSG_CODES.get(msg, f"code={msg:.1f}")
+    status, _, (x, y, z), _, _ = protocol.decode_position(bytes(data))
+    label = "STOPPING" if status == protocol.STATUS_STOPPING else "RUNNING"
     packet_count += 1
     print(f"[RX #{packet_count:04d}] {label:<8}  x={x:+.4f}  y={y:+.4f}  z={z:+.4f}")
 
@@ -63,14 +69,14 @@ async def main():
         await client.start_notify(POSITION_UUID, notification_handler)
         print("\n[BLE] Subscribed to position notifications — streaming (Ctrl+C to stop)\n")
 
-        # Write CONNECTED command to start the stream if required
+        # Heartbeat so the tracker starts streaming
         try:
-            await client.write_gatt_char(COMMAND_UUID, b"CONNECTED", response=False)
+            await client.write_gatt_char(COMMAND_UUID, HEARTBEAT, response=False)
         except Exception as e:
             print(f"[BLE] Write without response failed or not supported by char: {e}")
             # Try with response if false fails
             try:
-                await client.write_gatt_char(COMMAND_UUID, b"CONNECTED", response=True)
+                await client.write_gatt_char(COMMAND_UUID, HEARTBEAT, response=True)
             except Exception as e:
                 pass
         
@@ -78,7 +84,7 @@ async def main():
             while client.is_connected:
                 await asyncio.sleep(3.0)
                 try:
-                    await client.write_gatt_char(COMMAND_UUID, b"CONNECTED", response=False)
+                    await client.write_gatt_char(COMMAND_UUID, HEARTBEAT, response=False)
                 except:
                     pass
         except asyncio.CancelledError:
@@ -87,7 +93,7 @@ async def main():
         # Cleanup
         try:
             await client.stop_notify(POSITION_UUID)
-            await client.write_gatt_char(COMMAND_UUID, b"STOP", response=False)
+            await client.write_gatt_char(COMMAND_UUID, STOP, response=False)
         except Exception as e:
             print(f"Error during cleanup: {e}")
             

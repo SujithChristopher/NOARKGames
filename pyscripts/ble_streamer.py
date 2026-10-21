@@ -1,17 +1,14 @@
-"""BLE GATT peripheral streamer for NOARK position data.
+"""BLE transport between the tracker and Godot (docs/PROTOCOL.md).
 
-Python acts as GATT server (peripheral); Godot uses GDBLE as client (central).
+Python is the GATT peripheral; Godot (GDBLE / the Android plugin) the central.
+One notification or write is one protocol message — this class only moves
+bytes, protocol.py says what they mean. Same interface as UDPStreamer.
 
 UUIDs
 -----
 Service   : 4e4f4152-4b00-0000-0000-000000000000
-Position  : 4e4f4152-4b01-0000-0000-000000000000  (read + notify, Python → Godot;
-            also the text CFG:/TRK: packets, exactly as over UDP)
-Command   : 4e4f4152-4b02-0000-0000-000000000000  (write,         Godot → Python)
-
-Wire format: 11 × float32 little-endian (44 bytes)
-  [msg_code, cx, cy, cz, rvx, rvy, rvz, tx, ty, tz, ref_id]
-  msg_code: 2.0 = START, -99.0 = STOP, 5.0 = RESET
+To app    : 4e4f4152-4b01-0000-0000-000000000000  (read + notify, Python → Godot)
+To tracker: 4e4f4152-4b02-0000-0000-000000000000  (write,         Godot → Python)
 
 Advertising
 -----------
@@ -25,7 +22,6 @@ needs /etc/sudoers.d/noark-ble (radxa may run /usr/bin/hcitool, nothing else).
 """
 
 import asyncio
-import struct
 import subprocess
 import threading
 import uuid
@@ -44,7 +40,9 @@ SERVICE_UUID      = "4e4f4152-4b00-0000-0000-000000000000"
 POSITION_CHAR_UUID = "4e4f4152-4b01-0000-0000-000000000000"
 COMMAND_CHAR_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 
-_IDLE_PACKET = bytearray(struct.pack("f" * 11, *([0.0] * 11)))
+# The notify characteristic's value before anything is sent: protocol.NONE,
+# which Godot ignores.
+_IDLE_PACKET = bytearray(b"\x00")
 
 # Seconds between re-enabling the raw advertisement while nobody is subscribed:
 # a connection ends the advertising set, so this is what makes a reconnect work.
@@ -111,8 +109,8 @@ class BLEStreamer:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
-        # Every write, in order: the tracker drains CFG:/TRUNK: alongside the
-        # heartbeat, and a single slot let the next heartbeat overwrite them.
+        # Every write, in order: a single slot let the next heartbeat overwrite
+        # a CONFIG or TRUNK before the tracker read it.
         self._commands: deque[bytes] = deque(maxlen=64)
         self._running = False
         self._connected = False
@@ -127,26 +125,20 @@ class BLEStreamer:
         if not self._ready.wait(timeout=10):
             raise RuntimeError("BLE server did not start within 10 seconds")
 
-    def send(self, data: list) -> None:
-        """Notify connected central with an 11-float position packet."""
-        if not self._streaming and self._running:
-            self._streaming = True
-            print("[BLE] Streaming position data")
-        self.send_raw(struct.pack("f" * len(data), *data))
-
-    def send_raw(self, payload: bytes) -> None:
-        """Notify any other packet on the position characteristic, as UDP sends
-        it as a datagram: Godot tells the text ones (CFG:, TRK:) from the
-        44-byte position packet by size and prefix, the same as over UDP."""
+    def send(self, message: bytes) -> None:
+        """Notify the central with one message (at most 244 bytes at a 247 MTU)."""
         if not self._running or self._loop is None:
             return
+        if not self._streaming:
+            self._streaming = True
+            print("[BLE] Streaming")
         # Value and notification are set together on the loop's thread: dbus
         # isn't thread-safe, and setting the value here could let the next
         # packet overwrite it before this one went out.
-        self._loop.call_soon_threadsafe(self._notify, bytearray(payload))
+        self._loop.call_soon_threadsafe(self._notify, bytearray(message))
 
-    def get_command(self) -> bytes:
-        """Return the oldest command written by Godot, or b'' if none."""
+    def receive(self) -> bytes:
+        """The oldest message written by Godot, or b'' if none."""
         try:
             return self._commands.popleft()
         except IndexError:
@@ -193,7 +185,7 @@ class BLEStreamer:
             GATTAttributePermissions.readable,
         )
 
-        # Command: Godot writes commands ("STOP", "USER:xxx", "RESET", …)
+        # Godot writes its messages here
         await self._server.add_new_characteristic(
             SERVICE_UUID,
             COMMAND_CHAR_UUID,

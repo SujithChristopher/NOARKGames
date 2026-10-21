@@ -65,7 +65,7 @@ DEFAULTS = {
     "trunk_snapshot_w": 160,       # picker image width, px
     # How the rotation is measured: "icp" (stereo shell registered to the
     # neutral shell) or a minisam3d model, "msam_r18" / "msam_v3rot" (pose.py).
-    # Switchable live with CFG:trunk_method=<value>.
+    # Switchable live with CONFIG trunk_method=<value>.
     "trunk_method": "icp",
     # Camera mounted upside down: true / false / "auto" (whichever way up
     # trunk_seg finds a torso). trunk_seg and the student only work upright.

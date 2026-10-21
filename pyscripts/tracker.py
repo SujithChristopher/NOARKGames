@@ -21,6 +21,7 @@ import rapidtag
 import toml
 from scipy.optimize import least_squares
 
+import protocol
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
@@ -463,8 +464,12 @@ class TrackerClass:
         self._frame_count = 0
         self._stage_time  = {"capture": 0.0, "detect": 0.0, "refine": 0.0, "pose": 0.0}
         self.csv_writer   = None
+        self._csv_file    = None
         self.record       = False
-        self.received_message: bytes = b""
+        self._hid: Optional[str] = None
+        # The app has spoken in this connection: until then there is nobody to
+        # send positions to (over UDP, no address either).
+        self._app_seen = False
         # Frames for this session, written raw alongside tracking when
         # settings.json asks. Costs ~1.2 ms a pair and 61 MB/s of disk.
         self.record_session = bool(settings.get("recording", False))
@@ -482,12 +487,7 @@ class TrackerClass:
         self.recorder: Optional[FrameRecorder] = None
         self._sync_chip = settings.get("sync_chip", "gpiochip4")
         self._sync_pin = settings.get("sync_pin", "PIN_11")
-        # When a command last actually arrived. Distinct from received_message,
-        # which is sticky: it is only cleared on the STOP path, and that path is
-        # inside the marker-visible branch. Keying the watchdog off the field
-        # meant that after the very first packet it was refreshed every frame
-        # forever, so a Godot that died without sending STOP left this process
-        # running indefinitely, holding both cameras.
+        # When the app's last message arrived: the 3 s liveness watchdog.
         self._last_command_at = 0.0
         self._stop_requested = False
         self._rec_file0 = self._rec_file1 = None
@@ -528,7 +528,7 @@ class TrackerClass:
         self._trunk_sent_seq = -1
         self._trunk_logged = None
         self._trunk_settings = settings
-        # Live switch (CFG:trunk=on|off): off stops feeding and reporting the
+        # Live switch (CONFIG trunk=on|off): off stops feeding and reporting the
         # trunk process; on after a start with it disabled loads it then.
         self.trunk_on = bool(settings.get("trunk_enabled", True))
         if not self.trunk_on:
@@ -556,13 +556,13 @@ class TrackerClass:
             self.trunk_on = self.trunk is not None
         print(f"[TRUNK] {'On' if self.trunk_on else 'Off'} (live).")
 
-    def _trunk_command(self, cmd: bytes) -> None:
-        """`TRUNK:neutral` starts a neutral capture; `TRUNK:snapshot` sends the
-        subject picker's image; `TRUNK:select=<n>` follows person n of it (-1 =
-        the centre-most again)."""
+    def _trunk_command(self, arg: bytes) -> None:
+        """TRUNK `neutral` starts a neutral capture; `snapshot` sends the
+        subject picker's image; `select=<n>` follows person n of it (-1 = the
+        centre-most again)."""
         if self.trunk is None or not self.trunk_on:
             return
-        arg = cmd[6:].strip()
+        arg = arg.strip()
         if arg == b"neutral":
             print("[TRUNK] Neutral capture requested.")
             self.trunk.capture_neutral()
@@ -572,7 +572,7 @@ class TrackerClass:
             try:
                 self.trunk.select(int(arg[7:]))
             except ValueError:
-                print(f"[TRUNK] Bad select: {cmd!r}")
+                print(f"[TRUNK] Bad select: {arg!r}")
 
     def _send_snapshot(self) -> None:
         """Ship a snapshot the trunk process has produced, if any.
@@ -587,16 +587,16 @@ class TrackerClass:
 
         def run():
             for c in chunks:
-                self.streamer.send_raw(c)
+                self.streamer.send(c)
                 time.sleep(0.015)
         threading.Thread(target=run, name="snapshot-send", daemon=True).start()
         print(f"[TRUNK] Snapshot sent: {len(snap.people)} people, "
               f"{len(snap.jpeg)} B jpeg, {len(chunks)} chunks")
 
     def _send_trunk(self) -> None:
-        """One text datagram per trunk update:
-        TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-            reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
+        """One TRUNK_STATUS per trunk update, CSV:
+        state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
+        reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
         (trunk/tracker.py has the states and levels.)
         """
         st = self.trunk.status()
@@ -605,12 +605,13 @@ class TrackerClass:
             return
         self._trunk_sent_seq = st.seq
         f, l, a = st.angles
-        self.streamer.send_raw(
-            f"TRK:{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
+        self.streamer.send(protocol.encode(
+            protocol.TRUNK_STATUS,
+            f"{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
             f"{st.reason},{st.capture_result},{st.people},{int(st.locked)},"
             f"{st.q_how},{st.q_rms_mm:.1f},{st.q_frac:.2f},{st.raw_pts},{st.mask_px},"
-            f"{int(st.held)}".encode())
+            f"{int(st.held)}"))
         # One journal line whenever the state, level or this frame's outcome
         # changes, with the quality numbers: why a reading was bad (a shrunk
         # mask or cloud, a poor fit) is not visible from the angles alone.
@@ -637,14 +638,13 @@ class TrackerClass:
         """
         def watch():
             while not self._startup_done.is_set():
-                cmd = self._recv_command()
-                if cmd:
-                    # Kept, not dropped: the loop treats any traffic as the
-                    # heartbeat, and this is also how the streamer learns
-                    # Godot's address.
-                    self.received_message = cmd
+                msg = self.streamer.receive()
+                if msg:
+                    # Everything else is dropped: the app repeats its SESSION in
+                    # every heartbeat, so the loop sees it again once it runs.
+                    self._app_seen = True
                     self._last_command_at = time.time()
-                    if cmd == b"STOP" and self.stream_type == "udp":
+                    if protocol.decode(msg)[0] == protocol.STOP and self.stream_type == "udp":
                         self._stop_requested = True
                         return
                 time.sleep(0.05)
@@ -735,12 +735,39 @@ class TrackerClass:
         a lost heartbeat closes the session and waits for the next central
         instead of exiting, which would leave nothing to reconnect to."""
         print(f"[BLE] {why}; session closed, waiting for the next connection.")
-        self._stop_session_recording()
-        self.received_message = b""
+        self._close_session()
+        self._app_seen = False
         self.streamer.reset()
 
-    def _apply_config(self, cmd: bytes) -> None:
-        """Live tuning from Godot: `CFG:<key>=<value>` (30-byte datagram limit).
+    def _handle_messages(self) -> None:
+        """Everything the app sent since the last frame (docs/PROTOCOL.md).
+
+        Drained, not one per frame: a backlog delayed a CONFIG by seconds. Each
+        message is acted on as it is read, so a STOP or SESSION does not depend
+        on a marker being in view."""
+        while True:
+            msg = self.streamer.receive()
+            if not msg:
+                return
+            kind, payload = protocol.decode(msg)
+            self._app_seen = True
+            self._last_command_at = time.time()
+            if kind == protocol.CONFIG:
+                self._apply_config(payload)
+            elif kind == protocol.TRUNK:
+                self._trunk_command(payload)
+            elif kind == protocol.SESSION:
+                self._open_session(payload.decode(errors="replace").strip())
+            elif kind == protocol.STOP:
+                if self.stream_type == "ble":
+                    self._end_ble_session("STOP from the app")
+                    return
+                self._stop_requested = True
+            elif kind != protocol.HEARTBEAT:
+                print(f"[NET] Unknown message type 0x{kind:02x}, ignored")
+
+    def _apply_config(self, payload: bytes) -> None:
+        """Live tuning from Godot: CONFIG `<key>=<value>`, answered by CONFIG_ACK.
 
         Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
         camera (both|cam0|cam1), deadband (px; 0 = stabilizer off),
@@ -748,7 +775,7 @@ class TrackerClass:
         Bad values are reported and ignored, never fatal mid-session.
         """
         try:
-            key, value = cmd[4:].decode().strip().split("=", 1)
+            key, value = payload.decode().strip().split("=", 1)
             if key == "solver" and value in RigidBody.POSE_SOLVERS:
                 self.solver = value
             elif key == "refine" and value in ("crop", "contour", "subpix", "none"):
@@ -771,30 +798,16 @@ class TrackerClass:
             else:
                 raise ValueError("unknown key or value")
         except Exception as exc:
-            print(f"[CFG] ignored {cmd!r}: {exc}")
+            print(f"[CFG] ignored {payload!r}: {exc}")
             return
         print(f"[CFG] {key} = {value}")
-        # Ack so the UI can show it took effect (position packets are 44 bytes;
-        # this one is text and starts with "CFG:").
-        self.streamer.send_raw(f"CFG:{key}={value}".encode())
+        # So the UI can show it took effect.
+        self.streamer.send(protocol.encode(protocol.CONFIG_ACK, f"{key}={value}"))
 
-    def _recv_command(self) -> bytes:
-        return self.streamer.get_command()
-
-    def _send_coordinates(
-        self,
-        command: str,
-        centroid: np.ndarray,
-        ref_rvec: np.ndarray,
-        ref_tvec: np.ndarray,
-        ref_id: int,
-    ) -> None:
-        code_map = {"STOP": -99.0, "START": 2.0, "RESET": 5.0}
-        data = np.array(
-            [code_map.get(command, 2.0), *centroid, *ref_rvec, *ref_tvec, float(ref_id)],
-            dtype=np.float32,
-        )
-        self.streamer.send(data.tolist())
+    def _send_position(self, centroid, ref_rvec, ref_tvec, ref_id: int) -> None:
+        status = protocol.STATUS_STOPPING if self._stop_requested else protocol.STATUS_RUNNING
+        self.streamer.send(protocol.encode_position(
+            status, ref_id, np.ravel(centroid), np.ravel(ref_rvec), np.ravel(ref_tvec)))
         self._send_count += 1
 
     # ── Pose estimation ───────────────────────────────────────────────────────
@@ -979,32 +992,51 @@ class TrackerClass:
 
     # ── CSV recording ─────────────────────────────────────────────────────────
 
-    def _select_hospitalid(self) -> None:
-        if self.save_path is None:
-            self.save_path = os.path.join(
-                os.path.expanduser("~/Documents/NOARK_demo/data"),
-                self._hid,
-                self._curr_session,
-            )
-            os.makedirs(self.save_path, exist_ok=True)
-            csv_path = os.path.join(
-                self.save_path,
-                datetime.now().strftime("%Y_%m_%d_%H_%M_%S") + "_data.csv",
-            )
-            self.csv_writer = csv.writer(open(csv_path, "w", newline=""))
-            self.csv_writer.writerow(["Time", "X", "Y", "Z"])
+    def _open_session(self, hid: str) -> None:
+        """SESSION: the app repeats it every heartbeat, so the same id again is
+        a no-op; a different one closes this session and opens theirs."""
+        if not hid or hid == self._hid:
+            return
+        if self._hid is not None:
+            print(f"[SESSION] Patient {self._hid} -> {hid}")
+            self._close_session()
+        self._hid = hid
+        self.save_path = os.path.join(
+            os.path.expanduser("~/Documents/NOARK_demo/data"),
+            self._hid,
+            self._curr_session,
+        )
+        os.makedirs(self.save_path, exist_ok=True)
+        csv_path = os.path.join(
+            self.save_path,
+            datetime.now().strftime("%Y_%m_%d_%H_%M_%S") + "_data.csv",
+        )
+        self._csv_file = open(csv_path, "w", newline="")
+        self.csv_writer = csv.writer(self._csv_file)
+        self.csv_writer.writerow(["Time", "X", "Y", "Z"])
 
-            if self.record_frames and self._rec_file0 is not None:
-                self._close_rec_files()
-            if self.record_frames:
-                self._open_rec_files(self.save_path)
-            self._start_session_recording()
+        if self.record_frames and self._rec_file0 is not None:
+            self._close_rec_files()
+        if self.record_frames:
+            self._open_rec_files(self.save_path)
+        self._start_session_recording()
+        self.record = True
+
+    def _close_session(self) -> None:
+        """End the patient's session: the next SESSION, even for the same
+        patient, opens a new one (a BLE reconnect starts recording again)."""
+        self._stop_session_recording()
+        if self._csv_file is not None:
+            self._csv_file.close()
+        self._csv_file = self.csv_writer = None
+        self.save_path = self._hid = None
+        self.record = False
 
     def _start_session_recording(self) -> None:
         """Begin recording this session's frames, if settings.json asks for it.
 
         Started here rather than at launch because the patient id is what names
-        the directory, and that only arrives with the USER: command.
+        the directory, and that only arrives with the SESSION message.
         """
         if not self.record_session or self.recorder is not None:
             return
@@ -1080,44 +1112,9 @@ class TrackerClass:
         t3 = time.perf_counter()
         self._stage_time["refine"] += t3 - t2
 
-        # Poll command from Godot. STOP is latched immediately, independent of
-        # marker visibility below — otherwise a STOP arriving while markers
-        # are in view gets acked-and-cleared before run()'s exit check sees it.
-        # Drain the socket: Godot sends a datagram per position packet, so
-        # reading one per frame lets a backlog build and delays a CFG by seconds.
-        cmd = b""
-        while True:
-            nxt = self._recv_command()
-            if not nxt:
-                break
-            if nxt.startswith(b"CFG:"):
-                self._apply_config(nxt)
-                self._last_command_at = time.time()
-            elif nxt.startswith(b"TRUNK:"):
-                # Drained here like CFG, or the next heartbeat would overwrite it.
-                self._trunk_command(nxt)
-                self._last_command_at = time.time()
-            else:
-                cmd = nxt
-        if cmd:
-            self.received_message = cmd
-            self._last_command_at = time.time()
-            if cmd == b"STOP":
-                if self.stream_type == "ble":
-                    self._end_ble_session("STOP from the app")
-                else:
-                    self._stop_requested = True
-            # Opening the session is latched here too, for the same reason STOP
-            # is: it used to live in the marker-visible branch below, so a
-            # session with nothing in view opened no log and started no
-            # recording. Recording in particular must not depend on tracking
-            # succeeding — that is the case it exists to capture.
-            elif cmd.startswith(b"USER:") or cmd.startswith(b"CHANGE:"):
-                if cmd.startswith(b"CHANGE:"):
-                    self.save_path = None
-                self._hid = cmd.decode().split(":", 1)[1]
-                self._select_hospitalid()
-                self.record = True
+        # Before pose estimation: a STOP or SESSION must not wait for a marker
+        # to be in view (recording exists for exactly the frames that fail).
+        self._handle_messages()
 
         if self.trunk is not None and self.trunk_on:
             self._send_trunk()
@@ -1152,17 +1149,8 @@ class TrackerClass:
                 ref_rvec = rvecs[0]
                 ref_tvec = tvecs[0]
 
-            if self.received_message:
-                if self.received_message == b"STOP":
-                    self._send_coordinates("STOP", centroid, ref_rvec, ref_tvec, ref_id)
-                    self.received_message = b""
-                elif self.received_message.startswith((b"USER:", b"CHANGE:")):
-                    # The session was already opened when the command arrived.
-                    self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
-                elif self.received_message == b"RESET":
-                    self._send_coordinates("RESET", centroid, ref_rvec, ref_tvec, ref_id)
-                else:
-                    self._send_coordinates("START", centroid, ref_rvec, ref_tvec, ref_id)
+            if self._app_seen:
+                self._send_position(centroid, ref_rvec, ref_tvec, ref_id)
 
                 if self.record and self.csv_writer:
                     self.csv_writer.writerow(
@@ -1198,7 +1186,7 @@ class TrackerClass:
                         if self.stream_type == "udp":
                             print("Lost connection to Godot, exiting…")
                             break
-                        if self.received_message:
+                        if self._app_seen:
                             self._end_ble_session("No heartbeat for 3 s")
                         self._last_command_at = time.time()
                 except Exception as exc:

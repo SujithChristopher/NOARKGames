@@ -2,9 +2,9 @@ extends Node
 ## Trunk posture from the tracker (pyscripts/trunk/): neutral capture, angles
 ## from neutral and a per-axis compensation level.
 ##
-## tracker.py sends a text datagram per trunk update (~10 Hz), which
-## GlobalScript hands to on_packet():
-##   TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
+## tracker.py sends a TRUNK_STATUS message per trunk update (~10 Hz), whose
+## CSV payload GlobalScript hands to on_packet() (docs/PROTOCOL.md):
+##   state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
 ##       reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
 ## (the last six describe this frame's own quality, for the raw log)
 ## The thresholds, hysteresis and dwell are applied in Python
@@ -48,7 +48,7 @@ var held := false                   # angles are the last good ones, not this fr
 var _last_packet_ms := -100000
 
 var _beep: AudioStreamPlayer
-# Snapshot chunks being collected: "IMG:" id index total data (trunk/snapshot_packet.py)
+# Snapshot chunks being collected: id index total data (trunk/snapshot_packet.py)
 var _snap_id := -1
 var _snap_total := 0
 var _snap_chunks := {}
@@ -89,32 +89,32 @@ func set_enabled(on: bool) -> void:
 
 
 func capture_neutral() -> void:
-	GlobalScript._send_transport_message("TRUNK:neutral")
+	GlobalScript.send_trunk_command("neutral")
 
 
 ## Ask the tracker for the picker image; it arrives as snapshot_ready.
 func request_snapshot() -> void:
-	GlobalScript._send_transport_message("TRUNK:snapshot")
+	GlobalScript.send_trunk_command("snapshot")
 
 
 ## Follow person `index` of the last snapshot (-1 = the centre-most again). A new
 ## person has no neutral: has_neutral goes false and it must be captured again.
 func select_person(index: int) -> void:
-	GlobalScript._send_transport_message("TRUNK:select=%d" % index)
+	GlobalScript.send_trunk_command("select=%d" % index)
 
 
-## One chunk of a snapshot. Called (deferred) from GlobalScript.
+## One SNAPSHOT_CHUNK payload (id, index, total, data). Called (deferred) from GlobalScript.
 func on_image_chunk(packet: PackedByteArray) -> void:
-	if packet.size() < 8:
+	if packet.size() < 3:
 		return
-	var id := packet[4]
-	var index := packet[5]
-	var total := packet[6]
+	var id := packet[0]
+	var index := packet[1]
+	var total := packet[2]
 	if id != _snap_id:
 		_snap_id = id
 		_snap_total = total
 		_snap_chunks.clear()
-	_snap_chunks[index] = packet.slice(7)
+	_snap_chunks[index] = packet.slice(3)
 	if _snap_chunks.size() < _snap_total:
 		return
 	var blob := PackedByteArray()
@@ -143,9 +143,9 @@ func _decode_snapshot(blob: PackedByteArray) -> void:
 	snapshot_ready.emit(ImageTexture.create_from_image(image), outlines, int(meta.get("locked", -1)))
 
 
-## Called (deferred) from GlobalScript's network thread.
+## A TRUNK_STATUS payload. Called (deferred) from GlobalScript's network thread.
 func on_packet(text: String) -> void:
-	var f := text.substr(4).split(",")
+	var f := text.split(",")
 	if f.size() < 12:
 		return
 	_last_packet_ms = Time.get_ticks_msec()

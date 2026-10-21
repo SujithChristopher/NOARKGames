@@ -1,188 +1,111 @@
-# NOARK App ↔ Tracker Protocol
+# NOARK app ↔ tracker protocol (v2)
 
-What the Godot app sends to the tracking device (`device/tracker.py`), what
-comes back, and what the device does on silence. Companion to
-[DATA_FORMATS.md](DATA_FORMATS.md), which covers the files the two sides write.
+How the Godot app and `pyscripts/tracker.py` talk, over UDP or BLE. One protocol;
+the transport only moves bytes. Single sources of truth:
 
-Everything here was read from the code, not from a spec. Where the code defines
-nothing (numeric opcodes, error codes, a state machine), this document says so
-rather than inventing it — see §7.
+- Python: `pyscripts/protocol.py`
+- Godot: `Main_screen/Scripts/link_protocol.gd` (`LinkProtocol`)
 
-Sources: `app/scripts/device_link.gd` (app side),
-`device/tracker.py` and `device/udp_link.py` (device side),
-`device/ble_link.py` (BLE peripheral).
+Change both together, and this file with them.
 
 ---
 
-## 1. Transport
+## 1. Transports
 
-| | UDP (default) | BLE |
+| | UDP | BLE |
 |---|---|---|
-| Selected by | `config.json` `"stream_type": "udp"` | `"stream_type": "ble"` |
-| Endpoint | `127.0.0.1:8000` (`udp_port` in `config.json`) | GATT service `4e4f4152-4b00-0000-0000-000000000000` |
-| Uplink (app → device) | UDP datagram | Write to characteristic `…4b02…` (write or write-without-response, whichever the peripheral offers) |
-| Downlink (device → app) | UDP datagram | Notify on characteristic `…4b01…` |
-| Roles | Python binds and is the server; Godot `connect_to_host()`s | Python is the GATT peripheral (`NOARK_Tracker`); Godot is the central |
+| Selected by | settings.json `"stream_type": "udp"` | `"stream_type": "ble"` |
+| Typical setup | Godot and tracker on the board | Godot on an Android tablet, tracker on the board |
+| Endpoint | tracker binds `127.0.0.1:<udp_port>` (8000) | GATT service `4e4f4152-4b00-…`, device `ble_device_name` |
+| App → tracker | one datagram per message | one write per message to `…4b02…` |
+| Tracker → app | one datagram per message | one notification per message on `…4b01…` |
+| Max message | 1024 bytes (receive buffer) | 244 bytes (247 MTU − 3) |
 
-The tracker does not learn Godot's address from configuration. It replies to
-the source address of the **last command it received**, so it cannot send
-anything until the first command arrives.
+A transport's interface is the same on both sides: send one message (bytes),
+poll for the messages that arrived. `udp_streamer.py` / `ble_streamer.py` and the
+UDP / BLE branches in `global_script.gd` do nothing else — no parsing, no packing.
 
-BLE note: `ble_link.py` implements the peripheral, but `tracker.py` only
-instantiates the UDP link class. BLE is therefore documented from the app side and
-the streamer file; no code in this repo runs tracker + BLE together.
+Over UDP the tracker answers whoever sent it the last message, so it sends
+nothing until the app's first message arrives.
 
-## 2. Command encoding
+## 2. Framing
 
-There are **no numeric opcodes** on the uplink. A command is a UTF-8 ASCII
-string, one command per datagram (or per BLE write), with no length prefix, no
-terminator, no checksum, and no sequence number.
+Every message is **one type byte, then the payload**. Messages are told apart
+by the type byte only — never by size or text prefix. Multi-byte numbers are
+little-endian. Text payloads are UTF-8, with no terminator.
 
-```
-"STOP"            4 bytes  53 54 4F 50
-"RESET"           5 bytes  52 45 53 45 54
-"CONNECTED"       9 bytes  (heartbeat)
-"USER:<id>"       5 + len(id) bytes
-"CHANGE:<id>"     7 + len(id) bytes
-```
+`0x00` is reserved as "nothing" and is ignored by both sides (the BLE position
+characteristic's initial value).
 
-Matching is exact for `STOP` and `RESET` (`== b"STOP"`), and by prefix for
-`USER:` / `CHANGE:` (the text after the first `:` is the patient id).
+## 3. App → tracker
 
-**Size limit: 30 bytes.** The tracker reads with `recvfrom(30)`. A longer
-datagram is truncated on Linux (the target platform), so `USER:` + id must fit
-in 30 bytes — a hospital id of at most **25 bytes**. Nothing validates this on
-either side; an over-long id arrives cut short and names the wrong folder.
-
-## 3. Commands
-
-| Command | Sent by app? | Parameter | Valid values | Effect on device | Downlink code |
-|---|---|---|---|---|---|
-| `CONNECTED` | Yes — default heartbeat message | none | fixed string | Refreshes the liveness timer. Any message the tracker does not recognise is treated the same way. | `2.0` |
-| `USER:<id>` | Yes — on patient login (login handler) | `<id>` hospital id | non-empty; ≤ 25 bytes; used as a folder name, so no path separators. Not validated. | Sets the patient id, opens the session log and recordings if none are open (§5), starts recording. Becomes the heartbeat: the app resends it every 0.1 s for the rest of the run. | `2.0` |
-| `CHANGE:<id>` | **No** — tracker understands it, app never sends it | `<id>` as above | as above | Same as `USER:` but first clears the current session path, so a new session log is opened for the new id. | `2.0` |
-| `RESET` | **No** — tracker understands it, app never sends it | none | fixed string | Replies with code `5.0`. Nothing else changes on the device. | `5.0` |
-| `STOP` | Yes — once, on quit (quit handler) | none | fixed string | Latches a stop; tracker finishes the current iteration, closes recordings and cameras, exits. | `-99.0` |
-
-Downlink codes are the first float of the position packet (§4).
-
-`CHANGE:` and `RESET` are dead paths from the app's point of view. On the app
-side `5.0` sets `reset_position`, which nothing reads.
-
-### Heartbeat behaviour
-
-- The app-side link script starts a timer at `delay_time = 0.1` s (an `@export`) that
-  resends whatever `_outgoing_message` currently holds: `"CONNECTED"` at
-  launch, `"USER:<id>"` after login, `"STOP"` after quit.
-- The packet handler also sends `_outgoing_message` once per received
-  position packet, so the real uplink rate is the timer plus the packet rate.
-- Because `USER:<id>` replaces `CONNECTED` as the heartbeat, a login is not a
-  one-shot command. It is repeated until the app exits. Handling is
-  idempotent (a session is only opened when none is open), so this is safe.
-- `STOP` is the exception: the timer is stopped first, so it is sent once from
-  `handle_quit_request()` (plus once per position packet still in flight).
-
-## 4. Response: the position packet
-
-The device answers with one packet per processed frame, not per command.
-
-```
-11 × float32, little-endian, 44 bytes
-[ msg_code, cx, cy, cz, rvx, rvy, rvz, tx, ty, tz, ref_id ]
-   0         1   2   3   4    5    6    7   8   9   10
-```
-
-| Field | Meaning |
-|---|---|
-| `msg_code` | `2.0` START/OK, `5.0` RESET, `-99.0` STOP |
-| `cx..cz` | Smoothed tracked point, metres, camera frame |
-| `rvx..rvz` | Rodrigues rotation of the reference tag / rigid body |
-| `tx..tz` | Translation of the reference tag / rigid body |
-| `ref_id` | Reference tag id (float) |
-
-`msg_code` is chosen from the latest command: `STOP` → `-99.0`, `RESET` →
-`5.0`, everything else (including `USER:`, `CHANGE:`, `CONNECTED` and
-unrecognised text) → `2.0`.
-
-App handling of `msg_code` (frame update in `device_link.gd`):
-
-| Received | App does |
-|---|---|
-| `2.0` | `connected = true` |
-| `5.0` | `reset_position = true` (unused) |
-| `-99.0` | Marks disconnected/ended, joins the network and tracker threads, quits the app |
-
-BLE payloads must be at least 44 bytes and a multiple of 4, otherwise the app
-logs `Unexpected position payload size` and drops the packet.
-
-**There is no command-level acknowledgement.** A reply confirms only that the
-tracker is alive and saw a pose. Two consequences:
-
-- **No marker in view → no packet at all.** The device only sends when a pose
-  was solved. The app cannot tell "tracker alive, no marker" from "tracker
-  dead" by packets alone.
-- `STOP` is acknowledged with `-99.0` only if a pose is available at that
-  moment. If not, the tracker exits without acknowledging, and the app relies
-  on its own quit path.
-
-## 5. Device states and which commands apply
-
-The tracker has no explicit state variable. The states below are inferred from
-the control flow in `tracker.py`.
-
-| State | Entered when | Exited when |
-|---|---|---|
-| **Starting** | Process spawn. Socket bound first, then cameras brought up (phase alignment, tens of seconds). | Cameras ready, the main loop begins |
-| **Running, no session** | Loop started, no `USER:` yet (no session path set) | First `USER:` / `CHANGE:` |
-| **Running, session open** | `USER:` / `CHANGE:` handled | STOP, heartbeat timeout, or exception |
-| **Stopping** | STOP latched | Process exit |
-
-| Command | Starting | Running, no session | Running, session open | Stopping |
-|---|---|---|---|---|
-| `CONNECTED` | Read and kept; only refreshes liveness. No reply (loop not running). | Accepted, reply `2.0` (if pose) | Accepted, reply `2.0` | Ignored |
-| `USER:<id>` | Read and kept, **not acted on** until the loop starts; the heartbeat repeat then delivers it. | Accepted: opens log and recordings | Accepted, no-op (session already open) | Ignored |
-| `CHANGE:<id>` | As `USER:` | Accepted, same as `USER:` | Accepted: reopens a session for the new id | Ignored |
-| `RESET` | Kept, not acted on | Accepted, reply `5.0` | Accepted, reply `5.0` | Ignored |
-| `STOP` | **Honoured immediately** by the startup watcher, which aborts the camera bring-up | Accepted, exits | Accepted, closes recordings, exits | — |
-
-Notes:
-
-- Nothing is ever *rejected*. Commands not valid in a state are held or
-  ignored silently; the device sends no refusal.
-- The session log and recordings open on the command, not on tracking success,
-  so a session with no marker in view still records frames.
-- `CHANGE:` clears the session path and opens a new CSV but does not close the
-  previous session CSV writer; see the source before relying on it.
-- The last command received is latched and reused every
-  frame. It is cleared only after a `STOP` acknowledgement.
-
-## 6. Timeouts and retry
-
-| Timer | Value | Where | What happens on expiry |
+| Type | Name | Payload | Effect |
 |---|---|---|---|
-| Heartbeat interval (app) | 0.1 s (`delay_time`) | `device_link.gd` | — (this *is* the retry mechanism) |
-| Liveness timeout (device) | **3.0 s** since the last received command | `tracker.py` main loop | Prints `Lost connection to Godot, exiting…` and exits |
-| Startup | none | — | Loop's liveness clock starts only when the main loop begins, so a slow camera bring-up does not trip the 3 s timeout |
-| BLE peripheral start | 10 s | `ble_link.py` start | Raises `BLE server did not start within 10 seconds` |
-| Godot-side wait for packets | none | — | The app never times out waiting for the tracker |
-| Tracker respawn (app) | checked every frame | frame update | If the tracker thread is dead, not `debug`, not `endgame`: restart it |
+| `0x01` | `HEARTBEAT` | — | Liveness only |
+| `0x02` | `SESSION` | patient id (text) | Opens the session for that patient (logs, recordings). Repeating the same id is a no-op; a **different** id closes the current session and opens a new one |
+| `0x03` | `STOP` | — | UDP: the tracker exits. BLE: the session closes and the tracker waits for the next connection |
+| `0x04` | `CONFIG` | `key=value` (text) | Live tuning; answered by `CONFIG_ACK`. Keys: `solver`, `refine`, `camera`, `deadband`, `trunk` (`on`/`off`), `trunk_method` (`icp`/`msam_r18`/`msam_v3rot`) |
+| `0x05` | `TRUNK` | `neutral` \| `snapshot` \| `select=<n>` (text) | Capture neutral; send the subject picker's image; follow person n (−1 = centre-most) |
 
-**What to use for retry.** The protocol does not retry individual commands. It
-resends the current message every 0.1 s and the device tolerates 3.0 s of
-silence, which is 30 missed heartbeats. An app-side timeout for "device
-unresponsive" should be **≥ 3 s** of no position packets *and* a check that a
-marker is expected in view. Anything shorter will fire while the device is
-alive but cannot see a marker.
+Every message also counts as a heartbeat. The tracker drains everything that
+arrived each frame, so a command never waits behind a backlog.
 
-Because the uplink is UDP (or unacknowledged BLE writes), a lost `STOP` is
-recovered only by the device's own 3 s timeout, once the app stops sending.
+## 4. Tracker → app
 
-## 7. What the protocol does not define
+| Type | Name | Payload |
+|---|---|---|
+| `0x81` | `POSITION` | see below, 40 bytes |
+| `0x82` | `CONFIG_ACK` | `key=value` (text) as applied |
+| `0x83` | `TRUNK_STATUS` | CSV text, fields below |
+| `0x84` | `SNAPSHOT_CHUNK` | `snap_id u8 · index u8 · total u8 · data` |
 
-- **No numeric opcodes and no byte-level frame** on the uplink. Commands are
-  bare ASCII strings (§2).
-- **No error codes.** Failures show up as log lines (`Error: … — Godot likely
-  closed`, `Lost connection to Godot, exiting…`) and process exit, not as
-  values sent to the app. The `msg_code` slot carries only `2.0`, `5.0`,
-  `-99.0`; other values are not produced.
-- **No per-command acknowledgement or retry counter.**
+**POSITION** (`<BBH9f`, 40 bytes):
+
+| Offset | Field | |
+|---|---|---|
+| 0 | type `0x81` | |
+| 1 | status u8 | `0` running, `1` stopping (the app quits on it, UDP) |
+| 2 | ref_id u16 | reference tag / rigid-body id |
+| 4 | centroid xyz f32 ×3 | tracked point, metres, camera frame |
+| 16 | rvec f32 ×3 | Rodrigues rotation of the reference tag / rigid body |
+| 28 | tvec f32 ×3 | its translation |
+
+Sent once per frame in which a pose was solved. No marker in view → no
+POSITION.
+
+**TRUNK_STATUS** fields, in order:
+`state, level, lvl_flex, lvl_lat, lvl_axi, flex, lat, axi, progress, has_neutral,
+reason, capture_result, people, locked, q_how, q_rms_mm, q_frac, raw_pts, mask_px, held`
+(meanings in `pyscripts/trunk/tracker.py` `TrunkStatus` and `trunk_monitor.gd`).
+
+**SNAPSHOT_CHUNK**: the subject picker's image, `u16 json_len · json · jpeg`
+split into ≤ 200-byte pieces (`pyscripts/trunk/snapshot_packet.py`), reassembled
+by `TrunkMonitor` when all `total` pieces of one `snap_id` are in.
+
+## 5. Liveness and lifecycle (as of step 1)
+
+| | UDP | BLE |
+|---|---|---|
+| Tracker process | Spawned by Godot (`.venv/bin/python pyscripts/tracker.py --settings …`); Godot restarts it if it dies | systemd service `noark-tracker`, outlives the app |
+| App heartbeat | every 0.1 s: `SESSION(id)` once logged in, else `HEARTBEAT` | same |
+| 3 s with no message | tracker exits | session closes, tracker waits for the next central |
+| `STOP` | tracker answers with POSITION status 1 and exits | session closes |
+
+## 6. Roadmap
+
+The cleanup is done in steps; each leaves UDP and BLE working.
+
+1. **Done** — this framing: a type byte on every message, one protocol module
+   per side, transports that only move bytes. Dropped: the 44-byte size guess,
+   the `IMG:` padding hack, the control code inside the position floats, the
+   unused `RESET` / `CHANGE:` commands, the 30-byte command limit, and the
+   app's reply to every position packet over UDP.
+2. Heartbeat carries nothing but liveness; `SESSION` / `CONFIG` / `TRUNK` are
+   sent once with a sequence number and retried until `ACK(seq)`. A `HELLO`
+   with the protocol version opens each connection. Generic chunking for any
+   message over the transport's limit.
+3. The tracker runs as the service for UDP too: Godot connects instead of
+   spawning it, and the spawn / watchdog / startup-STOP code goes. `STOP` ends
+   the session over both transports.
+4. Remove the remaining `stream_type` branches; the transport is chosen in one
+   place on each side.

@@ -1,19 +1,19 @@
-"""UDP streamer for NOARK position data.
+"""UDP transport between the tracker and Godot (docs/PROTOCOL.md).
 
-Python acts as UDP server; Godot acts as client (sends commands, receives position).
-
-Wire format: 11 × float32 little-endian (44 bytes)
-  [msg_code, cx, cy, cz, rvx, rvy, rvz, tx, ty, tz, ref_id]
-  msg_code: 2.0 = START, -99.0 = STOP, 5.0 = RESET
+The tracker binds; Godot connects and sends first, and the tracker answers
+whoever sent it the last message. One datagram is one protocol message — this
+class only moves bytes, protocol.py says what they mean.
 """
 
 import socket
-import struct
 from typing import Optional
+
+# Godot's messages are small (a patient id, a CFG line); this only bounds them.
+MAX_MESSAGE = 1024
 
 
 class UDPStreamer:
-    """Synchronous UDP socket wrapper; BLEStreamer (ble_streamer.py) has the same interface."""
+    """Synchronous UDP socket; BLEStreamer (ble_streamer.py) has the same interface."""
 
     def __init__(self, ip: str = "localhost", port: int = 8000) -> None:
         self.ip = ip
@@ -28,24 +28,18 @@ class UDPStreamer:
         self._socket.setblocking(False)
         print("UDP socket bound to", self._socket.getsockname())
 
-    def send(self, data: list) -> None:
-        """Send an 11-float position packet to the last known Godot address."""
+    def send(self, message: bytes) -> None:
+        """One message to the last known Godot address (none yet: dropped)."""
         if self._socket is None or self._addr is None:
             return
-        self._socket.sendto(struct.pack("f" * len(data), *data), self._addr)
+        self._socket.sendto(message, self._addr)
 
-    def send_raw(self, payload: bytes) -> None:
-        """Send a non-position datagram (e.g. a CFG ack); Godot tells it by size."""
-        if self._socket is None or self._addr is None:
-            return
-        self._socket.sendto(payload, self._addr)
-
-    def get_command(self) -> bytes:
-        """Return the latest command from Godot, or b'' if none."""
+    def receive(self) -> bytes:
+        """The next message from Godot, or b'' if none."""
         if self._socket is None:
             return b""
         try:
-            data, self._addr = self._socket.recvfrom(30)
+            data, self._addr = self._socket.recvfrom(MAX_MESSAGE)
             return data
         except socket.error:
             return b""

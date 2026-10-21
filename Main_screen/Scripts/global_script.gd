@@ -1,6 +1,7 @@
 extends Node
 
 const TableFit := preload("res://Main_screen/Scripts/table_fit.gd")
+const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 
 # ── screen bounds ─────────────────────────────────────────────────────────────
 var X_SCREEN_OFFSET: int
@@ -52,7 +53,7 @@ var _last_ref_id:   int     = -1
 # Defined on the main screen ("Define Table"): the hand is put on the four table
 # corners, which fixes the zero, the axis directions and the px-per-metre scale
 # in one go, so set_origin() is not needed. While set, it replaces the origin
-# lock in _apply_position_packet. Persisted in table.json next to settings.json.
+# lock in _apply_position. Persisted in table.json next to settings.json.
 var table_set:    bool        = false
 var table_k:      float       = 0.0            # screen px per real metre
 var table_r:      Vector2     = Vector2.ZERO   # hand, real metres from the table centre
@@ -91,7 +92,7 @@ var _ble_shutting_down: bool = false
 # ── connection state ──────────────────────────────────────────────────────────
 @onready var connected: bool = false
 @onready var disconnected: bool = false
-@onready var reset_position: bool = false
+var _stop_received := false   # POSITION with status STOPPING: the tracker is exiting
 
 # ── python launcher ───────────────────────────────────────────────────────────
 @onready var interpreter_path: String
@@ -138,8 +139,9 @@ var smooth_scaled_network_position3D: Vector2 = Vector2.ZERO
 var quit_request: bool = false
 @export var delay_time = 0.1
 @onready var message_timer: Timer = Timer.new()
-var _outgoing_message = "CONNECTED"
-var _incoming_message: float
+# Sent as SESSION in every heartbeat once a patient is logged in (HEARTBEAT
+# before); the tracker treats a repeat of the same id as a no-op.
+var _session_id := ""
 
 @onready var debug: bool
 
@@ -221,34 +223,30 @@ signal tracker_config_applied(text: String)
 
 
 func handle_udp_packet() -> void:
-	var packet    = udp.get_packet()
-	if _handle_text_packet(packet):
-		return
-	var my_floats = PackedByteArray(packet).to_float32_array()
-	udp.put_packet(_outgoing_message.to_utf8_buffer())
-	_apply_position_packet(my_floats)
+	_handle_message(udp.get_packet())
 
 
-# The tracker's text packets, the same over UDP (a datagram) and BLE (a
-# notification on the position characteristic); position packets are 44 bytes.
-# Told apart by prefix, not size: a TRK: packet is 44 bytes about a third of the
-# time, and read as a position it is a centroid of ~0 — the cursor jumps. A
-# position packet cannot start with one of these (its first float is a small
-# message code, whose bytes are not letters).
-# Deferred: UDP calls this from the network thread.
-func _handle_text_packet(packet: PackedByteArray) -> bool:
-	if packet.size() < 4:
-		return false
-	match packet.slice(0, 4).get_string_from_ascii():
-		"CFG:":   # ack for a CFG command
-			tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
-		"TRK:":   # trunk status (TrunkMonitor)
-			TrunkMonitor.on_packet.call_deferred(packet.get_string_from_ascii())
-		"IMG:":   # a chunk of the subject picker's snapshot (TrunkMonitor)
-			TrunkMonitor.on_image_chunk.call_deferred(packet)
-		_:
-			return false
-	return true
+# One message from the tracker, the same over UDP (a datagram) and BLE (a
+# notification); told apart by the type byte (docs/PROTOCOL.md).
+# UDP calls this from the network thread, so everything else is deferred.
+func _handle_message(message: PackedByteArray) -> void:
+	match LinkProtocol.kind_of(message):
+		LinkProtocol.POSITION:
+			var pos := LinkProtocol.decode_position(message)
+			if pos.is_empty():
+				push_error("[NET] Short POSITION: %d bytes" % message.size())
+				return
+			_apply_position(pos)
+		LinkProtocol.CONFIG_ACK:
+			tracker_config_applied.emit.call_deferred(LinkProtocol.payload_text(message))
+		LinkProtocol.TRUNK_STATUS:
+			TrunkMonitor.on_packet.call_deferred(LinkProtocol.payload_text(message))
+		LinkProtocol.SNAPSHOT_CHUNK:
+			TrunkMonitor.on_image_chunk.call_deferred(message.slice(1))
+		LinkProtocol.NONE:
+			pass
+		var kind:
+			push_warning("[NET] Unknown message type 0x%02x" % kind)
 
 
 # ── BLE ───────────────────────────────────────────────────────────────────────
@@ -517,14 +515,7 @@ func _on_ble_services_discovered(services: Array) -> void:
 func _on_ble_characteristic_notified(char_uuid: String, data: PackedByteArray) -> void:
 	if char_uuid.to_lower() != BLE_POSITION_UUID:
 		return
-	if _handle_text_packet(data):
-		return
-
-	if data.size() < 44 or (data.size() % 4) != 0:
-		push_error("[BLE] Unexpected position payload size: %d" % data.size())
-		return
-
-	_apply_position_packet(data.to_float32_array())
+	_handle_message(data)
 
 
 func _on_ble_manager_error(error_message: String) -> void:
@@ -632,19 +623,20 @@ func load_table() -> void:
 	table_set = true
 
 
-func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
-	_incoming_message = my_floats[0]
+func _apply_position(pos: Dictionary) -> void:
+	if pos["status"] == LinkProtocol.STATUS_STOPPING:
+		_stop_received = true
 	_packet_count += 1
 	last_packet_ms = Time.get_ticks_msec()
 
 	# Cache what set_origin() needs: the board orientation, and the id that
-	# says a packet has been seen at all. The board translation in floats 7-9
-	# is not cached — the tracked point itself arrives in floats 1-3.
-	_last_rvec   = Vector3(my_floats[4], my_floats[5], my_floats[6])
-	_last_ref_id = int(my_floats[10])
+	# says a packet has been seen at all. The board translation is not cached —
+	# the tracked point itself arrives as the centroid.
+	_last_rvec   = pos["rvec"]
+	_last_ref_id = pos["ref_id"]
 
 	# Compute local coordinates (rotation + translation relative to origin)
-	var centroid := Vector3(my_floats[1], my_floats[2], my_floats[3])
+	var centroid: Vector3 = pos["centroid"]
 	_last_centroid = centroid
 	var local: Vector3
 	if table_set:
@@ -680,31 +672,38 @@ func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	scaled_network_position3D = Vector2(scaled_x, scaled_y)
 
 
-# Live tracker tuning (tracker.py _apply_config). Datagrams are capped at 30 bytes.
+# Live tracker tuning (tracker.py _apply_config); answered by tracker_config_applied.
 func send_tracker_config(key: String, value: String) -> void:
-	_send_transport_message("CFG:%s=%s" % [key, value])
+	_send(LinkProtocol.encode(LinkProtocol.CONFIG, "%s=%s" % [key, value]))
+
+
+# Trunk commands (TrunkMonitor): "neutral", "snapshot", "select=<n>".
+func send_trunk_command(arg: String) -> void:
+	_send(LinkProtocol.encode(LinkProtocol.TRUNK, arg))
 
 
 # ── transport send ────────────────────────────────────────────────────────────
 
-func _send_transport_message(message: String) -> void:
+# One message to the tracker. The transport only moves the bytes.
+func _send(message: PackedByteArray) -> void:
 	match stream_type:
 		"udp":
-			udp.put_packet(message.to_utf8_buffer())
+			udp.put_packet(message)
 		"ble":
 			if _ble_android_plugin:
 				if connected and _ble_can_write_command:
 					_ble_android_plugin.write_characteristic(
-						BLE_SERVICE_UUID, BLE_COMMAND_UUID,
-						message.to_utf8_buffer(), _ble_command_with_response)
+						BLE_SERVICE_UUID, BLE_COMMAND_UUID, message, _ble_command_with_response)
 			elif ble_device != null and ble_device.is_connected() and _ble_can_write_command:
 				ble_device.write_characteristic(
-					BLE_SERVICE_UUID, BLE_COMMAND_UUID,
-					message.to_utf8_buffer(), _ble_command_with_response)
+					BLE_SERVICE_UUID, BLE_COMMAND_UUID, message, _ble_command_with_response)
 
 
 func _on_heartbeat_tick() -> void:
-	_send_transport_message(_outgoing_message)
+	if _session_id.is_empty():
+		_send(LinkProtocol.encode(LinkProtocol.HEARTBEAT))
+	else:
+		_send(LinkProtocol.encode(LinkProtocol.SESSION, _session_id))
 
 
 # ── process ───────────────────────────────────────────────────────────────────
@@ -730,18 +729,15 @@ func _process(_delta: float) -> void:
 	smooth_scaled_network_position = smooth_scaled_network_position.lerp(scaled_network_position, t)
 	smooth_scaled_network_position3D = smooth_scaled_network_position3D.lerp(scaled_network_position3D, t)
 
-	match _incoming_message:
-		-99.0:
-			disconnected = true
-			endgame      = true
-			if stream_type == "udp":
-				thread_network.wait_to_finish()
-				thread_python.wait_to_finish()
-			get_tree().quit()
-		2.0:
-			connected = true
-		5.0:
-			reset_position = true
+	if _stop_received:
+		disconnected = true
+		endgame      = true
+		if stream_type == "udp":
+			thread_network.wait_to_finish()
+			thread_python.wait_to_finish()
+		get_tree().quit()
+	elif last_packet_ms > 0:
+		connected = true
 
 
 # ── UDP threads ───────────────────────────────────────────────────────────────
@@ -774,13 +770,14 @@ func handle_quit_request() -> void:
 	if is_instance_valid(message_timer):
 		message_timer.stop()
 
-	_outgoing_message = "STOP"
 	print("Camera closed properly")
-	_send_transport_message(_outgoing_message)
+	_send(LinkProtocol.encode(LinkProtocol.STOP))
 
 
+# Opens the tracker's session for this patient (its logs and recordings); a
+# different id than before closes the previous session first.
 func change_patient() -> void:
-	_outgoing_message = "USER:" + PatientDB.current_patient_id
+	_session_id = PatientDB.current_patient_id
 
 
 func _notification(what: int) -> void:

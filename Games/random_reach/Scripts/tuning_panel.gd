@@ -1,6 +1,6 @@
 extends CanvasLayer
 ## Live tracker tuning overlay. F2 or the "Tune" button toggles it.
-## Each change is sent to tracker.py as `CFG:<key>=<value>` and applies on the next frame.
+## Each change is sent to tracker.py as a CONFIG message (docs/PROTOCOL.md) and applies on the next frame.
 
 const OPTIONS := {
 	"solver": ["joint", "ransac"],
