@@ -15,6 +15,7 @@ const SESSION := 0x03         # patient id
 const STOP := 0x04
 const CONFIG := 0x05          # "key=value"
 const TRUNK := 0x06           # "neutral" | "snapshot" | "select=<n>"
+const STORAGE := 0x07         # "list" | "delete=<path>"; answered later by STORAGE_LIST
 
 # Tracker -> app
 const TRACKER_HEARTBEAT := 0x80
@@ -23,6 +24,7 @@ const ACK := 0x82             # seq u16, ok u8, detail
 const TRUNK_STATUS := 0x83    # CSV
 const SNAPSHOT := 0x84        # u16 json_len, json, jpeg
 const CHUNK := 0x85           # msg_id u8, index u8, total u8, part of another message
+const STORAGE_LIST := 0x86    # JSON: the board's recordings and disk
 
 const POSITION_SIZE := 39
 const ACK_SIZE := 4

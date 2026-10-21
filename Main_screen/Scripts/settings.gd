@@ -20,7 +20,7 @@ const DEFAULTS := {
 	# How the tracker reaches the app: "udp" (Godot on the tracker board spawns
 	# tracker.py) or "ble" (Godot on a tablet; tracker.py runs on the board and
 	# advertises as ble_device_name). One or the other — tracker.py reads it too.
-	"stream_type": "udp",
+	"stream_type": "ble",
 	"ble_device_name": "NOARK_Tracker",
 	"udp_port": 8000,
 	"display": false,
@@ -90,9 +90,6 @@ func _load() -> void:
 		return
 	# First run.
 	data = DEFAULTS.duplicate()
-	# A tablet cannot run tracker.py, so it can only reach the board over BLE.
-	if OS.get_name() == "Android":
-		data["stream_type"] = "ble"
 	if FileAccess.file_exists(LEGACY_PATH):
 		var legacy = JSON.parse_string(FileAccess.get_file_as_string(LEGACY_PATH))
 		if typeof(legacy) == TYPE_DICTIONARY:

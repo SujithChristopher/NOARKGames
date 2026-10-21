@@ -81,6 +81,14 @@ again and is not applied twice.
 | `0x04` | `STOP` | — | — |
 | `0x05` | `CONFIG` | `key=value` | `key=value` as applied, or why refused |
 | `0x06` | `TRUNK` | `neutral` \| `snapshot` \| `select=<n>` | the command, or why refused |
+| `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
+
+STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
+board's camera recordings: `<patient>/<session>/Video/rec_*` and
+`<patient>/<session>/MovementData/recordings/rec_*` under the data directory,
+`<path>` relative to it. The tracker refuses anything else and the recording
+being written now. Listing and deleting run on a worker thread, so the ACK only
+says the job was taken; each finished job answers with a `STORAGE_LIST`.
 
 CONFIG keys (tracker.py `_apply_setting`): `solver` (joint/ransac), `refine`
 (crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
@@ -102,6 +110,7 @@ same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 | `0x83` | `TRUNK_STATUS` | CSV, below |
 | `0x84` | `SNAPSHOT` | `u16 json_len · json · jpeg` (`trunk/snapshot_packet.py`) |
 | `0x85` | `CHUNK` | `msg_id u8 · index u8 · total u8 · part`, of a message too big for the transport |
+| `0x86` | `STORAGE_LIST` | JSON, below; after each STORAGE job |
 
 **POSITION**, one per frame with a solved pose (no marker in view → none; the
 heartbeat still shows the tracker is alive):
@@ -121,6 +130,11 @@ reason, capture_result, people, locked, q_how, q_rms_mm, q_frac, raw_pts, mask_p
 
 **SNAPSHOT** json: `{"w", "h", "locked", "people": [[[x, y], ...], ...]}` in
 snapshot pixels — the subject picker's image and one outline per person.
+
+**STORAGE_LIST** json: `{"total", "free", "event", "recordings": [{"path",
+"patient", "session", "name", "bytes", "active"}]}` — disk bytes, what the job
+did (`""` for a list, `deleted <path>`, `error: …`), and every recording
+(`active`: being written, cannot be deleted).
 
 ## 6. Tools
 

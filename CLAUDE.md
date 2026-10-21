@@ -247,12 +247,17 @@ for big messages, heartbeats both ways.
 - The tracker is the `noark-tracker` systemd service on the board over **both**
   transports; Godot never starts it, it connects (HELLO) and the session ends on
   STOP or 3 s of silence, the tracker running on. Cameras come up once at boot.
-  `stream_type` in settings.json picks `udp` (Godot on the board) or `ble`
-  (Godot on a tablet); the tracker and Godot each read it, in one place each.
+  `stream_type` in settings.json picks `ble` (the default; Godot on a tablet)
+  or `udp` (Godot on the board), also in the Settings screen; the tracker and Godot each read it, in one place each.
 - Python: `protocol.py` (wire format), `link.py` (acks, chunks, heartbeat,
   liveness), `udp_streamer.py` / `ble_streamer.py` (bytes only). Godot:
   `link_protocol.gd`, `tracker_link.gd`, `udp_transport.gd` / `ble_transport.gd`;
   `GlobalScript.link` is the link, `link_status` drives the status dot.
+- The main menu's **Settings** button opens `settings_panel.gd`: a Tracker tab
+  (settings.json) and a Storage tab (`storage_tab.gd`) that lists and deletes
+  the board's camera recordings through the tracker (STORAGE command,
+  `pyscripts/storage.py`), so it works from a tablet too. Only recordings —
+  never game data, sessions.csv or position CSVs — and never the one in progress.
 - Changing a setting: the Settings panel sends it live as a CONFIG; at every HELLO
   the tracker also re-applies the live keys from its own settings.json. Anything
   else (cameras, `stream_type`, trunk thresholds, `display`) needs

@@ -28,15 +28,19 @@ const SILENCE_S := 3.0         # the tracker sends at least every 0.5 s
 var connected := false
 var _transport: Node
 var _session_id := ""
+## The patient the session is for ("" if none), sent again after a reconnect.
+var session_id: String:
+	get:
+		return _session_id
 var _seq := randi() & 0xFFFF
 var _queue: Array[Dictionary] = []    # {kind, body}
 var _in_flight: Dictionary = {}       # {kind, seq, msg, sent_ms, tries}
 var _last_heard_ms := 0
 var _heartbeat_acc := 0.0
 var _hello_refused_until_ms := 0
-var _chunk_id := -1
-var _chunk_parts: Dictionary = {}
-var _chunk_total := 0
+# msg_id -> {index: part}; two chunked messages (a snapshot and a storage list)
+# can be on the way at once.
+var _chunks: Dictionary = {}
 
 
 func _init(transport: Node) -> void:
@@ -188,20 +192,19 @@ func _on_chunk(msg: PackedByteArray) -> void:
 	if msg.size() < 4:
 		return
 	var id := msg[1]
-	if id != _chunk_id:
-		_chunk_id = id
-		_chunk_total = msg[3]
-		_chunk_parts.clear()
-	_chunk_parts[msg[2]] = msg.slice(4)
-	if _chunk_parts.size() < _chunk_total:
+	var total := msg[3]
+	if msg[2] == 0 or not _chunks.has(id):   # a new message under this id
+		_chunks[id] = {}
+	var parts: Dictionary = _chunks[id]
+	parts[msg[2]] = msg.slice(4)
+	if parts.size() < total:
 		return
 	var whole := PackedByteArray()
-	for i in _chunk_total:
-		if not _chunk_parts.has(i):
+	for i in total:
+		if not parts.has(i):
 			return
-		whole.append_array(_chunk_parts[i])
-	_chunk_id = -1
-	_chunk_parts.clear()
+		whole.append_array(parts[i])
+	_chunks.erase(id)
 	_on_received(whole)
 
 

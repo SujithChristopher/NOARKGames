@@ -1,9 +1,13 @@
 extends CanvasLayer
-## Settings screen for the main scene: a button opens a panel over {DOCUMENTS}/NOARK/settings.json.
-## Edits are saved as they are made. `debug` is not listed on purpose (file-only).
-## Everything but `display` is also sent to the tracker as a CONFIG and applies
-## at once (recording from the next session); `display` needs the tracker
-## restarted (sudo systemctl restart noark-tracker).
+## The main menu's Settings screen; the Settings button calls open().
+##
+## Tracker tab: {DOCUMENTS}/NOARK_demo/settings.json, saved as it is edited.
+## `debug` is not listed on purpose (file-only). The LIVE_KEYS are also sent to
+## the tracker as a CONFIG and apply at once (recording from the next session);
+## the rest need the tracker restarted (sudo systemctl restart noark-tracker).
+## Storage tab: the board's camera recordings (storage_tab.gd).
+
+const StorageTab := preload("res://Main_screen/Scripts/storage_tab.gd")
 
 const LIVE_KEYS := {
 	"tracker_solver": "solver", "tracker_refine": "refine",
@@ -12,54 +16,173 @@ const LIVE_KEYS := {
 	"recording_fps": "recording_fps", "recording_scale": "recording_scale",
 }
 
-# [key, label, kind, options]   kind: "bool" or "choice" (choices are compared as strings)
+# [section title] or [key, label, kind, options]
+# kind: "bool" or "choice" (choices are compared as strings)
 const FIELDS := [
+	["Connection"],
+	["stream_type", "Link to the tracker", "choice", ["ble", "udp"]],
+	["", "Status", "status", []],
+	["Recording"],
 	["recording", "Record camera frames", "bool", []],
 	["recording_fps", "Recording fps", "choice", ["15", "30", "60"]],
 	["recording_scale", "Recording scale", "choice", ["0.25", "0.5", "1"]],
+	["Trunk"],
 	["trunk_enabled", "Trunk tracking", "bool", []],
 	["trunk_method", "Trunk method", "choice", ["icp", "msam_r18", "msam_v3rot"]],
-	["display", "Show tracker window", "bool", []],
+	["Hand tracker"],
 	["tracker_solver", "Pose solver", "choice", ["joint", "ransac"]],
 	["tracker_refine", "Corner refine", "choice", ["contour", "subpix", "crop", "none"]],
 	["tracker_camera", "Cameras", "choice", ["both", "cam0", "cam1"]],
 	["corner_deadband_px", "Corner deadband (px)", "choice", ["0", "0.5", "1", "2"]],
+	["display", "Show tracker window", "bool", []],
 ]
 
-var _panel: PanelContainer
+const MUTED := Color(0.7, 0.72, 0.75)
+const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
+const LINK_STATUS_TEXT := {
+	LinkProtocol.LinkStatus.IDLE: "Not started",
+	LinkProtocol.LinkStatus.SCANNING: "Looking for the tracker...",
+	LinkProtocol.LinkStatus.CONNECTING: "Waiting for the tracker...",
+	LinkProtocol.LinkStatus.CONNECTED: "Connected",
+}
+
+var _tabs: TabContainer
+var _storage: Control
 var _status: Label
+var _link_label: Label
 
 
 func _ready() -> void:
 	layer = 40
-	var open := Button.new()
-	open.text = "Settings"
-	open.focus_mode = Control.FOCUS_NONE
-	open.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	open.position = Vector2(12, 12)
-	open.pressed.connect(func(): _panel.visible = not _panel.visible)
-	add_child(open)
+	visible = false
 
-	_panel = PanelContainer.new()
-	_panel.visible = false
-	_panel.position = Vector2(12, 52)
-	add_child(_panel)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(dim)   # also keeps clicks off the menu underneath
+
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.offset_left = 48
+	panel.offset_top = 28
+	panel.offset_right = -48
+	panel.offset_bottom = -28
+	var theme := Theme.new()
+	theme.default_font_size = 20
+	theme.set_constant("v_separation", "Tree", 10)
+	theme.set_icon("unchecked", "Tree", _box_icon())   # the default vanishes on a dark panel
+	panel.theme = theme
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.11, 0.12, 0.14)
+	bg.set_corner_radius_all(10)
+	panel.add_theme_stylebox_override("panel", bg)
+	add_child(panel)
+
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 12)
-	_panel.add_child(margin)
+		margin.add_theme_constant_override("margin_" + side, 20)
+	panel.add_child(margin)
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 8)
+	col.add_theme_constant_override("separation", 12)
 	margin.add_child(col)
 
+	var header := HBoxContainer.new()
+	col.add_child(header)
 	var title := Label.new()
-	title.text = "Settings  (%s)" % Settings.path
-	col.add_child(title)
+	title.text = "Settings"
+	title.add_theme_font_size_override("font_size", 30)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var close_button := Button.new()
+	close_button.text = "  Close  "
+	close_button.focus_mode = Control.FOCUS_NONE
+	close_button.pressed.connect(close)
+	header.add_child(close_button)
+
+	_tabs = TabContainer.new()
+	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(_tabs)
+	_tabs.add_child(_tracker_tab())
+	_storage = StorageTab.new()
+	_storage.name = "Storage"
+	_tabs.add_child(_storage)
+	_tabs.tab_changed.connect(func(_i: int): _refresh_storage_if_shown())
+
+
+func open() -> void:
+	visible = true
+	_refresh_storage_if_shown()
+
+
+func close() -> void:
+	visible = false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if visible and event.is_action_pressed("ui_cancel"):
+		close()
+		get_viewport().set_input_as_handled()
+
+
+# An empty checkbox: a light 2 px outline, 16 px square, 4 px clear of the text.
+static func _box_icon() -> Texture2D:
+	var size := 16
+	var img := Image.create(size + 4, size, false, Image.FORMAT_RGBA8)
+	var edge := Color(0.85, 0.87, 0.9)
+	for i in size:
+		for w in 2:
+			img.set_pixel(i, w, edge)
+			img.set_pixel(i, size - 1 - w, edge)
+			img.set_pixel(w, i, edge)
+			img.set_pixel(size - 1 - w, i, edge)
+	return ImageTexture.create_from_image(img)
+
+
+func _refresh_storage_if_shown() -> void:
+	if visible and _tabs.get_current_tab_control() == _storage:
+		_storage.refresh()
+
+
+# ── Tracker tab ───────────────────────────────────────────────────────────────
+
+func _tracker_tab() -> Control:
+	var tab := VBoxContainer.new()
+	tab.name = "Tracker"
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	tab.add_child(scroll)
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 8)
+	scroll.add_child(col)
 	for f in FIELDS:
-		col.add_child(_row(f))
+		if f.size() == 1:
+			col.add_child(_section(f[0]))
+		else:
+			col.add_child(_row(f))
+
 	_status = Label.new()
-	_status.text = "Changes are saved automatically."
-	col.add_child(_status)
+	_status.text = "Changes are saved automatically  (%s)" % Settings.path
+	_status.add_theme_color_override("font_color", MUTED)
+	_status.add_theme_font_size_override("font_size", 16)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tab.add_child(_status)
+	return tab
+
+
+func _section(text: String) -> Control:
+	var box := VBoxContainer.new()
+	var spacer := Control.new()
+	spacer.custom_minimum_size.y = 6
+	box.add_child(spacer)
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 22)
+	label.add_theme_color_override("font_color", MUTED)
+	box.add_child(label)
+	box.add_child(HSeparator.new())
+	return box
 
 
 func _row(f: Array) -> HBoxContainer:
@@ -67,9 +190,12 @@ func _row(f: Array) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	var label := Label.new()
 	label.text = f[1]
-	label.custom_minimum_size.x = 240
+	label.custom_minimum_size.x = 320
 	row.add_child(label)
-	if f[2] == "bool":
+	if f[2] == "status":
+		_link_label = Label.new()
+		row.add_child(_link_label)
+	elif f[2] == "bool":
 		var box := CheckButton.new()
 		box.focus_mode = Control.FOCUS_NONE
 		box.button_pressed = bool(Settings.get_value(key, false))
@@ -79,6 +205,7 @@ func _row(f: Array) -> HBoxContainer:
 		var options: Array = f[3]
 		var pick := OptionButton.new()
 		pick.focus_mode = Control.FOCUS_NONE
+		pick.custom_minimum_size.x = 200
 		for o in options:
 			pick.add_item(o)
 		var current := _as_text(Settings.get_value(key, options[0]))
@@ -92,23 +219,38 @@ func _row(f: Array) -> HBoxContainer:
 	return row
 
 
+func _process(_delta: float) -> void:
+	if visible and _link_label:
+		var over := "BLE" if Settings.get_value("stream_type", "ble") == "ble" else "UDP"
+		_link_label.text = "%s  (%s)" % [LINK_STATUS_TEXT.get(GlobalScript.link_status, "?"), over]
+
+
 func _changed(key: String, value: Variant) -> void:
+	if key == "stream_type":
+		Settings.set_value(key, value)
+		if not Settings.save():
+			_status.text = "Could not save settings!"
+			return
+		GlobalScript.restart_link()
+		# The tracker picks its transport once, at start, from its own board's
+		# settings.json — the same file when the app runs on the board.
+		_status.text = "This app now connects over %s. The tracker on the board must match: " % value.to_upper() \
+			+ "set it there and run  sudo systemctl restart noark-tracker"
+		return
 	if key == "trunk_enabled":
 		TrunkMonitor.set_enabled(value)   # saves, and tells the tracker now
 		_status.text = "Saved trunk_enabled = %s (applied now)" % value
 		return
 	Settings.set_value(key, value)
-	var ok := Settings.save()
-	var live := ""
+	if not Settings.save():
+		_status.text = "Could not save settings!"
+		return
+	var live := " (restart the tracker to apply)"
 	if LIVE_KEYS.has(key):
 		var sent := ("on" if value else "off") if value is bool else _as_text(value)
 		GlobalScript.send_tracker_config(LIVE_KEYS[key], sent)
 		live = " (sent to the tracker)"
-	elif not ok:
-		live = ""
-	else:
-		live = " (restart the tracker to apply)"
-	_status.text = ("Saved %s = %s%s" % [key, _as_text(value), live]) if ok else "Could not save settings!"
+	_status.text = "Saved %s = %s%s" % [key, _as_text(value), live]
 
 
 # 1.0 -> "1", 0.5 -> "0.5"; matches how the option lists are written.
@@ -120,6 +262,6 @@ static func _as_text(v: Variant) -> String:
 
 # Keep numbers numeric in the file: the tracker int()/float()s them, but a string would be sloppy.
 static func _typed(key: String, text: String) -> Variant:
-	if key in ["tracker_solver", "tracker_refine", "tracker_camera", "trunk_method"]:
+	if key in ["stream_type", "tracker_solver", "tracker_refine", "tracker_camera", "trunk_method"]:
 		return text
 	return text.to_float() if "." in text else text.to_int()

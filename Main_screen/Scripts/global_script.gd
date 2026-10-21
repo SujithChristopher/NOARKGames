@@ -62,6 +62,11 @@ var _table_y0:    float       = 0.0
 ## transport settings.json `stream_type` picks — the one place that choice is
 ## made (_start_link).
 var link: Node
+var _transport: Node
+## The link's own signals, re-emitted here: restart_link() replaces the link,
+## and whoever listens should not have to connect again.
+signal link_connected_changed(connected: bool)
+signal link_command_done(kind: int, ok: bool, detail: String)
 
 # ── python launcher ───────────────────────────────────────────────────────────
 @onready var interpreter_path: String
@@ -141,26 +146,43 @@ func _ready() -> void:
 
 ## A CONFIG was applied by the tracker ("key=value"); the Tune panel shows it.
 signal tracker_config_applied(text: String)
+## The board's recordings and disk, after a STORAGE command (storage.py):
+## {total, free, event, recordings: [{path, patient, session, name, bytes, active}]}.
+signal storage_listed(info: Dictionary)
 
 
 # The tracker runs on its own (the noark-tracker service on the board); the app
 # connects to it over UDP when they share the board, BLE from a tablet.
 func _start_link() -> void:
-	var transport: Node
-	match Settings.get_value("stream_type", "udp"):
-		"ble":
-			transport = BleTransport.new(Settings.get_value("ble_device_name", "NOARK_Tracker"), debug)
-		var other:
-			if other != "udp":
-				push_error("Unknown stream_type '%s' — using UDP" % other)
-			transport = UdpTransport.new(Settings.get_value("udp_host", "127.0.0.1"),
+	match Settings.get_value("stream_type", "ble"):
+		"udp":
+			_transport = UdpTransport.new(Settings.get_value("udp_host", "127.0.0.1"),
 				int(Settings.get_value("udp_port", 8000)))
-	add_child(transport)
-	link = TrackerLink.new(transport)
+		var other:
+			if other != "ble":
+				push_error("Unknown stream_type '%s' — using BLE" % other)
+			_transport = BleTransport.new(Settings.get_value("ble_device_name", "NOARK_Tracker"), debug)
+	add_child(_transport)
+	link = TrackerLink.new(_transport)
 	add_child(link)
 	link.message.connect(_on_tracker_message)
 	link.command_done.connect(_on_command_done)
-	transport.start()
+	link.command_done.connect(link_command_done.emit)
+	link.connected_changed.connect(link_connected_changed.emit)
+	_transport.start()
+
+
+## stream_type changed (Settings): end this link — and its session at the
+## tracker — and connect again over the transport settings.json now names.
+func restart_link() -> void:
+	var session_id: String = link.session_id
+	link.stop_now()
+	link.close()
+	link.queue_free()
+	_transport.queue_free()
+	_start_link()
+	if not session_id.is_empty():
+		link.set_session(session_id)
 
 
 func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
@@ -175,6 +197,12 @@ func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
 			TrunkMonitor.on_packet(LinkProtocol.payload_text(msg))
 		LinkProtocol.SNAPSHOT:
 			TrunkMonitor.on_snapshot(msg.slice(1))
+		LinkProtocol.STORAGE_LIST:
+			var info = JSON.parse_string(LinkProtocol.payload_text(msg))
+			if info is Dictionary:
+				storage_listed.emit(info)
+			else:
+				push_error("[LINK] Unreadable STORAGE_LIST")
 		_:
 			push_warning("[LINK] Unexpected message type 0x%02x" % kind)
 
@@ -333,6 +361,12 @@ func send_tracker_config(key: String, value: String) -> void:
 # Trunk commands (TrunkMonitor): "neutral", "snapshot", "select=<n>".
 func send_trunk_command(arg: String) -> void:
 	link.send_command(LinkProtocol.TRUNK, arg)
+
+
+# The board's recordings (Settings > Storage): "list", "delete=<path>". Each
+# answer comes as storage_listed; a refused one as link.command_done.
+func send_storage_command(arg: String) -> void:
+	link.send_command(LinkProtocol.STORAGE, arg)
 
 
 # ── process ───────────────────────────────────────────────────────────────────

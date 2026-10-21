@@ -18,7 +18,8 @@ SESSION = 0x03        # patient id
 STOP = 0x04
 CONFIG = 0x05         # "key=value"
 TRUNK = 0x06          # "neutral" | "snapshot" | "select=<n>"
-RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK})
+STORAGE = 0x07        # "list" | "delete=<path>"; answered later by STORAGE_LIST
+RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE})
 
 # Tracker -> app
 TRACKER_HEARTBEAT = 0x80
@@ -27,6 +28,7 @@ ACK = 0x82            # seq u16, ok u8, detail
 TRUNK_STATUS = 0x83   # CSV
 SNAPSHOT = 0x84       # u16 json_len, json, jpeg
 CHUNK = 0x85          # msg_id u8, index u8, total u8, part of another message
+STORAGE_LIST = 0x86   # JSON: the board's recordings and disk (storage.py)
 
 _SEQ = struct.Struct("<H")
 _ACK = struct.Struct("<BHB")

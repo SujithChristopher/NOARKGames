@@ -25,6 +25,7 @@ from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
 from link import Link
+from storage import Storage
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
 from stereo_capture import StereoCapture
 from trunk.snapshot_packet import encode_snapshot
@@ -153,6 +154,7 @@ def _pin_to_cpus(spec) -> None:
 # Where Godot's Settings autoload keeps the file (Linux/Windows/macOS; on Android the
 # tracker does not run). Godot passes the exact path with --settings.
 DEFAULT_SETTINGS_PATH = Path.home() / "Documents" / "NOARK_demo" / "settings.json"
+DATA_ROOT = Path.home() / "Documents" / "NOARK_demo" / "data"
 
 
 def _load_settings(path: Path = DEFAULT_SETTINGS_PATH) -> dict:
@@ -336,10 +338,10 @@ class TrackerClass:
         # board, "ble" when it runs on a tablet. Either way the tracker is the
         # long-running side (the noark-tracker service) and the app connects to
         # it. Godot reads the same key (its own settings.json) to pick its side.
-        self.stream_type       = settings.get("stream_type", "udp")
+        self.stream_type       = settings.get("stream_type", "ble")
         if self.stream_type not in ("udp", "ble"):
-            print(f"[NET] Unknown stream_type {self.stream_type!r}, using udp.")
-            self.stream_type = "udp"
+            print(f"[NET] Unknown stream_type {self.stream_type!r}, using ble.")
+            self.stream_type = "ble"
         self.ble_device_name   = settings.get("ble_device_name", "NOARK_Tracker")
         self.display           = settings.get(
             "display", ac.get("display", {}).get("display", False)
@@ -485,6 +487,9 @@ class TrackerClass:
         self._sync_chip = settings.get("sync_chip", "gpiochip4")
         self._sync_pin = settings.get("sync_pin", "PIN_11")
         self._rec_file0 = self._rec_file1 = None
+        self._rec_dir: Optional[Path] = None
+        # Settings > Storage in the app: list / delete recordings, off the loop.
+        self.storage = Storage(DATA_ROOT, self._recording_dirs)
         self._ts_file0  = self._ts_file1  = None
 
         self._curr_session = os.path.join(
@@ -625,6 +630,7 @@ class TrackerClass:
     def _open_rec_files(self, base_path: str) -> None:
         rec_dir = Path(base_path) / "recordings" / datetime.now().strftime("rec_%H-%M-%S")
         rec_dir.mkdir(parents=True, exist_ok=True)
+        self._rec_dir = rec_dir
 
         metadata = {
             "patient_id":   self._hid,
@@ -696,6 +702,8 @@ class TrackerClass:
             return self._apply_config(body)
         if kind == protocol.TRUNK:
             return self._trunk_command(body)
+        if kind == protocol.STORAGE:
+            return self.storage.command(body.decode(errors="replace").strip())
         if kind == protocol.SESSION:
             hid = body.decode(errors="replace").strip()
             if not hid:
@@ -992,11 +1000,7 @@ class TrackerClass:
             print(f"[SESSION] Patient {self._hid} -> {hid}")
             self._close_session()
         self._hid = hid
-        self.save_path = os.path.join(
-            os.path.expanduser("~/Documents/NOARK_demo/data"),
-            self._hid,
-            self._curr_session,
-        )
+        self.save_path = os.path.join(DATA_ROOT, self._hid, self._curr_session)
         os.makedirs(self.save_path, exist_ok=True)
         csv_path = os.path.join(
             self.save_path,
@@ -1054,6 +1058,13 @@ class TrackerClass:
             scale=self.recording_scale,
         )
 
+    def _recording_dirs(self) -> list:
+        """The recordings being written now, which Storage must not delete."""
+        dirs = [self.recorder.out_dir] if self.recorder is not None else []
+        if self._rec_file0 is not None:
+            dirs.append(self._rec_dir)
+        return dirs
+
     def _stop_session_recording(self) -> None:
         if self.recorder is not None:
             self.recorder.close()
@@ -1107,6 +1118,9 @@ class TrackerClass:
         # to be in view (recording exists for exactly the frames that fail).
         self.link.poll(self._on_message)
         self.link.tick()
+        storage_list = self.storage.poll()
+        if storage_list and self.link.connected:
+            self.link.send(storage_list)
 
         if self.trunk is not None and self.trunk_on:
             self._send_trunk()
