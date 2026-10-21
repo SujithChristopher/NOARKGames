@@ -125,7 +125,8 @@ heartbeat still shows the tracker is alive):
 
 **TRUNK_STATUS** fields, in order:
 `state, level, lvl_flex, lvl_lat, lvl_axi, flex, lat, axi, progress, has_neutral,
-reason, capture_result, people, locked, q_how, q_rms_mm, q_frac, raw_pts, mask_px, held`
+reason, capture_result, people, locked, q_how, q_rms_mm, q_frac, raw_pts, mask_px, held,
+hz, method` (hz: trunk updates per second; method: icp / msam_r18 / msam_v3rot)
 (`TrunkStatus` in `pyscripts/trunk/tracker.py`; `trunk_monitor.gd`).
 
 **SNAPSHOT** json: `{"w", "h", "locked", "people": [[[x, y], ...], ...]}` in

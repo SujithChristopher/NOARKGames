@@ -217,7 +217,7 @@ neutral cloud → flexion / lateral / axial and a state machine
   upright). Auto tries the other way when no torso is found; masks are rotated back,
   so the stereo geometry never sees the rotation.
 - Godot → tracker TRUNK `neutral` (the game menus' "Capture neutral posture");
-  tracker → Godot TRUNK_STATUS `state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held`.
+  tracker → Godot TRUNK_STATUS `state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,hz,method`.
   The last six are *this frame's* quality (how it fit or why it did not, ICP residual, matched
   share, shell points, mask area, whether the angles are held from the last good frame). Random
   Reach writes them to its raw CSV (`trunk_how` … `trunk_held`) and the tracker prints a journal
@@ -253,8 +253,8 @@ for big messages, heartbeats both ways.
   liveness), `udp_streamer.py` / `ble_streamer.py` (bytes only). Godot:
   `link_protocol.gd`, `tracker_link.gd`, `udp_transport.gd` / `ble_transport.gd`;
   `GlobalScript.link` is the link, `link_status` drives the status dot.
-- The main menu's **Settings** button opens `settings_panel.gd`: a Tracker tab
-  (settings.json) and a Storage tab (`storage_tab.gd`) that lists and deletes
+- The main menu's **Settings** button opens its own scene (`Main_screen/Scenes/settings_screen.tscn`,
+  `settings_screen.gd`): a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live) and a Storage tab (`storage_tab.gd`) that lists and deletes
   the board's camera recordings through the tracker (STORAGE command,
   `pyscripts/storage.py`), so it works from a tablet too. Only recordings —
   never game data, sessions.csv or position CSVs — and never the one in progress.

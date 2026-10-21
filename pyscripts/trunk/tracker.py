@@ -143,7 +143,8 @@ class TrunkStatus:
     mask_px: int = 0                      # torso mask area (working-size pixels)
     held: bool = False                    # angles are the last good ones, not this frame's
     seq: int = 0
-    hz: float = 0.0
+    hz: float = 0.0                       # trunk updates per second, last 2 s
+    method: str = ""                      # icp / msam_r18 / msam_v3rot, what measured it
     timing_ms: dict = field(default_factory=dict)
 
     @property
@@ -322,7 +323,7 @@ class TrunkEngine:
 
         if start_capture:
             self._capture = (now, [], [], 0)
-        st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, timing_ms=timing,
+        st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, method=self.method, timing_ms=timing,
                          people=self._people, locked=self._lock_mask is not None,
                          raw_pts=self._q[0], mask_px=self._q[1])
         if self._capture is not None and self._capture_step(now, cloud, bad, st):

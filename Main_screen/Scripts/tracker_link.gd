@@ -211,9 +211,17 @@ func _on_chunk(msg: PackedByteArray) -> void:
 func _lost(why: String) -> void:
 	if connected:
 		print("[LINK] Lost the tracker: %s" % why)
+	# Whoever waits on a command hears that it will not be answered.
+	var dropped: Array[int] = []
+	if not _in_flight.is_empty() and _in_flight.kind != LinkProtocol.HELLO:
+		dropped.append(_in_flight.kind)
+	for c in _queue:
+		dropped.append(c.kind)
 	_in_flight = {}
 	_queue.clear()
 	_set_connected(false)
+	for kind in dropped:
+		command_done.emit(kind, false, "link lost")
 
 
 func _set_connected(on: bool) -> void:

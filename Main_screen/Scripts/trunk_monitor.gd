@@ -45,6 +45,15 @@ var q_frac := NAN                   # share of the cloud that matched
 var raw_pts := 0                    # shell points before the cloud cap
 var mask_px := 0                    # torso mask area
 var held := false                   # angles are the last good ones, not this frame's
+var hz := 0.0                       # trunk updates per second, measured by the tracker
+var method := ""                    # what measures it: icp / msam_r18 / msam_v3rot
+
+## How each trunk_method is shown (Settings, the Trunk angles screen).
+const METHOD_NAMES := {
+	"icp": "ICP (stereo point cloud)",
+	"msam_r18": "minisam3d r18 (v3mix)",
+	"msam_v3rot": "minisam3d v3rot (older)",
+}
 var _last_packet_ms := -100000
 
 var _beep: AudioStreamPlayer
@@ -140,6 +149,9 @@ func on_packet(text: String) -> void:
 		raw_pts = int(f[17])
 		mask_px = int(f[18])
 		held = f[19] == "1"
+	if f.size() >= 22:
+		hz = float(f[20])
+		method = f[21]
 	if new_state != state:
 		state = new_state
 		state_changed.emit(state)

@@ -580,7 +580,8 @@ class TrackerClass:
     def _send_trunk(self) -> None:
         """One TRUNK_STATUS per trunk update, CSV:
         state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-        reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
+        reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,
+        hz,method
         (trunk/tracker.py has the states and levels.)
         """
         st = self.trunk.status()
@@ -595,7 +596,7 @@ class TrackerClass:
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
             f"{st.reason},{st.capture_result},{st.people},{int(st.locked)},"
             f"{st.q_how},{st.q_rms_mm:.1f},{st.q_frac:.2f},{st.raw_pts},{st.mask_px},"
-            f"{int(st.held)}"))
+            f"{int(st.held)},{st.hz:.1f},{st.method}"))
         # One journal line whenever the state, level or this frame's outcome
         # changes, with the quality numbers: why a reading was bad (a shrunk
         # mask or cloud, a poor fit) is not visible from the angles alone.

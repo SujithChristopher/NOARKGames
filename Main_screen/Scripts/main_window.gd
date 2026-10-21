@@ -190,6 +190,10 @@ func _on_new_patient_pressed() -> void:
     id_edit.grab_focus()
 
 
+func _on_settings_pressed() -> void:
+    get_tree().change_scene_to_file("res://Main_screen/Scenes/settings_screen.tscn")
+
+
 func _on_define_table_pressed() -> void:
     var overlay: Control = load("res://Main_screen/Scripts/table_overlay.gd").new()
     var layer := CanvasLayer.new()

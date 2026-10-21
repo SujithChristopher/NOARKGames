@@ -145,6 +145,8 @@ func _on_command_done(kind: int, ok: bool, detail: String) -> void:
 	if kind != LinkProtocol.STORAGE or ok:
 		return
 	_refresh_button.disabled = false
+	if detail == "link lost":   # _on_connected_changed says so, and lists again on reconnect
+		return
 	if detail == "no answer":   # whether any of them happened is unknown
 		_pending.clear()
 		_batch = {"count": 0, "bytes": 0.0, "errors": []}
@@ -167,6 +169,7 @@ func _on_connected_changed(connected: bool) -> void:
 
 
 func _show_offline() -> void:
+	_refresh_button.disabled = false
 	_recordings = []
 	_build_tree()
 	_show_disk({})

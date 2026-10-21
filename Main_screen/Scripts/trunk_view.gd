@@ -18,6 +18,7 @@ var _graph: Control
 var _values: Array[Label] = []
 var _status: Label
 var _result: Label
+var _source: Label   # which method measures it, and how often
 var _capture: Button
 
 
@@ -83,6 +84,9 @@ func _build() -> void:
 	text.add_child(_status)
 	_result = _label("", 18)
 	text.add_child(_result)
+	_source = _label("", 16)
+	_source.modulate = Color(1, 1, 1, 0.6)
+	text.add_child(_source)
 	_capture = _button("Capture neutral posture")
 	_capture.pressed.connect(_on_capture_pressed)
 	bottom.add_child(_capture)
@@ -136,6 +140,7 @@ func _refresh_text() -> void:
 		_values[i].text = "%s %s" % [NAMES[i], "%+.1f°" % TrunkMonitor.angles[i] if tracking else "--"]
 		_values[i].modulate = LEVEL_COLORS[TrunkMonitor.levels[i]] if tracking else Color(1, 1, 1, 0.5)
 	_status.text = TrunkMonitor.status_text()
+	_source.text = "" if not TrunkMonitor.available() or TrunkMonitor.method.is_empty() else 		"%s  ·  %.1f fps" % [TrunkMonitor.METHOD_NAMES.get(TrunkMonitor.method, TrunkMonitor.method), TrunkMonitor.hz]
 	_capture.disabled = not TrunkMonitor.available() or TrunkMonitor.state == TrunkMonitor.CAPTURING
 	if TrunkMonitor.state == TrunkMonitor.CAPTURING:
 		return

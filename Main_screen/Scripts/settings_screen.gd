@@ -1,5 +1,6 @@
-extends CanvasLayer
-## The main menu's Settings screen; the Settings button calls open().
+extends Control
+## The Settings scene (settings_screen.tscn), from the main menu's Settings
+## button; Back (or Esc) returns to the main menu.
 ##
 ## Tracker tab: {DOCUMENTS}/NOARK_demo/settings.json, saved as it is edited.
 ## `debug` is not listed on purpose (file-only). The LIVE_KEYS are also sent to
@@ -8,6 +9,7 @@ extends CanvasLayer
 ## Storage tab: the board's camera recordings (storage_tab.gd).
 
 const StorageTab := preload("res://Main_screen/Scripts/storage_tab.gd")
+const TrunkMonitorScript := preload("res://Main_screen/Scripts/trunk_monitor.gd")
 
 const LIVE_KEYS := {
 	"tracker_solver": "solver", "tracker_refine": "refine",
@@ -16,11 +18,12 @@ const LIVE_KEYS := {
 	"recording_fps": "recording_fps", "recording_scale": "recording_scale",
 }
 
-# [section title] or [key, label, kind, options]
-# kind: "bool" or "choice" (choices are compared as strings)
+# [section title] or [key, label, kind, options, (shown names)]
+# kind: "bool", "choice" (choices are compared as strings) or "status" (the link)
 const FIELDS := [
 	["Connection"],
-	["stream_type", "Link to the tracker", "choice", ["ble", "udp"]],
+	["stream_type", "Link to the tracker", "choice", ["ble", "udp"],
+		{"ble": "BLE (app on a tablet)", "udp": "UDP (app on the board)"}],
 	["", "Status", "status", []],
 	["Recording"],
 	["recording", "Record camera frames", "bool", []],
@@ -28,7 +31,7 @@ const FIELDS := [
 	["recording_scale", "Recording scale", "choice", ["0.25", "0.5", "1"]],
 	["Trunk"],
 	["trunk_enabled", "Trunk tracking", "bool", []],
-	["trunk_method", "Trunk method", "choice", ["icp", "msam_r18", "msam_v3rot"]],
+	["trunk_method", "Trunk method", "choice", ["msam_r18", "msam_v3rot", "icp"], TrunkMonitorScript.METHOD_NAMES],
 	["Hand tracker"],
 	["tracker_solver", "Pose solver", "choice", ["joint", "ransac"]],
 	["tracker_refine", "Corner refine", "choice", ["contour", "subpix", "crop", "none"]],
@@ -38,6 +41,7 @@ const FIELDS := [
 ]
 
 const MUTED := Color(0.7, 0.72, 0.75)
+const MENU := "res://Main_screen/Scenes/main.tscn"
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 const LINK_STATUS_TEXT := {
 	LinkProtocol.LinkStatus.IDLE: "Not started",
@@ -53,51 +57,40 @@ var _link_label: Label
 
 
 func _ready() -> void:
-	layer = 40
-	visible = false
-
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.6)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)   # also keeps clicks off the menu underneath
-
-	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	panel.offset_left = 48
-	panel.offset_top = 28
-	panel.offset_right = -48
-	panel.offset_bottom = -28
+	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var theme := Theme.new()
 	theme.default_font_size = 20
 	theme.set_constant("v_separation", "Tree", 10)
-	theme.set_icon("unchecked", "Tree", _box_icon())   # the default vanishes on a dark panel
-	panel.theme = theme
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.11, 0.12, 0.14)
-	bg.set_corner_radius_all(10)
-	panel.add_theme_stylebox_override("panel", bg)
-	add_child(panel)
+	theme.set_icon("unchecked", "Tree", _box_icon())   # the default vanishes on a dark background
+	self.theme = theme
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.11, 0.12, 0.14)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
 
 	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 20)
-	panel.add_child(margin)
+		margin.add_theme_constant_override("margin_" + side, 24)
+	add_child(margin)
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 12)
 	margin.add_child(col)
 
 	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 20)
 	col.add_child(header)
+	var back := Button.new()
+	back.text = "  ⬅ Back  "
+	back.focus_mode = Control.FOCUS_NONE
+	back.custom_minimum_size.y = 48
+	back.pressed.connect(_back)
+	header.add_child(back)
 	var title := Label.new()
 	title.text = "Settings"
 	title.add_theme_font_size_override("font_size", 30)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
-	var close_button := Button.new()
-	close_button.text = "  Close  "
-	close_button.focus_mode = Control.FOCUS_NONE
-	close_button.pressed.connect(close)
-	header.add_child(close_button)
 
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -109,19 +102,14 @@ func _ready() -> void:
 	_tabs.tab_changed.connect(func(_i: int): _refresh_storage_if_shown())
 
 
-func open() -> void:
-	visible = true
-	_refresh_storage_if_shown()
-
-
-func close() -> void:
-	visible = false
+func _back() -> void:
+	get_tree().change_scene_to_file(MENU)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if visible and event.is_action_pressed("ui_cancel"):
-		close()
+	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
+		_back()
 
 
 # An empty checkbox: a light 2 px outline, 16 px square, 4 px clear of the text.
@@ -139,7 +127,7 @@ static func _box_icon() -> Texture2D:
 
 
 func _refresh_storage_if_shown() -> void:
-	if visible and _tabs.get_current_tab_control() == _storage:
+	if _tabs.get_current_tab_control() == _storage:
 		_storage.refresh()
 
 
@@ -202,25 +190,27 @@ func _row(f: Array) -> HBoxContainer:
 		box.toggled.connect(func(on: bool): _changed(key, on))
 		row.add_child(box)
 	else:
-		var options: Array = f[3]
+		var options: Array = f[3].duplicate()
+		var names: Dictionary = f[4] if f.size() > 4 else {}
 		var pick := OptionButton.new()
 		pick.focus_mode = Control.FOCUS_NONE
 		pick.custom_minimum_size.x = 200
 		for o in options:
-			pick.add_item(o)
+			pick.add_item(names.get(o, o))
 		var current := _as_text(Settings.get_value(key, options[0]))
 		var idx := options.find(current)
 		if idx < 0:   # a value edited into the file that the list doesn't offer
+			options.append(current)
 			pick.add_item(current)
 			idx = pick.item_count - 1
 		pick.select(idx)
-		pick.item_selected.connect(func(i: int): _changed(key, _typed(key, pick.get_item_text(i))))
+		pick.item_selected.connect(func(i: int): _changed(key, _typed(key, options[i])))
 		row.add_child(pick)
 	return row
 
 
 func _process(_delta: float) -> void:
-	if visible and _link_label:
+	if _link_label:
 		var over := "BLE" if Settings.get_value("stream_type", "ble") == "ble" else "UDP"
 		_link_label.text = "%s  (%s)" % [LINK_STATUS_TEXT.get(GlobalScript.link_status, "?"), over]
 
