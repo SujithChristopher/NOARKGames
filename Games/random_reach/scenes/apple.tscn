@@ -90,8 +90,8 @@ autoplay = "apple"
 shape = SubResource("CircleShape2D_2d0uy")
 
 [node name="Timer" type="Timer" parent="."]
-wait_time = 10.0
-autostart = true
+wait_time = 5.0
+one_shot = true
 
 [node name="TimerCircle" type="ColorRect" parent="."]
 material = SubResource("ShaderMaterial_buuis")
@@ -101,6 +101,6 @@ offset_right = 30.0
 offset_bottom = 30.0
 color = Color(0, 0.78303975, 0.783078, 0.08627451)
 
-[connection signal="area_entered" from="." to="." method="_on_area_entered"]
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="body_exited" from="." to="." method="_on_body_exited"]
 [connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]

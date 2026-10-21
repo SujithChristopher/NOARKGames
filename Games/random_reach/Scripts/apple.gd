@@ -12,7 +12,9 @@ var player_node = null
 var apple_lifetime = 0.0
 
 const COLLECTION_TIME = 1.0
-const TIMER_DURATION = 10.0
+const TIMER_DURATION = 5.0
+var black_sheep: AnimatedSprite2D
+var flock: Node2D
 
 # Breathing variables
 var breath_time = 0.0
@@ -76,14 +78,17 @@ func _process(delta):
 	
 	# Update apple lifetime and progress bar
 	apple_lifetime += delta
-	var time_left = TIMER_DURATION - apple_lifetime
+	var time_left = get_time_left()
 	progress_bar.value = time_left
+	if time_left <= 0.0:
+		_on_timer_timeout()
+		return
 	
 	# Change color based on time (green -> yellow -> red)
 	var stylebox = progress_bar.get_theme_stylebox("fill")
-	if time_left > 6:
+	if time_left > TIMER_DURATION * 0.6:
 		stylebox.bg_color = Color(0, 1, 0)  # Green
-	elif time_left > 3:
+	elif time_left > TIMER_DURATION * 0.3:
 		stylebox.bg_color = Color(1, 1, 0)  # Yellow
 	else:
 		stylebox.bg_color = Color(1, 0, 0)  # Red
@@ -125,6 +130,7 @@ func _eat_apple():
 		return
 	
 	is_eaten = true
+	$Timer.stop()
 	
 	if timer_circle:
 		timer_circle.visible = false
@@ -141,8 +147,8 @@ func _eat_apple():
 	apple_eaten.emit()
 	
 	if anim:
-		anim.animation = "collected"
-		await anim.animation_finished
+		tween.parallel().tween_property(anim, "scale", Vector2.ZERO, 0.35)
+	await tween.finished
 	
 	queue_free()
 
@@ -155,6 +161,29 @@ func _on_body_exited(body: Node2D):
 		player_node = null
 
 func _on_timer_timeout():
-	if not is_eaten:
-		apple_missed.emit()
+	if is_eaten:
+		return
+	# Reserve the apple immediately; the resident sheep cannot award a player point.
+	is_eaten = true
+	$Timer.stop()
+	timer_circle.hide()
+	progress_bar.hide()
+	apple_missed.emit()
+	score_label.text = "Apple missed"
+	score_label.position = Vector2(-55, -65)
+	score_label.show()
+	if is_instance_valid(flock):
+		black_sheep = flock.claim_apple(self)
+	if not is_instance_valid(black_sheep):
 		queue_free()
+
+func eat_by_black_sheep() -> void:
+	score_label.text = "Black sheep's snack!"
+	score_label.position.x = -130.0
+	var snack := create_tween()
+	snack.tween_property(anim, "scale", Vector2.ZERO, 0.35)
+	snack.tween_interval(0.3)
+	snack.tween_callback(queue_free)
+
+func get_time_left() -> float:
+	return maxf(TIMER_DURATION - apple_lifetime, 0.0)

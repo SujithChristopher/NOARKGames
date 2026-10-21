@@ -82,6 +82,7 @@ var rom_y_bot: int
 
 # Preloaded resources
 var apple = preload("res://Games/random_reach/scenes/apple.tscn")
+var _flock: Node2D
 
 # Trunk compensation (TrunkMonitor): play pauses while the trunk is past the
 # compensation threshold and resumes once it has been back under the warning
@@ -98,8 +99,11 @@ var path = "res://debug.json"
 var debug
 
 func _ready() -> void:
+	z_index = 2
 	get_parent().add_child.call_deferred(preload("res://Games/random_reach/Scripts/tuning_panel.gd").new())
 	_load_debug_config()
+	if debug:
+		patient_id = "vvv"
 	_setup_training_hand()
 	_setup_timers()
 	_setup_ui()
@@ -107,6 +111,9 @@ func _ready() -> void:
 	_initialize_game_state()
 	_auto_select_mode()  # Must be called BEFORE _update_top_score_display() to set correct game_name
 	_update_top_score_display()
+	_flock = preload("res://Games/random_reach/Scripts/sheep_flock.gd").new()
+	_flock.player = self
+	get_parent().add_child.call_deferred(_flock)
 	_setup_global_timer()
 	_trunk_feedback = preload("res://Main_screen/Scripts/trunk_feedback.gd").new()
 	get_parent().add_child.call_deferred(_trunk_feedback)
@@ -127,7 +134,15 @@ func _auto_select_mode() -> void:
 		_set_2d_mode()
 
 func _load_debug_config() -> void:
-	debug = JSON.parse_string(FileAccess.get_file_as_string(path))['debug']
+	# Older installations use debug.json; newer ones use the saved Settings file.
+	# Use the same effective flag for mouse input, spawning and session logging.
+	var legacy_config = JSON.parse_string(FileAccess.get_file_as_string(path)) \
+		if FileAccess.file_exists(path) else null
+	var legacy_debug := false
+	if legacy_config is Dictionary:
+		legacy_debug = legacy_config.get("debug", false) == true
+	debug_mode = DebugSettings.debug_mode or legacy_debug
+	debug = debug_mode
 
 func _setup_training_hand() -> void:
 	var training_hand = GlobalSignals.selected_training_hand
@@ -243,11 +258,7 @@ func _update_sprite_direction() -> void:
 		var direction = current_apple.position.x - position.x
 		_sprite_nodes.anim.flip_h = direction < 0
 
-	# Control animation based on Y position
-	if position.y == 600:
-		_sprite_nodes.anim.animation = "no_jet"
-	else:
-		_sprite_nodes.anim.animation = "jet"
+	_sprite_nodes.anim.play(&"no_jet" if position.y == MAX_BOUNDS.y else &"jet")
 
 func _handle_apple_spawning() -> void:
 	if current_apple == null and (debug_mode or network_position != Vector2.ZERO):
@@ -256,17 +267,19 @@ func _handle_apple_spawning() -> void:
 func _spawn_new_apple() -> void:
 	_timer_nodes.my_timer.start()
 	current_apple = apple.instantiate()
+	current_apple.flock = _flock
 	add_child(current_apple)
 	current_apple.top_level = true
 	status = ""
 
 	# Connect apple signals
 	current_apple.apple_eaten.connect(_on_apple_eaten)
-	current_apple.apple_missed.connect(SessionLog.miss)
+	current_apple.apple_missed.connect(_on_apple_missed)
 	current_apple.tree_exited.connect(_on_apple_removed)
 
 	# Set apple position
 	_set_apple_position()
+	_flock.watch_apple(current_apple)
 
 func _set_apple_position() -> void:
 	var apple_position := Vector2(randi_range(200, 900), randi_range(200, 600))
@@ -287,7 +300,7 @@ func _update_target_position(apple_position: Vector2) -> void:
 
 func _update_timer_display() -> void:
 	if current_apple != null:
-		var remaining_time = round(_timer_nodes.my_timer.time_left)
+		var remaining_time = ceili(current_apple.get_time_left())
 		_ui_nodes.time_display.text = str(remaining_time) + "s"
 
 		if remaining_time > 0:
@@ -338,6 +351,8 @@ func _trunk_resume() -> void:
 ## Stop the target's own countdown and its eating timer while play is paused.
 func _freeze_targets(frozen: bool) -> void:
 	_timer_nodes.my_timer.paused = frozen
+	if is_instance_valid(_flock):
+		_flock.process_mode = Node.PROCESS_MODE_DISABLED if frozen else Node.PROCESS_MODE_INHERIT
 	if current_apple != null:
 		current_apple.process_mode = Node.PROCESS_MODE_DISABLED if frozen \
 			else Node.PROCESS_MODE_INHERIT
@@ -354,6 +369,7 @@ func _pause_game() -> void:
 	GlobalTimerManager.pause_countdown()
 	game_started = false
 	pause_state = 0
+	_freeze_targets(true)
 
 func _resume_game() -> void:
 	GlobalTimer.resume_timer()
@@ -363,6 +379,7 @@ func _resume_game() -> void:
 	pause_state = 1
 
 func show_game_over() -> void:
+	_freeze_targets(true)
 	MusicManager.play_sound_effect("game_over")
 	var top_score = ScoreManager.get_top_score(patient_id, game_name)
 	_ui_nodes.highscore.text = str(top_score)
@@ -380,6 +397,10 @@ func _on_logout_button_pressed() -> void:
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
 
 func _on_retry_button_pressed() -> void:
+	_flock.reset()
+	if is_instance_valid(current_apple):
+		current_apple.queue_free()
+		current_apple = null
 	get_tree().paused = false
 	_ui_nodes.color_rect.visible = false
 	_ui_nodes.game_over_label.hide()
@@ -399,10 +420,16 @@ func save_final_score_to_log(score: int) -> void:
 		game_log_file.flush()
 
 func _setup_game_logging() -> void:
-	log_timer.timeout.connect(_on_log_timer_timeout)
+	# Mouse testing must not create or upload a patient therapy session.
+	if debug:
+		return
+	if not log_timer.timeout.is_connected(_on_log_timer_timeout):
+		log_timer.timeout.connect(_on_log_timer_timeout)
 
 	# Use the updated game_name variable
-	game_log_file = Manager.create_game_log_file(game_name, GlobalSignals.current_patient_id)
+	game_log_file = Manager.create_game_log_file(game_name, patient_id)
+	if game_log_file == null:
+		return
 	game_log_file.store_csv_line(PackedStringArray([
 		'epochtime', 'score', 'status', 'error_status', 'packets',
 		'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
@@ -440,6 +467,10 @@ func _on_reach_game_ready() -> void:
 func _on_apple_removed() -> void:
 	current_apple = null
 
+func _on_apple_missed() -> void:
+	status = "missed"
+	SessionLog.miss()
+
 func _on_apple_eaten() -> void:
 	if _trunk_compensating():
 		# Reached by leaning, not by the arm: no score.
@@ -463,11 +494,10 @@ func _notification(what) -> void:
 		GlobalTimerManager.remove_timer_selector_from_game()
 
 func _on_area_2d_area_entered(area) -> void:
-	_sprite_nodes.anim.animation = "jet"
-	await _sprite_nodes.anim.animation_finished
+	_sprite_nodes.anim.play(&"jet")
 
 func _on_area_2d_area_exited(area) -> void:
-	_sprite_nodes.anim.animation = "jet"
+	_sprite_nodes.anim.play(&"jet")
 
 func _on_zero_pressed() -> void:
 	zero_offset = network_position
