@@ -36,7 +36,7 @@ var angles := Vector3.ZERO          # flexion, lateral, axial (degrees)
 var progress := 0.0                 # neutral capture, 0..1
 var has_neutral := false
 var reason := ""                    # why OCCLUDED
-var capture_result := ""            # "", "ok", "moving", "not_visible"
+var capture_result := ""            # "", "ok", "moving", "not_visible", "away"
 var people := 0                     # torsos the tracker sees
 var locked := false                 # following a picked person
 var q_how := ""                     # this frame: direct/odometry/failed/gated/no_torso/...
@@ -47,6 +47,7 @@ var mask_px := 0                    # torso mask area
 var held := false                   # angles are the last good ones, not this frame's
 var hz := 0.0                       # trunk updates per second, measured by the tracker
 var method := ""                    # what measures it: icp / msam_r18 / msam_v3rot
+var doubt := ""                     # used but less trusted: "low_conf" / "arm_over_chest"
 
 ## How each trunk_method is shown (Settings, the Trunk angles screen).
 const METHOD_NAMES := {
@@ -152,6 +153,7 @@ func on_packet(text: String) -> void:
 	if f.size() >= 22:
 		hz = float(f[20])
 		method = f[21]
+	doubt = f[22] if f.size() >= 23 else ""
 	if new_state != state:
 		state = new_state
 		state_changed.emit(state)

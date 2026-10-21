@@ -519,6 +519,9 @@ class TrackerClass:
         self._trunk_sent_seq = -1
         self._trunk_logged = None
         self._trunk_settings = settings
+        self._trunk_csv = None
+        if settings.get("trunk_debug"):
+            self._open_trunk_csv()
         # Live switch (CONFIG trunk=on|off): off stops feeding and reporting the
         # trunk process; on after a start with it disabled loads it then.
         self.trunk_on = bool(settings.get("trunk_enabled", True))
@@ -581,7 +584,7 @@ class TrackerClass:
         """One TRUNK_STATUS per trunk update, CSV:
         state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
         reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,
-        hz,method
+        hz,method,doubt
         (trunk/tracker.py has the states and levels.)
         """
         st = self.trunk.status()
@@ -589,6 +592,8 @@ class TrackerClass:
         if st.seq == self._trunk_sent_seq:
             return
         self._trunk_sent_seq = st.seq
+        if self._trunk_csv is not None:
+            self._log_trunk(st)
         f, l, a = st.angles
         self.link.send(protocol.encode(
             protocol.TRUNK_STATUS,
@@ -596,17 +601,18 @@ class TrackerClass:
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
             f"{st.reason},{st.capture_result},{st.people},{int(st.locked)},"
             f"{st.q_how},{st.q_rms_mm:.1f},{st.q_frac:.2f},{st.raw_pts},{st.mask_px},"
-            f"{int(st.held)},{st.hz:.1f},{st.method}"))
+            f"{int(st.held)},{st.hz:.1f},{st.method},{st.doubt}"))
         # One journal line whenever the state, level or this frame's outcome
         # changes, with the quality numbers: why a reading was bad (a shrunk
         # mask or cloud, a poor fit) is not visible from the angles alone.
-        key = (st.state, st.level, st.q_how)
+        key = (st.state, st.level, st.q_how, st.doubt)
         if key != self._trunk_logged:
             self._trunk_logged = key
             print(f"[TRUNK] {st.state_name} lvl={st.level} how={st.q_how or '-'} "
                   f"held={int(st.held)} ang=({f:+.1f},{l:+.1f},{a:+.1f}) "
                   f"rms={st.q_rms_mm:.1f}mm frac={st.q_frac:.2f} "
-                  f"pts={st.raw_pts} mask={st.mask_px} people={st.people}", flush=True)
+                  f"pts={st.raw_pts} mask={st.mask_px} people={st.people}"
+                  f"{' doubt=' + st.doubt if st.doubt else ''}", flush=True)
 
     # ── Cameras ───────────────────────────────────────────────────────────────
     # Phase alignment, queue pairing and drift resync all live in
@@ -805,7 +811,36 @@ class TrackerClass:
         else:
             raise ValueError(f"unknown key or value: {key}={value}")
 
+    def _open_trunk_csv(self) -> None:
+        """trunk_debug: every trunk update next to the rigid body's latest pose,
+        for scoring a trunk method against the marker strapped to the sternum
+        (per-axis gain and cross-talk). One file per tracker start."""
+        out = DATA_ROOT.parent / "trunk_debug"
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / datetime.now().strftime("trunk_%Y-%m-%d_%H-%M-%S.csv")
+        self._trunk_csv = open(path, "w", newline="", buffering=1)   # line by line: survives a kill
+        self._trunk_csv_writer = csv.writer(self._trunk_csv)
+        self._trunk_csv_writer.writerow([
+            "time", "method", "state", "held", "doubt", "has_neutral", "flex", "lat", "axi",
+            "cam_rx", "cam_ry", "cam_rz", "conf", "people",
+            "marker_age_s", "marker_id", "marker_rx", "marker_ry", "marker_rz",
+            "marker_tx", "marker_ty", "marker_tz", "flip"])
+        self._marker = None
+        print(f"[TRUNK] Debug log: {path}", flush=True)
+
+    def _log_trunk(self, st) -> None:
+        now = time.time()
+        m = self._marker
+        marker = ([round(now - m[0], 3), m[1], *np.round(m[2], 5), *np.round(m[3], 5)]
+                  if m is not None else ["", "", "", "", "", "", "", ""])
+        self._trunk_csv_writer.writerow([
+            f"{now:.3f}", st.method, st.state_name, int(st.held), st.doubt, int(st.has_neutral),
+            *(f"{a:.2f}" for a in st.angles), *(f"{c:.2f}" for c in st.cam_rot),
+            f"{st.q_frac:.2f}", st.people, *marker, int(self.flip_frames)])
+
     def _send_position(self, centroid, ref_rvec, ref_tvec, ref_id: int) -> None:
+        if self._trunk_csv is not None:
+            self._marker = (time.time(), int(ref_id), np.ravel(ref_rvec), np.ravel(ref_tvec))
         self.link.send(protocol.encode_position(
             ref_id, np.ravel(centroid), np.ravel(ref_rvec), np.ravel(ref_tvec)))
         self._send_count += 1

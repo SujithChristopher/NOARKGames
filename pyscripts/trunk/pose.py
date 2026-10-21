@@ -41,9 +41,25 @@ UPPER_FOR_CROP = [J[n] for n in ("nose", "left_ear", "right_ear", "neck", "left_
                                  "right_shoulder", "left_elbow", "right_elbow",
                                  "left_wrist", "right_wrist")]
 TRUNK_JOINTS = [J["neck"], J["left_shoulder"], J["right_shoulder"]]
+ARM_JOINTS = [J[n] for n in ("left_wrist", "right_wrist", "left_elbow", "right_elbow")]
+CHEST_DEPTH = 0.6                   # the chest: shoulders to this far down towards the hips
+ARM_SEEN_CONF = 1.5                 # an arm joint the model actually sees
 TRUNK_ROT = 0                       # ROT_JOINTS[0] = ("trunk", c_spine3)
 CROP_SCALE = 1.35                   # data.py / pack_noark.upper_box
 RZ = np.diag([-1.0, -1.0, 1.0])     # a 180 deg image rotation = the camera turned about z
+
+
+def arm_over_chest(kp, conf):
+    """An arm joint inside the chest outline in the image: the arm is between
+    the camera and the trunk, the case the student is weakest on. Only the
+    upper part of the trunk, so hands resting on the table in front of the
+    belly do not count."""
+    ls, rs = kp[J["left_shoulder"]], kp[J["right_shoulder"]]
+    lh, rh = kp[J["left_hip"]], kp[J["right_hip"]]
+    chest = np.float32([ls, rs, rs + CHEST_DEPTH * (rh - rs), ls + CHEST_DEPTH * (lh - ls)])
+    return any(conf[j] >= ARM_SEEN_CONF
+               and cv2.pointPolygonTest(chest, (float(kp[j, 0]), float(kp[j, 1])), False) > 0
+               for j in ARM_JOINTS)
 
 
 def crop_affine(center, size):
@@ -127,9 +143,12 @@ class PoseTrunk:
     """Per-frame trunk rotation from the reference camera's working-size frame.
 
     `measure(left, mask, rot180)` -> ((R_trunk (3,3) camera axes, xyz (K,3)
-    camera axes, conf (K,)), "") or (None, reason)."""
+    camera axes, conf (K,), doubt), "") or (None, reason). Below `min_conf`
+    on the neck or shoulders a frame is not used at all; `doubt` marks one
+    that is used but less trusted: "low_conf" (under `doubt_conf`) or
+    "arm_over_chest", "" otherwise."""
 
-    def __init__(self, K_ref, D_ref, sensor, size, model, min_conf=2.0):
+    def __init__(self, K_ref, D_ref, sensor, size, model, min_conf=2.0, doubt_conf=0.0):
         """K_ref/D_ref: the reference camera at sensor resolution (sensor = (W, H));
         size = the working (w, h) the frames and masks arrive at."""
         w, h = size
@@ -140,6 +159,7 @@ class PoseTrunk:
         self.size = (w, h)
         self.student = Student(model)
         self.min_conf = float(min_conf)
+        self.doubt_conf = float(doubt_conf)
         self._prev = None
         self._rot180 = None                 # last confident keypoints (upright pinhole px)
 
@@ -197,11 +217,14 @@ class PoseTrunk:
             self._prev = None
             return None, "no_torso"
         kp, xyz, conf, rots = out
-        if conf[TRUNK_JOINTS].min() < self.min_conf:
+        trunk_conf = conf[TRUNK_JOINTS].min()
+        if trunk_conf < self.min_conf:
             self._prev = None
             return None, "low_conf"
         self._prev = kp
+        doubt = ("low_conf" if trunk_conf < self.doubt_conf
+                 else "arm_over_chest" if arm_over_chest(kp, conf) else "")
         R = rots[TRUNK_ROT]
         if rot180:
             R, xyz = RZ @ R, xyz @ RZ.T
-        return (R, xyz, conf), ""
+        return (R, xyz, conf, doubt), ""

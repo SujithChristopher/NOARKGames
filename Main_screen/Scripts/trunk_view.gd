@@ -116,7 +116,8 @@ func _on_capture_pressed() -> void:
 
 func _on_updated() -> void:
 	var tracking := TrunkMonitor.state == TrunkMonitor.TRACKING
-	_samples.append([_now(), TrunkMonitor.angles if tracking else null])
+	_samples.append([_now(), TrunkMonitor.angles if tracking else null,
+		tracking and not TrunkMonitor.doubt.is_empty()])
 
 
 func _process(_delta: float) -> void:
@@ -154,6 +155,9 @@ func _refresh_text() -> void:
 		"not_visible":
 			_result.text = "Capture failed: the trunk is not visible to the cameras"
 			_result.modulate = Color(1.0, 0.6, 0.4)
+		"away":
+			_result.text = "Person was away: capture neutral posture again"
+			_result.modulate = Color(1.0, 0.6, 0.4)
 
 
 func _draw_graph() -> void:
@@ -190,6 +194,14 @@ func _draw_graph() -> void:
 		for sgn in [-1.0, 1.0]:
 			var y: float = y_of.call(sgn * pair[0])
 			_graph.draw_dashed_line(Vector2(0, y), Vector2(w, y), Color(pair[1], 0.6), 2.0, 10.0)
+
+	# Light yellow behind stretches the tracker was unsure of (an arm in front
+	# of the chest, low confidence): the angles there may be off.
+	for k in _samples.size():
+		if _samples[k][2]:
+			var x0: float = x_of.call(_samples[k][0])
+			var x1: float = x_of.call(_samples[k + 1][0]) if k + 1 < _samples.size() else w
+			_graph.draw_rect(Rect2(x0, 0, maxf(x1 - x0, 2.0), h), Color(1.0, 0.92, 0.45, 0.18))
 
 	for i in 3:
 		var line := PackedVector2Array()

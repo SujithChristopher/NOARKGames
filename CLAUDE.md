@@ -217,7 +217,7 @@ neutral cloud → flexion / lateral / axial and a state machine
   upright). Auto tries the other way when no torso is found; masks are rotated back,
   so the stereo geometry never sees the rotation.
 - Godot → tracker TRUNK `neutral` (the game menus' "Capture neutral posture");
-  tracker → Godot TRUNK_STATUS `state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,hz,method`.
+  tracker → Godot TRUNK_STATUS `state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,hz,method,doubt`.
   The last six are *this frame's* quality (how it fit or why it did not, ICP residual, matched
   share, shell points, mask area, whether the angles are held from the last good frame). Random
   Reach writes them to its raw CSV (`trunk_how` … `trunk_held`) and the tracker prints a journal
@@ -237,6 +237,22 @@ neutral cloud → flexion / lateral / axial and a state machine
   Occluded never pauses. Trunk state/level/angles are appended to its raw CSV.
   `Main_screen/Scripts/trunk_feedback.gd` is the overlay any game can add.
 - `uv run pyscripts/trunk_live.py --show` tests it without Godot (stop the tracker first).
+- **Scoring a method against ground truth:** `"trunk_debug": true` in settings.json (read at
+  tracker start) logs every trunk update next to the rigid body's pose to
+  `{DOCUMENTS}/NOARK_demo/trunk_debug/trunk_*.csv`, plus a `[TRUNK-DBG]` journal line a second
+  and the neutral frame's offset from the camera at capture. Strap the hand device to the
+  sternum, capture neutral, lean / twist each way; `uv run pyscripts/trunk_score.py` prints
+  each method's cross-talk matrix (diagonal = gain per axis, off-diagonal = leak). Measured
+  2026-10-21 (v3rot): the flexion / lateral / axial split matches the camera-axes rotation
+  1:1 (neutral frame 8–11° off the camera) — axis leaks seen live come from the model.
+- **Occlusion (minisam3d):** an arm or object in front of the chest bends the student's rotation
+  5–10° while its neck/shoulder heatmap confidence drops. Per model, `trunk_msam_min_conf`
+  (r18 2.5) drops the frame (held, then OCCLUDED) and `trunk_msam_doubt_conf` (r18 2.9) or a
+  wrist/elbow inside the chest outline (`pose.arm_over_chest`) marks it `doubt`: shown, but no
+  warning/pause and kept out of a neutral capture. TRUNK_STATUS carries it; the Trunk angles graph
+  shades those stretches light yellow; Random Reach logs `trunk_doubt`. OCCLUDED for
+  `trunk_reneutral_s` (10 s) drops the neutral (`capture_result` "away"): people rarely sit back
+  down the same way.
 
 ### App ↔ tracker link (UDP or BLE)
 

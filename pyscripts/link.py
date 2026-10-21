@@ -44,12 +44,12 @@ class Link:
             if kind == protocol.HEARTBEAT:
                 continue
             if kind not in protocol.RELIABLE:
-                print(f"[LINK] Unknown message type 0x{kind:02x}, ignored")
+                print(f"[LINK] Unknown message type 0x{kind:02x}, ignored", flush=True)
                 continue
             try:
                 seq, body = protocol.split_seq(payload)
             except ValueError:
-                print(f"[LINK] Malformed message 0x{kind:02x}, ignored")
+                print(f"[LINK] Malformed message 0x{kind:02x}, ignored", flush=True)
                 continue
             if kind != protocol.HELLO and self._last_ack and self._last_ack[0] == seq:
                 self.send(self._last_ack[1])   # our ACK was lost; the app retried
@@ -72,10 +72,10 @@ class Link:
     def _hello(self, body: bytes):
         version = body[0] if body else 0
         if version != protocol.VERSION:
-            print(f"[LINK] App speaks protocol v{version}, this tracker v{protocol.VERSION}")
+            print(f"[LINK] App speaks protocol v{version}, this tracker v{protocol.VERSION}", flush=True)
             return False, f"tracker speaks protocol v{protocol.VERSION}"
         if not self.connected:
-            print("[LINK] App connected")
+            print("[LINK] App connected", flush=True)
         self.connected = True
         return True, f"v{protocol.VERSION}"
 

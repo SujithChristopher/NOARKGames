@@ -104,3 +104,6 @@ func _refresh() -> void:
 		"not_visible":
 			_result.text = "Capture failed: the trunk is not visible to the cameras"
 			_result.modulate = Color(1.0, 0.6, 0.4)
+		"away":
+			_result.text = "Person was away: capture neutral posture again"
+			_result.modulate = Color(1.0, 0.6, 0.4)

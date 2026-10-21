@@ -70,13 +70,25 @@ DEFAULTS = {
     # Camera mounted upside down: true / false / "auto" (whichever way up
     # trunk_seg finds a torso). trunk_seg and the student only work upright.
     "trunk_rot180": "auto",
-    # neck + shoulders heatmap confidence below this = low_conf. Measured on a
-    # seated subject: r18 p5 2.3 / median 3.7, v3rot p5 0.15 / median 2.5.
-    "trunk_msam_min_conf": 1.0,
+    # neck + shoulders heatmap confidence, per model (or one number for all):
+    # under min_conf the frame is not used (held, then OCCLUDED); under
+    # doubt_conf it is used but marked uncertain. Measured 2026-10-21, r18
+    # seated: normal tracking p5 2.9 / median 3.9, and every stretch that read
+    # 5-10 deg off while the subject sat still (an arm or object in front) was
+    # under 2.3. v3rot runs lower: p5 0.15 / median 2.5.
+    "trunk_msam_min_conf": {"msam_r18": 2.5, "msam_v3rot": 1.0},
+    "trunk_msam_doubt_conf": {"msam_r18": 2.9, "msam_v3rot": 1.5},
+    # OCCLUDED this long (the subject left, or turned away) drops the neutral:
+    # they rarely sit back down the same way (+8.5 deg flexion measured).
+    "trunk_reneutral_s": 10.0,
     # p90 of the trunk rotation's spread about its mean over a neutral capture.
     # The max let one outlier frame reject a still subject (r18 jitters ~0.8 deg
     # frame to frame).
     "trunk_msam_neutral_deg": 4.0,
+    # Once a second while tracking, a journal line with the angles next to the
+    # rotation in camera axes (x right, y down, z forward), to tell an axis
+    # leaking between flexion / lateral / axial in the split from the model.
+    "trunk_debug": False,
     # Cores for the trunk worker. The prime core (7) is the measured choice on
     # this board: with the hand tracker on 4-7 it cost hand tracking 1-3 fps
     # (~33.5 -> 31-34) at 11-12 Hz of trunk updates. Little cores (0-3) kept
@@ -90,6 +102,27 @@ class PoseNeutral:
     """minisam3d's neutral: the trunk rotation and anatomical frame, camera axes."""
     R_trunk: np.ndarray
     R_neu: np.ndarray
+
+
+def _log_pose_frame(F, conf):
+    """How the anatomical frame built from the neutral joints sits against the
+    camera's (lateral +x, up -y, anterior -z) and how sure the joints were: a
+    badly placed axis moves one movement into another angle."""
+    from .pose import J
+
+    cam = np.array([[1.0, 0, 0], [0, -1.0, 0], [0, 0, -1.0]]).T
+    off = [float(np.degrees(np.arccos(np.clip(F[:, i] @ cam[:, i], -1, 1)))) for i in range(3)]
+    print(f"[TRUNK] neutral frame vs camera: lateral {off[0]:.0f} deg, up {off[1]:.0f} deg, "
+          f"anterior {off[2]:.0f} deg; conf neck {conf[J['neck']]:.1f} "
+          f"shoulders {conf[J['left_shoulder']]:.1f}/{conf[J['right_shoulder']]:.1f} "
+          f"hips {conf[J['left_hip']]:.1f}/{conf[J['right_hip']]:.1f}", flush=True)
+
+
+def _for_method(value, method):
+    """A setting given per trunk method, or one number for all."""
+    if isinstance(value, dict):
+        return float(value.get(method, 0.0))
+    return float(value)
 
 
 def _per_axis(value):
@@ -139,9 +172,11 @@ class TrunkStatus:
                                           # small_cloud / lost_subject
     q_rms_mm: float = float("nan")        # ICP residual of this frame's fit
     q_frac: float = float("nan")          # share of the frame's cloud that matched
+    cam_rot: tuple = (float("nan"),) * 3  # neutral -> now as a rotation vector, camera axes, deg
     raw_pts: int = 0                      # shell points before the cloud cap
     mask_px: int = 0                      # torso mask area (working-size pixels)
     held: bool = False                    # angles are the last good ones, not this frame's
+    doubt: str = ""                       # used but less trusted: low_conf / arm_over_chest
     seq: int = 0
     hz: float = 0.0                       # trunk updates per second, last 2 s
     method: str = ""                      # icp / msam_r18 / msam_v3rot, what measured it
@@ -189,6 +224,7 @@ class TrunkEngine:
         self._pending_since = np.zeros(3)
         self._levels = np.zeros(3, int)
         self._last = None                 # last good (angles, rms, how)
+        self._debug_at = 0.0
         self._seq = 0
         self._rate = []
         self.set_method(cfg["trunk_method"])
@@ -213,10 +249,11 @@ class TrunkEngine:
             try:
                 if self._pose is None:
                     (Kr, Dr), sensor = self._ref
-                    self._pose = PoseTrunk(Kr, Dr, sensor, self.shell.size, method,
-                                           self.cfg["trunk_msam_min_conf"])
+                    self._pose = PoseTrunk(Kr, Dr, sensor, self.shell.size, method)
                 else:
                     self._pose.set_model(method)
+                self._pose.min_conf = _for_method(self.cfg["trunk_msam_min_conf"], method)
+                self._pose.doubt_conf = _for_method(self.cfg["trunk_msam_doubt_conf"], method)
             except Exception as exc:
                 print(f"[TRUNK] {method} unavailable, staying on {self.method}: {exc!r}", flush=True)
                 return False
@@ -395,7 +432,7 @@ class TrunkEngine:
         if rot_deg(R_body) > ROT_MAX_DEG:
             return None, dict(how="gated")
         conf = obs[2][TRUNK_JOINTS]
-        return R_body, dict(how="direct", frac=float(conf.min()))
+        return R_body, dict(how="direct", frac=float(conf.min()), doubt=obs[3])
 
     def _track(self, now, cloud, bad, timing, st):
         if bad:
@@ -410,13 +447,30 @@ class TrunkEngine:
         st.q_rms_mm = info.get("rms", float("nan")) * 1e3
         st.q_frac = info.get("frac", float("nan"))
         st.held = R_body is None
+        st.doubt = info.get("doubt", "")
         if R_body is not None:
             self._fail_since = None
             angles = trunk_angles(R_body @ self._neutral.R_neu, self._neutral.R_neu)
             self._last = (angles, info.get("rms", float("nan")) * 1e3, info["how"])
-            self._classify(np.array(angles), now)
+            cam = np.degrees(cv2.Rodrigues(R_body)[0].ravel())
+            st.cam_rot = tuple(float(c) for c in cam)
+            if self.cfg["trunk_debug"] and now - self._debug_at >= 1.0:
+                self._debug_at = now
+                print(f"[TRUNK-DBG] {self.method} flex/lat/axi=({angles[0]:+.1f},{angles[1]:+.1f},"
+                      f"{angles[2]:+.1f}) camera rotvec x/y/z=({cam[0]:+.1f},{cam[1]:+.1f},{cam[2]:+.1f})",
+                      flush=True)
+            if not st.doubt:   # an uncertain reading shows, but does not raise a warning
+                self._classify(np.array(angles), now)
         elif self._fail_since is None:
             self._fail_since = now
+
+        if (self._fail_since is not None and self._neutral is not None
+                and now - self._fail_since >= self.cfg["trunk_reneutral_s"]):
+            print(f"[TRUNK] occluded {self.cfg['trunk_reneutral_s']:.0f} s: neutral dropped", flush=True)
+            self._clear_neutral()
+            self._capture_result = "away"
+            st.state = NO_NEUTRAL
+            return
 
         if self._fail_since is not None and (
                 now - self._fail_since >= self.cfg["trunk_occlusion_s"] or self._last is None):
@@ -454,7 +508,7 @@ class TrunkEngine:
         """Advance a neutral capture. True while it is still running."""
         t0, clouds, cents, seen = self._capture
         seen += 1
-        if not bad:
+        if not bad and not (self.method != "icp" and cloud[3]):   # an uncertain frame is no neutral
             clouds.append(cloud)
             if self.method == "icp":
                 cents.append(cloud.mean(axis=0))
@@ -506,6 +560,7 @@ class TrunkEngine:
             else:
                 self._neutral = PoseNeutral(R_mean, anatomical_frame_pose(
                     np.mean([o[1] for o in obs], axis=0)))
+                _log_pose_frame(self._neutral.R_neu, np.mean([o[2] for o in obs], axis=0))
                 self._fail_since, self._last = None, None
                 self._levels[:] = OK
                 self._pending[:] = OK
