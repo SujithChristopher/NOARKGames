@@ -332,74 +332,68 @@ color = Color(0.537255, 0.760784, 0.482353, 0)
 
 [node name="ExitButton" type="Button" parent="TextureRect" unique_id=1158539088]
 layout_mode = 0
-offset_left = 1004.0
-offset_top = 572.0
-offset_right = 1131.0
-offset_bottom = 633.0
+offset_left = 1010
+offset_top = 574
+offset_right = 1132
+offset_bottom = 630
 theme = ExtResource("3_oasjk")
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
-theme_override_font_sizes/font_size = 18
 text = "EXIT"
 
 [node name="HospID" type="LineEdit" parent="TextureRect" unique_id=2002839286]
 layout_mode = 0
-offset_left = 409.0
-offset_top = 212.0
-offset_right = 774.0
-offset_bottom = 291.0
+offset_left = 396
+offset_top = 206
+offset_right = 756
+offset_bottom = 264
 theme = ExtResource("3_oasjk")
 theme_override_fonts/font = ExtResource("4_oasjk")
-placeholder_text = "Patient id (type or click):"
+placeholder_text = "Patient ID"
 
 [node name="SyncStatus" type="Label" parent="TextureRect" unique_id=881396199]
 layout_mode = 0
-offset_left = 409.0
-offset_top = 291.0
-offset_right = 774.0
-offset_bottom = 313.0
+offset_left = 400
+offset_top = 268
+offset_right = 756
+offset_bottom = 290
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9764706)
 theme_override_font_sizes/font_size = 13
 text = "Fetching patients..."
 
 [node name="PlayButton" type="Button" parent="." unique_id=2029755704]
 layout_mode = 0
-offset_left = 412.0
-offset_top = 315.0
-offset_right = 756.0
-offset_bottom = 380.0
+offset_left = 396
+offset_top = 300
+offset_right = 756
+offset_bottom = 386
 theme = ExtResource("3_oasjk")
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Play"
 script = ExtResource("3_54gjo")
 
 [node name="NewPatientButton" type="Button" parent="." unique_id=981569524]
 layout_mode = 0
-offset_left = 412.0
-offset_top = 390.0
-offset_right = 756.0
-offset_bottom = 455.0
+offset_left = 336
+offset_top = 406
+offset_right = 488
+offset_bottom = 470
 theme = ExtResource("3_oasjk")
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "New Patient"
 
 [node name="DefineTableButton" type="Button" parent="." unique_id=177023916]
 layout_mode = 0
-offset_left = 412.0
-offset_top = 465.0
-offset_right = 756.0
-offset_bottom = 530.0
+offset_left = 500
+offset_top = 406
+offset_right = 652
+offset_bottom = 470
 theme = ExtResource("3_oasjk")
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Define Table"
 
 [node name="SettingsButton" type="Button" parent="." unique_id=604815372]
 layout_mode = 0
-offset_left = 412.0
-offset_top = 540.0
-offset_right = 756.0
-offset_bottom = 605.0
+offset_left = 664
+offset_top = 406
+offset_right = 816
+offset_bottom = 470
 theme = ExtResource("3_oasjk")
-theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Settings"
 
 [node name="Logo" type="TextureRect" parent="." unique_id=163609671]
@@ -522,7 +516,7 @@ script = ExtResource("9_blein")
 layout_mode = 0
 offset_left = 28.0
 offset_top = 2.0
-offset_right = 140.0
+offset_right = 320.0
 offset_bottom = 24.0
 theme_override_font_sizes/font_size = 13
 text = "Idle"
@@ -537,11 +531,30 @@ theme_override_font_sizes/font_size = 11
 text = "x:0  y:0  z:0"
 
 
+[node name="RestartTrackerButton" type="Button" parent="." unique_id=730118245]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 62.0
+offset_right = 226.0
+offset_bottom = 104.0
+tooltip_text = "Restart the tracker service on the board"
+text = "Restart tracker"
+
+[node name="RestartStatus" type="Label" parent="." unique_id=730118246]
+layout_mode = 0
+offset_left = 18.0
+offset_top = 108.0
+offset_right = 360.0
+offset_bottom = 130.0
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9764706)
+theme_override_font_sizes/font_size = 13
+
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
 [connection signal="text_submitted" from="TextureRect/HospID" to="PlayButton" method="_on_hosp_id_text_submitted"]
 [connection signal="pressed" from="PlayButton" to="PlayButton" method="_on_pressed"]
 [connection signal="pressed" from="NewPatientButton" to="PlayButton" method="_on_new_patient_pressed"]
 [connection signal="pressed" from="DefineTableButton" to="PlayButton" method="_on_define_table_pressed"]
 [connection signal="pressed" from="SettingsButton" to="PlayButton" method="_on_settings_pressed"]
+[connection signal="pressed" from="RestartTrackerButton" to="PlayButton" method="_on_restart_tracker_pressed"]
 [connection signal="pressed" from="Warning/Button" to="PlayButton" method="_on_window_close_requested"]
 [connection signal="pressed" from="Patient_notfound/patient_nf_ok" to="PlayButton" method="_on_patient_nf_ok_pressed"]

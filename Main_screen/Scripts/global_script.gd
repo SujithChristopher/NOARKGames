@@ -67,6 +67,15 @@ var _transport: Node
 ## and whoever listens should not have to connect again.
 signal link_connected_changed(connected: bool)
 signal link_command_done(kind: int, ok: bool, detail: String)
+## The tracker's cameras (LinkProtocol.TrackerState): idle, starting, tracking.
+signal tracker_state_changed(state: int)
+
+## Tracking is asked of the tracker only while something needs it: a scene
+## under res://Games/, or a node that called hold_tracking(). Everywhere else
+## (main menu, Settings, dose, results) the tracker idles with its cameras off.
+var _tracking_holders: Array[Node] = []
+var _tracking_sent := -1   # the last track= sent: -1 none since connecting, 0 off, 1 on
+const TRACKER_SERVICE := "/etc/systemd/system/noark-tracker.service"
 
 # ── python launcher ───────────────────────────────────────────────────────────
 @onready var interpreter_path: String
@@ -169,6 +178,8 @@ func _start_link() -> void:
 	link.command_done.connect(_on_command_done)
 	link.command_done.connect(link_command_done.emit)
 	link.connected_changed.connect(link_connected_changed.emit)
+	link.tracker_state_changed.connect(tracker_state_changed.emit)
+	_tracking_sent = -1
 	_transport.start()
 
 
@@ -369,9 +380,56 @@ func send_storage_command(arg: String) -> void:
 	link.send_command(LinkProtocol.STORAGE, arg)
 
 
+## Keep the tracker tracking while `node` is in the tree (a screen outside
+## res://Games/ that shows the hand or the trunk: the trunk panel in the game
+## menus, Trunk angles, Define Table).
+func hold_tracking(node: Node) -> void:
+	if node in _tracking_holders:
+		return
+	_tracking_holders.append(node)
+	node.tree_exiting.connect(func(): _tracking_holders.erase(node), CONNECT_ONE_SHOT)
+
+
+func tracking_wanted() -> bool:
+	var scene := get_tree().current_scene
+	if scene != null and scene.scene_file_path.begins_with("res://Games/"):
+		return true
+	return not _tracking_holders.is_empty()
+
+
+# CONFIG track=on|off whenever that changes, and once after every (re)connect:
+# a tracker starts each app idle.
+func _update_tracking() -> void:
+	if link == null or not link.connected:
+		_tracking_sent = -1
+		return
+	var want := int(tracking_wanted())
+	if want != _tracking_sent:
+		_tracking_sent = want
+		link.send_command(LinkProtocol.CONFIG, "track=%s" % ("on" if want else "off"))
+
+
+## Restart the tracker service. Over the link when the tracker answers (it
+## exits and systemd starts it again); otherwise, on the board itself, through
+## systemctl (/etc/sudoers.d/noark-tracker lets it). -> "" or why it could not.
+func restart_tracker() -> String:
+	if link.connected:
+		link.send_command(LinkProtocol.RESTART)
+		return ""
+	if OS.get_name() == "Linux" and FileAccess.file_exists(TRACKER_SERVICE):
+		var out := []
+		var code := OS.execute("sudo", ["-n", "systemctl", "--no-block", "restart", "noark-tracker"], out, true)
+		if code == 0:
+			return ""
+		return "systemctl failed: %s" % "".join(out).strip_edges()
+	return "The tracker is not answering. Power the board off and on."
+
+
 # ── process ───────────────────────────────────────────────────────────────────
 
 func _process(_delta: float) -> void:
+	_update_tracking()
+
 	# Packet rate: tally the running counter into packets_per_second once a second
 	_pps_accum_time += _delta
 	if _pps_accum_time >= 1.0:

@@ -15,6 +15,9 @@ var _offered := false   # the picker opened by itself for this crowd already
 
 
 func _ready() -> void:
+	# The game menus capture the neutral here, so they track too (trunk on only).
+	if TrunkMonitor.enabled():
+		GlobalScript.hold_tracking(self)
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	box.grow_horizontal = Control.GROW_DIRECTION_BOTH

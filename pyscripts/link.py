@@ -8,7 +8,8 @@ docs/PROTOCOL.md asks of the tracker, the same over both:
   the same ACK again without being applied twice;
 * a message bigger than the transport takes goes out as CHUNKs, paced;
 * a TRACKER_HEARTBEAT when nothing else was sent for a while, so the app can
-  tell a live tracker that sees no marker from a dead one;
+  tell a live tracker that sees no marker from a dead one; it carries the
+  tracker's state (idle, cameras starting, tracking), sent at once on a change;
 * `silent_for()`, how long since the app was last heard.
 """
 
@@ -31,6 +32,7 @@ class Link:
         self._last_sent = 0.0
         self._last_ack = None         # (seq, ack message) of the last command handled
         self._chunk_id = 0
+        self.state = protocol.STATE_IDLE
 
     def poll(self, handler) -> None:
         """Handle everything that arrived. `handler(kind, body) -> (ok, detail)`
@@ -97,7 +99,17 @@ class Link:
     def tick(self) -> None:
         """Once a frame: keep the app's liveness check fed."""
         if self.connected and time.time() - self._last_sent >= HEARTBEAT_S:
-            self.send(protocol.encode(protocol.TRACKER_HEARTBEAT))
+            self._heartbeat()
+
+    def set_state(self, state: int) -> None:
+        """The tracker's state for the app's status line; a change goes out now."""
+        if state != self.state:
+            self.state = state
+            if self.connected:
+                self._heartbeat()
+
+    def _heartbeat(self) -> None:
+        self.send(protocol.encode(protocol.TRACKER_HEARTBEAT, bytes([self.state])))
 
     def silent_for(self) -> float:
         return time.time() - self.last_heard

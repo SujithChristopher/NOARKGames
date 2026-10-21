@@ -19,6 +19,7 @@ var _live: Label
 
 
 func _ready() -> void:
+	GlobalScript.hold_tracking(self)   # the hand on the corners: cameras on
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var vp := get_viewport_rect().size
 

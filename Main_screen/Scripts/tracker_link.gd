@@ -19,6 +19,8 @@ signal message(kind: int, msg: PackedByteArray)
 ## A command's ACK arrived (ok) or was refused / never came (not ok).
 signal command_done(kind: int, ok: bool, detail: String)
 signal connected_changed(connected: bool)
+## The tracker's cameras: LinkProtocol.TrackerState, from its heartbeats.
+signal tracker_state_changed(state: int)
 
 const HEARTBEAT_S := 0.1
 const RETRY_S := 0.3
@@ -26,6 +28,7 @@ const MAX_TRIES := 10          # 3 s; HELLO retries for as long as it takes
 const SILENCE_S := 3.0         # the tracker sends at least every 0.5 s
 
 var connected := false
+var tracker_state: int = LinkProtocol.TrackerState.UNKNOWN
 var _transport: Node
 var _session_id := ""
 ## The patient the session is for ("" if none), sent again after a reconnect.
@@ -160,7 +163,10 @@ func _on_received(msg: PackedByteArray) -> void:
 			_on_ack(LinkProtocol.decode_ack(msg))
 		LinkProtocol.CHUNK:
 			_on_chunk(msg)
-		LinkProtocol.TRACKER_HEARTBEAT, LinkProtocol.NONE:
+		LinkProtocol.TRACKER_HEARTBEAT:
+			if msg.size() >= 2:
+				_set_tracker_state(msg[1])
+		LinkProtocol.NONE:
 			pass
 		var kind:
 			if connected:
@@ -230,4 +236,12 @@ func _set_connected(on: bool) -> void:
 	connected = on
 	if on:
 		print("[LINK] Connected to the tracker")
+	else:
+		_set_tracker_state(LinkProtocol.TrackerState.UNKNOWN)
 	connected_changed.emit(on)
+
+
+func _set_tracker_state(state: int) -> void:
+	if state != tracker_state:
+		tracker_state = state
+		tracker_state_changed.emit(state)

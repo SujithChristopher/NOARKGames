@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import platform
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -497,16 +498,25 @@ class TrackerClass:
         )
 
         # ── Transport + cameras ───────────────────────────────────────────────
-        # Bind before bringing the cameras up: frame-sync alignment takes tens
-        # of seconds, and an app that connects meanwhile has its HELLO buffered
-        # by the kernel (UDP) or BlueZ and answered once the loop runs. The app
-        # retries until it is.
+        # The cameras are off until the app asks for tracking (CONFIG
+        # track=on, while a game runs) and go off again a little after it stops
+        # asking: tracking nobody costs most of two cores and heats the board.
+        # They come up on their own thread (_manage_cameras), so the link keeps
+        # answering through the seconds that takes.
         self._init_transport()
-
-        if platform.system() == "Linux":
-            self._init_cameras()
-        else:
+        if platform.system() != "Linux":
             raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
+        self.capture: Optional[StereoCapture] = None
+        self._cam_thread: Optional[threading.Thread] = None
+        self._cam_result = None            # the thread's StereoCapture, or its exception
+        self._cam_retry_at = 0.0
+        self._want_tracking = False        # CONFIG track=on|off
+        self._tracking = False             # wanted, and the cameras are up
+        self._unwanted_since: Optional[float] = None
+        # Seconds the cameras stay up after tracking stops: from a game back
+        # to its menu and into the next game should not wait for them.
+        self.camera_off_s = float(settings.get("camera_idle_off_s", 20))
+        self.restart_requested = False     # RESTART: run() returns, main exits non-zero
         self._init_trunk(settings)
 
     # ── Trunk ─────────────────────────────────────────────────────────────────
@@ -618,19 +628,88 @@ class TrackerClass:
     # Phase alignment, queue pairing and drift resync all live in
     # StereoCapture, shared with rigidbody_calib.py so both see the same frames.
 
-    def _init_cameras(self) -> None:
-        self.capture = StereoCapture(
-            frame_size=self.frame_size,
-            fps_value=self.fps_value,
-            frame_sync=self.frame_sync_enabled,
-            phase_tol_us=self.phase_tol_us,
-            resync_threshold_us=self.resync_threshold_us,
-            exposure_us=self._exposure_us,
-            gain=self._gain,
-            isp=self._isp,
-        )
-        self.cam0 = self.capture.cam0
-        self.cam1 = self.capture.cam1
+    def _start_cameras(self) -> None:
+        """Bring the pair up on a thread; _manage_cameras picks the result up."""
+        def work():
+            t0 = time.time()
+            try:
+                capture = StereoCapture(
+                    frame_size=self.frame_size,
+                    fps_value=self.fps_value,
+                    frame_sync=self.frame_sync_enabled,
+                    phase_tol_us=self.phase_tol_us,
+                    resync_threshold_us=self.resync_threshold_us,
+                    exposure_us=self._exposure_us,
+                    gain=self._gain,
+                    isp=self._isp,
+                )
+            except Exception as exc:
+                print(f"[CAM] Could not start the cameras: {exc!r}", flush=True)
+                self._cam_result = exc
+                return
+            print(f"[CAM] Cameras up in {time.time() - t0:.1f} s.", flush=True)
+            self._cam_result = capture
+
+        self._cam_result = None
+        self._cam_thread = threading.Thread(target=work, name="cameras", daemon=True)
+        self._cam_thread.start()
+
+    def _stop_cameras(self) -> None:
+        self.capture.close()
+        self.capture = None
+        self.cam0 = self.cam1 = None
+        print("[CAM] Cameras off (idle).", flush=True)
+
+    def _manage_cameras(self, now: float) -> None:
+        """Once a loop: cameras up while the app wants tracking, off
+        `camera_idle_off_s` after it stops; the state goes to the app."""
+        if self._cam_thread is not None and not self._cam_thread.is_alive():
+            self._cam_thread = None
+            result, self._cam_result = self._cam_result, None
+            if isinstance(result, StereoCapture):
+                self.capture = result
+                self.cam0, self.cam1 = result.cam0, result.cam1
+            else:
+                self._cam_retry_at = now + 5.0
+
+        want = self._want_tracking and self.link.connected
+        if want:
+            self._unwanted_since = None
+            if self.capture is None and self._cam_thread is None and now >= self._cam_retry_at:
+                print("[CAM] Tracking requested: starting the cameras.", flush=True)
+                self._start_cameras()
+        elif self.capture is not None:
+            if self._unwanted_since is None:
+                self._unwanted_since = now
+            elif now - self._unwanted_since >= self.camera_off_s:
+                self._stop_cameras()
+
+        tracking = want and self.capture is not None
+        if tracking != self._tracking:
+            self._set_tracking(tracking)
+        if tracking:
+            self.link.set_state(protocol.STATE_TRACKING)
+        elif not want:
+            self.link.set_state(protocol.STATE_IDLE)
+        elif self._cam_thread is None:
+            self.link.set_state(protocol.STATE_FAILED)    # waiting to retry
+        else:
+            self.link.set_state(protocol.STATE_STARTING)
+
+    def _set_tracking(self, on: bool) -> None:
+        """Tracking starts or stops. A session's recording covers only the
+        tracked stretches: the games, not the menus between them."""
+        self._tracking = on
+        print(f"[TRACK] {'Tracking' if on else 'Idle'}.", flush=True)
+        self._frame_count = 0
+        self._send_count = 0
+        self._stage_time = {k: 0.0 for k in self._stage_time}
+        if on:
+            self.capture.reset_counters()
+            if self._hid is not None:
+                self._start_session_recording()
+        else:
+            self._stop_session_recording()
 
     # ── Recording ─────────────────────────────────────────────────────────────
 
@@ -696,15 +775,22 @@ class TrackerClass:
         """The app has gone (closed, crashed, out of range). The tracker
         outlives it, over either transport: the session closes and it waits for
         the next HELLO."""
-        print(f"[LINK] {why}; session closed, waiting for the app.")
+        print(f"[LINK] {why}; session closed, waiting for the app.", flush=True)
+        self._want_tracking = False
         self._close_session()
         self.link.reset()
 
     def _on_message(self, kind: int, body: bytes):
         """One app command, from Link.poll -> (ok, detail) for its ACK."""
         if kind == protocol.HELLO:
+            # A new app: idle until it asks for tracking.
+            self._want_tracking = False
             self._reload_settings()
             return True, ""
+        if kind == protocol.RESTART:
+            print("[LINK] RESTART from the app; exiting for systemd to start again.", flush=True)
+            self.restart_requested = True
+            return True, "restarting"
         if kind == protocol.CONFIG:
             return self._apply_config(body)
         if kind == protocol.TRUNK:
@@ -776,6 +862,7 @@ class TrackerClass:
         Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
         camera (both|cam0|cam1), deadband (px; 0 = stabilizer off),
         trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot),
+        track (on|off: the app wants tracking now; the cameras run only then),
         recording (on|off), recording_fps, recording_scale (0-1],
         recording_chunk_frames — the recording ones from the next session.
         """
@@ -800,6 +887,8 @@ class TrackerClass:
                 self._trunk_settings = {**self._trunk_settings, "trunk_method": value}
                 if self.trunk is not None:
                     self.trunk.set_method(value)
+        elif key == "track" and value in ("on", "off"):
+            self._want_tracking = value == "on"
         elif key == "recording" and value in ("on", "off"):
             self.record_session = value == "on"
         elif key == "recording_fps" and float(value) > 0:
@@ -1050,7 +1139,8 @@ class TrackerClass:
             self._close_rec_files()
         if self.record_frames:
             self._open_rec_files(self.save_path)
-        self._start_session_recording()
+        if self._tracking:
+            self._start_session_recording()
         self.record = True
 
     def _close_session(self) -> None:
@@ -1210,24 +1300,53 @@ class TrackerClass:
             disp1 = cv2.resize(disp1, (350, 200))
             cv2.imshow("frame", np.hstack([disp0, disp1]))
 
+    def _idle_step(self) -> None:
+        """A loop without tracking: the link and storage only. Cameras still
+        up in their grace period are drained, so their queues are fresh when
+        tracking resumes."""
+        if self.capture is not None:
+            self.capture.next_pair()
+        else:
+            time.sleep(0.02)
+        self.link.poll(self._on_message)
+        self.link.tick()
+        storage_list = self.storage.poll()
+        if storage_list and self.link.connected:
+            self.link.send(storage_list)
+
+    def _release_starting_cameras(self) -> None:
+        """Exiting while the cameras are still coming up: wait, then free them."""
+        self._cam_thread.join(timeout=60)
+        if isinstance(self._cam_result, StereoCapture):
+            self._cam_result.close()
+
     def run(self) -> None:
         """Track until stopped (Ctrl-C, the service stopping). Apps come and go."""
         last_rate_log  = time.time()
         last_resync    = time.time()
 
         try:
-            while True:
-                self.process_frame()
+            while not self.restart_requested:
+                self._manage_cameras(time.time())
+                if self._tracking:
+                    self.process_frame()
+                else:
+                    self._idle_step()
                 if self.link.connected and self.link.silent_for() > 3.0:
                     self._end_link("No heartbeat for 3 s")
 
                 now = time.time()
+                if self.capture is None:
+                    last_rate_log = now
+                    continue
                 if self.resync_every_s > 0 and now - last_resync >= self.resync_every_s:
                     last_resync = now
                     self.capture.maybe_resync()
 
                 elapsed = now - last_rate_log
-                if elapsed >= 5.0:
+                if not self._tracking:
+                    last_rate_log = now
+                elif elapsed >= 5.0:
                     fps = self._frame_count / elapsed
                     pkt_rate = self._send_count / elapsed
                     n = max(self._frame_count, 1)
@@ -1257,6 +1376,8 @@ class TrackerClass:
 
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
+            if self.restart_requested:
+                time.sleep(0.3)   # lets the ACK out over BLE before the transport stops
         finally:
             # Each step on its own: one failing (the trunk worker already gone
             # after a Ctrl-C) must not skip the rest — a skipped streamer.stop()
@@ -1269,6 +1390,8 @@ class TrackerClass:
                 steps.append(self.trunk.stop)
             if getattr(self, "capture", None) is not None:
                 steps.append(self.capture.close)
+            if getattr(self, "_cam_thread", None) is not None:
+                steps.append(self._release_starting_cameras)
             if hasattr(self, "streamer"):
                 steps.append(self.streamer.stop)
             if self.display:
@@ -1354,3 +1477,5 @@ if __name__ == "__main__":
         resync_threshold_us=args.resync_threshold,
     )
     tracker.run()
+    if tracker.restart_requested:
+        sys.exit(75)   # non-zero: systemd (Restart=on-failure) starts it again

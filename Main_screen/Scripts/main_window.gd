@@ -8,6 +8,14 @@ extends Button
 @onready var sync_status: Label = $"../TextureRect/SyncStatus"
 @onready var loading_dialog: AcceptDialog = AcceptDialog.new()
 const DOSE_SCENE = "res://Main_screen/Scenes/dose.tscn"
+const GameButton := preload("res://Main_screen/Scripts/game_button.gd")
+@onready var restart_button: Button = $"../RestartTrackerButton"
+@onready var restart_status: Label = $"../RestartStatus"
+# Restart tracker: 0 none, 1 waiting for the old tracker to go, 2 for the new
+# one to answer. Gives up after RESTART_TIMEOUT_S.
+var _restart_phase := 0
+var _restart_started_ms := 0
+const RESTART_TIMEOUT_S := 60
 var endgame : bool
 
 # Fetches patients.json from the server when the main screen opens. The
@@ -23,8 +31,20 @@ var suggestions := ItemList.new()
 
 
 func _ready() -> void:
+    _style_menu()
     _build_suggestions()
     sync_thread.start(_sync_patients)
+    GlobalScript.link_connected_changed.connect(_on_link_connected_changed)
+
+
+func _style_menu() -> void:
+    GameButton.apply(self, GameButton.GREEN, 36)
+    GameButton.apply($"../NewPatientButton", GameButton.BLUE, 17)
+    GameButton.apply($"../DefineTableButton", GameButton.ORANGE, 17)
+    GameButton.apply($"../SettingsButton", GameButton.PURPLE, 17)
+    GameButton.apply($"../TextureRect/ExitButton", GameButton.RED, 20)
+    GameButton.apply(restart_button, GameButton.TEAL, 14)
+    GameButton.style_line_edit(hosp_id_edit)
 
 
 func _exit_tree() -> void:
@@ -188,6 +208,53 @@ func _on_new_patient_pressed() -> void:
     get_parent().add_child(dialog)
     dialog.popup_centered()
     id_edit.grab_focus()
+
+
+# The tracker service, restarted from here: over the link when it answers,
+# else through systemctl on the board (GlobalScript.restart_tracker).
+func _on_restart_tracker_pressed() -> void:
+    var dialog := ConfirmationDialog.new()
+    dialog.title = "Restart tracker"
+    dialog.dialog_text = "Restart the tracker service?\nIt is back in about 15 seconds."
+    dialog.ok_button_text = "Restart"
+    dialog.confirmed.connect(_restart_tracker)
+    dialog.confirmed.connect(dialog.queue_free)
+    dialog.canceled.connect(dialog.queue_free)
+    get_parent().add_child(dialog)
+    dialog.popup_centered()
+
+
+func _restart_tracker() -> void:
+    var was_connected: bool = GlobalScript.link.connected
+    var why := GlobalScript.restart_tracker()
+    if why != "":
+        restart_status.text = why
+        return
+    _restart_phase = 1 if was_connected else 2
+    _restart_started_ms = Time.get_ticks_msec()
+    restart_button.disabled = true
+    restart_button.text = "Restarting..."
+    restart_status.text = "Waiting for the tracker to stop..." if was_connected else "Waiting for the tracker..."
+
+
+func _on_link_connected_changed(connected: bool) -> void:
+    if _restart_phase == 1 and not connected:
+        _restart_phase = 2
+        restart_status.text = "Tracker stopped, starting again..."
+    elif _restart_phase == 2 and connected:
+        _end_restart("Tracker restarted")
+
+
+func _end_restart(text: String) -> void:
+    _restart_phase = 0
+    restart_button.disabled = false
+    restart_button.text = "Restart tracker"
+    restart_status.text = text
+
+
+func _process(_delta: float) -> void:
+    if _restart_phase != 0 and Time.get_ticks_msec() - _restart_started_ms > RESTART_TIMEOUT_S * 1000:
+        _end_restart("The tracker did not come back. Check the board.")
 
 
 func _on_settings_pressed() -> void:

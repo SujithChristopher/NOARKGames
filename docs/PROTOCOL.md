@@ -21,8 +21,13 @@ for an incompatible change, and update this file.
 
 The tracker is a long-running service (`noark-tracker`, systemd) over both
 transports. The app never starts or stops it; it connects, runs sessions, and
-goes. Cameras are brought up once, at boot — frame-sync alignment takes tens of
-seconds, which an app launch no longer pays.
+goes. The cameras are **off until the app asks for tracking** (`CONFIG
+track=on`, sent while a game or a screen that shows the hand / trunk is open),
+come up on their own thread in 2–5 s (the link keeps answering meanwhile), and
+go off again `camera_idle_off_s` (20 s) after the app asks for `track=off` or
+goes. Every HELLO starts the app idle. Session recordings cover only the tracked
+stretches. `RESTART` makes the tracker exit non-zero, and systemd
+(`Restart=on-failure`) starts it again 5 s later.
 
 ```
 app                                  tracker
@@ -76,12 +81,13 @@ again and is not applied twice.
 | Type | Name | Body | ACK detail |
 |---|---|---|---|
 | `0x01` | `HEARTBEAT` | (no seq, no body) | — |
-| `0x02` | `HELLO` | version u8 (2) | `v2`, or why refused |
+| `0x02` | `HELLO` | version u8 (3) | `v3`, or why refused |
 | `0x03` | `SESSION` | patient id | the id |
 | `0x04` | `STOP` | — | — |
 | `0x05` | `CONFIG` | `key=value` | `key=value` as applied, or why refused |
 | `0x06` | `TRUNK` | `neutral` \| `snapshot` \| `select=<n>` | the command, or why refused |
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
+| `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
 
 STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
 board's camera recordings: `<patient>/<session>/Video/rec_*` and
@@ -90,7 +96,8 @@ board's camera recordings: `<patient>/<session>/Video/rec_*` and
 being written now. Listing and deleting run on a worker thread, so the ACK only
 says the job was taken; each finished job answers with a `STORAGE_LIST`.
 
-CONFIG keys (tracker.py `_apply_setting`): `solver` (joint/ransac), `refine`
+CONFIG keys (tracker.py `_apply_setting`): `track` (on/off: the app wants
+tracking now; not a setting, never in settings.json), `solver` (joint/ransac), `refine`
 (crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
 `trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `recording`
 (on/off), `recording_fps`, `recording_scale` (0–1], `recording_chunk_frames` —
@@ -104,7 +111,7 @@ same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 
 | Type | Name | Payload |
 |---|---|---|
-| `0x80` | `TRACKER_HEARTBEAT` | — ; sent when nothing else went out for 0.5 s |
+| `0x80` | `TRACKER_HEARTBEAT` | state u8: 0 idle (cameras off), 1 cameras starting, 2 tracking, 3 cameras failed (retried in 5 s); sent when nothing else went out for 0.5 s, and at once on a change |
 | `0x81` | `POSITION` | `<BH9f`, 39 bytes, below |
 | `0x82` | `ACK` | `seq u16 · ok u8 · detail` |
 | `0x83` | `TRUNK_STATUS` | CSV, below |

@@ -23,6 +23,7 @@ var _capture: Button
 
 
 func _ready() -> void:
+	GlobalScript.hold_tracking(self)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_warn = _threshold("trunk_warn_deg", 8.0)
 	_comp = _threshold("trunk_comp_deg", 15.0)

@@ -262,7 +262,23 @@ for big messages, heartbeats both ways.
 
 - The tracker is the `noark-tracker` systemd service on the board over **both**
   transports; Godot never starts it, it connects (HELLO) and the session ends on
-  STOP or 3 s of silence, the tracker running on. Cameras come up once at boot.
+  STOP or 3 s of silence, the tracker running on.
+- **Idle unless a game runs:** the cameras, tag detection and trunk tracking are off
+  until Godot sends CONFIG `track=on`. `GlobalScript._update_tracking` sends it while
+  the current scene is under `res://Games/` or a node called
+  `GlobalScript.hold_tracking(self)` (trunk panel in the game menus when trunk is on,
+  Trunk angles, Define Table); everywhere else `track=off`. The cameras take 2–5 s to
+  come up (own thread; the link keeps answering) and go off `camera_idle_off_s` (20 s)
+  after. Recordings cover only tracked stretches. Idle measured ~98% CPU free, 71 °C
+  falling (tracking: ~170% CPU, 85–87 °C). The tracker's state rides on
+  TRACKER_HEARTBEAT; the main menu's status dot shows it (cameras off / starting / tracking).
+  A new screen that needs the hand outside `res://Games/` must call `hold_tracking`.
+- **Restart tracker** (main menu): RESTART over the link (the tracker exits 75,
+  systemd restarts it); if the tracker does not answer and the app is on the board,
+  `sudo -n systemctl --no-block restart noark-tracker`, which needs
+  `/etc/sudoers.d/noark-tracker` (`radxa ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block restart noark-tracker`).
+  Main-menu buttons are styled in code by `Main_screen/Scripts/game_button.gd`
+  (`GameButton.apply(button, colour, size)`), layout stays in the .tscn.
   `stream_type` in settings.json picks `ble` (the default; Godot on a tablet)
   or `udp` (Godot on the board), also in the Settings screen; the tracker and Godot each read it, in one place each.
 - Python: `protocol.py` (wire format), `link.py` (acks, chunks, heartbeat,

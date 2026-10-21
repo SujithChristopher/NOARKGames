@@ -348,6 +348,10 @@ class TrunkEngine:
         now = time.perf_counter()
         timing = {}
         self._seq += 1
+        if self._rate and now - self._rate[-1] > FRAME_GAP_S and self._fail_since is not None:
+            # No frames for a while: the cameras were off (the app idle), not
+            # the person away. The occlusion clock starts again from here.
+            self._fail_since = now
         self._rate = [t for t in self._rate if now - t < 2.0] + [now]
         hz = (len(self._rate) - 1) / max(now - self._rate[0], 1e-6) if len(self._rate) > 1 else 0.0
 
@@ -725,6 +729,10 @@ def _process_main(shm_name, shape, lock, seq, new, cmds, out, calib, settings):
     finally:
         del buf
         shm.close()
+
+
+# A pause in frames longer than this is the tracker idling, not an occlusion.
+FRAME_GAP_S = 1.0
 
 
 class TrunkProcess:

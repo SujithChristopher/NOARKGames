@@ -7,7 +7,7 @@ The Godot side is Main_screen/Scripts/link_protocol.gd; change the two together.
 
 import struct
 
-VERSION = 2
+VERSION = 3
 
 NONE = 0x00
 
@@ -19,16 +19,25 @@ STOP = 0x04
 CONFIG = 0x05         # "key=value"
 TRUNK = 0x06          # "neutral" | "snapshot" | "select=<n>"
 STORAGE = 0x07        # "list" | "delete=<path>"; answered later by STORAGE_LIST
-RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE})
+RESTART = 0x08        # ACKed, then the tracker exits and systemd starts it again
+RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE, RESTART})
 
 # Tracker -> app
-TRACKER_HEARTBEAT = 0x80
+TRACKER_HEARTBEAT = 0x80  # state u8: what the cameras are doing (below)
 POSITION = 0x81       # <BH9f: ref_id, centroid, rvec, tvec
 ACK = 0x82            # seq u16, ok u8, detail
 TRUNK_STATUS = 0x83   # CSV
 SNAPSHOT = 0x84       # u16 json_len, json, jpeg
 CHUNK = 0x85          # msg_id u8, index u8, total u8, part of another message
 STORAGE_LIST = 0x86   # JSON: the board's recordings and disk (storage.py)
+
+# TRACKER_HEARTBEAT state: the cameras are off until the app asks for tracking
+# (CONFIG track=on), take a few seconds to come up, and go off again after it
+# stops asking.
+STATE_IDLE = 0
+STATE_STARTING = 1
+STATE_TRACKING = 2
+STATE_FAILED = 3     # the cameras would not start; retried
 
 _SEQ = struct.Struct("<H")
 _ACK = struct.Struct("<BHB")

@@ -3,7 +3,7 @@ extends RefCounted
 ## then the payload (docs/PROTOCOL.md). The Python side is pyscripts/protocol.py;
 ## change the two together. Used as `const LinkProtocol := preload(...)`.
 
-const VERSION := 2
+const VERSION := 3
 
 const NONE := 0x00
 
@@ -16,9 +16,10 @@ const STOP := 0x04
 const CONFIG := 0x05          # "key=value"
 const TRUNK := 0x06           # "neutral" | "snapshot" | "select=<n>"
 const STORAGE := 0x07         # "list" | "delete=<path>"; answered later by STORAGE_LIST
+const RESTART := 0x08         # ACKed, then the tracker exits and systemd starts it again
 
 # Tracker -> app
-const TRACKER_HEARTBEAT := 0x80
+const TRACKER_HEARTBEAT := 0x80  # state u8 (TrackerState)
 const POSITION := 0x81        # <BH9f: ref_id, centroid, rvec, tvec
 const ACK := 0x82             # seq u16, ok u8, detail
 const TRUNK_STATUS := 0x83    # CSV
@@ -31,6 +32,11 @@ const ACK_SIZE := 4
 
 ## What the app's end of the link is doing, for the status indicator.
 enum LinkStatus { IDLE, SCANNING, CONNECTING, CONNECTED }
+
+## What the tracker's cameras are doing (TRACKER_HEARTBEAT). Off until the app
+## asks for tracking (CONFIG track=on), a few seconds to come up, and off again
+## a little after it stops asking. UNKNOWN until the first heartbeat.
+enum TrackerState { IDLE, STARTING, TRACKING, FAILED, UNKNOWN = -1 }
 
 
 static func encode(kind: int) -> PackedByteArray:
