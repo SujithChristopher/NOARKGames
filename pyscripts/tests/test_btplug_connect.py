@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import protocol  # noqa: E402
 
 HEARTBEAT = protocol.encode(protocol.HEARTBEAT)
-STOP = protocol.encode(protocol.STOP)
+# The tracker streams only to an app that said HELLO; STOP ends its session.
+HELLO = protocol.encode_reliable(protocol.HELLO, 1, bytes([protocol.VERSION]))
+STOP = protocol.encode_reliable(protocol.STOP, 2)
 
 DEVICE_NAME   = "NOARK_Tracker"
 SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
@@ -23,8 +25,8 @@ def notification_handler(sender, data: bytearray):
     if kind != protocol.POSITION:
         print(f"[RX] message 0x{kind:02x}: {payload[:60]!r}")
         return
-    status, _, (x, y, z), _, _ = protocol.decode_position(bytes(data))
-    label = "STOPPING" if status == protocol.STATUS_STOPPING else "RUNNING"
+    _, (x, y, z), _, _ = protocol.decode_position(bytes(data))
+    label = "POSITION"
     packet_count += 1
     print(f"[RX #{packet_count:04d}] {label:<8}  x={x:+.4f}  y={y:+.4f}  z={z:+.4f}")
 
@@ -69,20 +71,20 @@ async def main():
         await client.start_notify(POSITION_UUID, notification_handler)
         print("\n[BLE] Subscribed to position notifications — streaming (Ctrl+C to stop)\n")
 
-        # Heartbeat so the tracker starts streaming
+        # HELLO so the tracker starts streaming
         try:
-            await client.write_gatt_char(COMMAND_UUID, HEARTBEAT, response=False)
+            await client.write_gatt_char(COMMAND_UUID, HELLO, response=False)
         except Exception as e:
             print(f"[BLE] Write without response failed or not supported by char: {e}")
             # Try with response if false fails
             try:
-                await client.write_gatt_char(COMMAND_UUID, HEARTBEAT, response=True)
+                await client.write_gatt_char(COMMAND_UUID, HELLO, response=True)
             except Exception as e:
                 pass
-        
+
         try:
             while client.is_connected:
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(1.0)   # the tracker gives up after 3 s of silence
                 try:
                     await client.write_gatt_char(COMMAND_UUID, HEARTBEAT, response=False)
                 except:

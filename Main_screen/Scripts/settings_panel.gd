@@ -1,13 +1,15 @@
 extends CanvasLayer
 ## Settings screen for the main scene: a button opens a panel over {DOCUMENTS}/NOARK/settings.json.
 ## Edits are saved as they are made. `debug` is not listed on purpose (file-only).
-## Solver / refine / camera / deadband are also sent to the running tracker; the
-## rest are read when the tracker starts, so they apply next launch.
+## Everything but `display` is also sent to the tracker as a CONFIG and applies
+## at once (recording from the next session); `display` needs the tracker
+## restarted (sudo systemctl restart noark-tracker).
 
 const LIVE_KEYS := {
 	"tracker_solver": "solver", "tracker_refine": "refine",
 	"tracker_camera": "camera", "corner_deadband_px": "deadband",
-	"trunk_method": "trunk_method",
+	"trunk_method": "trunk_method", "recording": "recording",
+	"recording_fps": "recording_fps", "recording_scale": "recording_scale",
 }
 
 # [key, label, kind, options]   kind: "bool" or "choice" (choices are compared as strings)
@@ -99,12 +101,13 @@ func _changed(key: String, value: Variant) -> void:
 	var ok := Settings.save()
 	var live := ""
 	if LIVE_KEYS.has(key):
-		GlobalScript.send_tracker_config(LIVE_KEYS[key], _as_text(value))
+		var sent := ("on" if value else "off") if value is bool else _as_text(value)
+		GlobalScript.send_tracker_config(LIVE_KEYS[key], sent)
 		live = " (sent to the tracker)"
 	elif not ok:
 		live = ""
 	else:
-		live = " (applies next launch)"
+		live = " (restart the tracker to apply)"
 	_status.text = ("Saved %s = %s%s" % [key, _as_text(value), live]) if ok else "Could not save settings!"
 
 
@@ -117,6 +120,6 @@ static func _as_text(v: Variant) -> String:
 
 # Keep numbers numeric in the file: the tracker int()/float()s them, but a string would be sloppy.
 static func _typed(key: String, text: String) -> Variant:
-	if key in ["tracker_solver", "tracker_refine", "tracker_camera"]:
+	if key in ["tracker_solver", "tracker_refine", "tracker_camera", "trunk_method"]:
 		return text
 	return text.to_float() if "." in text else text.to_int()

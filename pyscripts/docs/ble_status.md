@@ -8,8 +8,7 @@
 - **Confirmed**: Full scan → connect → notify → receive pipeline working
 - **Device**: `NOARK_Tracker` at `88:a2:9e:ad:d3:e5`
 - **Data rate**: Continuous position packets at ~30 Hz
-- **Packet format**: 4 × float32 LE — `[msg_code, x, y, z]`
-- **msg_code values**: `2.0=START`, `-99.0=STOP`, `5.0=RESET`, `0.0=IDLE`
+- **Message format**: see `docs/PROTOCOL.md` (one protocol for UDP and BLE)
 
 ### GATT layout (confirmed from live scan)
 | Service / Char UUID | Caps | Role |
@@ -22,7 +21,7 @@
 - Advertises as `NOARK_Tracker`
 - GATT server accepts connections from any central
 - Sends position on notify channel at camera frame rate
-- Accepts text commands: `CONNECTED`, `STOP`, `USER:xxx`, `RESET`
+- Accepts the app's commands (HELLO, SESSION, STOP, CONFIG, TRUNK; `docs/PROTOCOL.md`)
 
 ---
 

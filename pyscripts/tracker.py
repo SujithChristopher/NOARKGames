@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 import platform
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -25,6 +24,7 @@ import protocol
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
+from link import Link
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
 from stereo_capture import StereoCapture
 from trunk.snapshot_packet import encode_snapshot
@@ -266,10 +266,6 @@ _CAMERA_CHOICES = {
 }
 
 
-class StartupAborted(Exception):
-    """Godot asked to quit while the cameras were still coming up."""
-
-
 class TrackerClass:
     def __init__(
         self,
@@ -278,6 +274,7 @@ class TrackerClass:
         rigidbody_path: Path,
         device_path: Path,
         settings: Optional[dict] = None,
+        settings_path: Optional[Path] = None,
         record_frames: bool = False,
         fps_value: Optional[int] = None,
         flip_frames: bool = True,
@@ -291,6 +288,8 @@ class TrackerClass:
     ) -> None:
         if settings is None:
             settings = {}
+        # Re-read at every HELLO for what can change live (_reload_settings).
+        self._settings_path = settings_path
 
         self.record_frames      = record_frames
         self.fps_value          = fps_value
@@ -334,8 +333,9 @@ class TrackerClass:
         self.udp_ip            = settings.get("udp_ip",   stream.get("ip", "127.0.0.1"))
         self.udp_port          = int(settings.get("udp_port", stream.get("port", 8000)))
         # One transport or the other, never both: "udp" when Godot runs on this
-        # board and spawns us, "ble" when it runs on a tablet. Godot reads the
-        # same key (its own settings.json) to pick its side.
+        # board, "ble" when it runs on a tablet. Either way the tracker is the
+        # long-running side (the noark-tracker service) and the app connects to
+        # it. Godot reads the same key (its own settings.json) to pick its side.
         self.stream_type       = settings.get("stream_type", "udp")
         if self.stream_type not in ("udp", "ble"):
             print(f"[NET] Unknown stream_type {self.stream_type!r}, using udp.")
@@ -467,9 +467,6 @@ class TrackerClass:
         self._csv_file    = None
         self.record       = False
         self._hid: Optional[str] = None
-        # The app has spoken in this connection: until then there is nobody to
-        # send positions to (over UDP, no address either).
-        self._app_seen = False
         # Frames for this session, written raw alongside tracking when
         # settings.json asks. Costs ~1.2 ms a pair and 61 MB/s of disk.
         self.record_session = bool(settings.get("recording", False))
@@ -487,9 +484,6 @@ class TrackerClass:
         self.recorder: Optional[FrameRecorder] = None
         self._sync_chip = settings.get("sync_chip", "gpiochip4")
         self._sync_pin = settings.get("sync_pin", "PIN_11")
-        # When the app's last message arrived: the 3 s liveness watchdog.
-        self._last_command_at = 0.0
-        self._stop_requested = False
         self._rec_file0 = self._rec_file1 = None
         self._ts_file0  = self._ts_file1  = None
 
@@ -498,19 +492,11 @@ class TrackerClass:
         )
 
         # ── Transport + cameras ───────────────────────────────────────────────
-        # Bind before bringing the cameras up, not after. Frame-sync alignment
-        # takes tens of seconds, and Godot starts heartbeating the moment it
-        # spawns us: with nothing listening yet those datagrams hit a closed
-        # port, and Godot's socket is a *connected* one, so Linux bounces an
-        # ICMP port-unreachable that can leave it erroring. The tracker would
-        # then see no heartbeat, exit on its 3 s timeout as soon as the loop
-        # started, and be respawned by Godot's watchdog into the same long wait
-        # — a silent crash loop that looks exactly like "no UDP position".
-        #
-        # Binding first costs nothing: nothing reads the socket until the loop
-        # starts, and the kernel buffers whatever arrives meanwhile.
+        # Bind before bringing the cameras up: frame-sync alignment takes tens
+        # of seconds, and an app that connects meanwhile has its HELLO buffered
+        # by the kernel (UDP) or BlueZ and answered once the loop runs. The app
+        # retries until it is.
         self._init_transport()
-        self._watch_for_stop()
 
         if platform.system() == "Linux":
             self._init_cameras()
@@ -556,12 +542,12 @@ class TrackerClass:
             self.trunk_on = self.trunk is not None
         print(f"[TRUNK] {'On' if self.trunk_on else 'Off'} (live).")
 
-    def _trunk_command(self, arg: bytes) -> None:
+    def _trunk_command(self, arg: bytes):
         """TRUNK `neutral` starts a neutral capture; `snapshot` sends the
         subject picker's image; `select=<n>` follows person n of it (-1 = the
-        centre-most again)."""
+        centre-most again). -> (ok, detail) for the ACK."""
         if self.trunk is None or not self.trunk_on:
-            return
+            return False, "trunk tracking is off"
         arg = arg.strip()
         if arg == b"neutral":
             print("[TRUNK] Neutral capture requested.")
@@ -572,26 +558,19 @@ class TrackerClass:
             try:
                 self.trunk.select(int(arg[7:]))
             except ValueError:
-                print(f"[TRUNK] Bad select: {arg!r}")
+                return False, f"bad select: {arg.decode(errors='replace')}"
+        else:
+            return False, f"unknown trunk command: {arg.decode(errors='replace')}"
+        return True, arg.decode()
 
     def _send_snapshot(self) -> None:
-        """Ship a snapshot the trunk process has produced, if any.
-
-        Chunks are paced: BlueZ drops a notification whose value is replaced
-        before it went out, and a burst of 25 would."""
+        """Ship a snapshot the trunk process has produced, if any."""
         snap = self.trunk.take_snapshot()
         if snap is None:
             return
-        self._snap_id = (getattr(self, "_snap_id", 0) + 1) & 0xFF
-        chunks = encode_snapshot(snap, self._snap_id)
-
-        def run():
-            for c in chunks:
-                self.streamer.send(c)
-                time.sleep(0.015)
-        threading.Thread(target=run, name="snapshot-send", daemon=True).start()
-        print(f"[TRUNK] Snapshot sent: {len(snap.people)} people, "
-              f"{len(snap.jpeg)} B jpeg, {len(chunks)} chunks")
+        message = encode_snapshot(snap)
+        self.link.send(message)   # chunked and paced by the link
+        print(f"[TRUNK] Snapshot sent: {len(snap.people)} people, {len(message)} B")
 
     def _send_trunk(self) -> None:
         """One TRUNK_STATUS per trunk update, CSV:
@@ -605,7 +584,7 @@ class TrackerClass:
             return
         self._trunk_sent_seq = st.seq
         f, l, a = st.angles
-        self.streamer.send(protocol.encode(
+        self.link.send(protocol.encode(
             protocol.TRUNK_STATUS,
             f"{st.state},{st.level},{st.levels[0]},{st.levels[1]},{st.levels[2]},"
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
@@ -627,35 +606,6 @@ class TrackerClass:
     # Phase alignment, queue pairing and drift resync all live in
     # StereoCapture, shared with rigidbody_calib.py so both see the same frames.
 
-    def _watch_for_stop(self) -> None:
-        """Notice a quit while the cameras are still coming up.
-
-        Godot sends STOP once, stops its heartbeat, then blocks in
-        wait_to_finish() until this process exits. Bringing the pair up takes
-        tens of seconds of phase alignment during which nothing read the socket,
-        so quitting early left the app hung until the whole alignment had run —
-        the tracker was not stuck, it simply had not looked yet.
-        """
-        def watch():
-            while not self._startup_done.is_set():
-                msg = self.streamer.receive()
-                if msg:
-                    # Everything else is dropped: the app repeats its SESSION in
-                    # every heartbeat, so the loop sees it again once it runs.
-                    self._app_seen = True
-                    self._last_command_at = time.time()
-                    if protocol.decode(msg)[0] == protocol.STOP and self.stream_type == "udp":
-                        self._stop_requested = True
-                        return
-                time.sleep(0.05)
-
-        self._startup_done = threading.Event()
-        threading.Thread(target=watch, name="stop-watch", daemon=True).start()
-
-    def _stage_check(self) -> None:
-        if self._stop_requested:
-            raise StartupAborted()
-
     def _init_cameras(self) -> None:
         self.capture = StereoCapture(
             frame_size=self.frame_size,
@@ -666,7 +616,6 @@ class TrackerClass:
             exposure_us=self._exposure_us,
             gain=self._gain,
             isp=self._isp,
-            on_stage=self._stage_check,
         )
         self.cam0 = self.capture.cam0
         self.cam1 = self.capture.cam1
@@ -728,86 +677,128 @@ class TrackerClass:
         else:
             self.streamer = UDPStreamer(ip=self.udp_ip, port=self.udp_port)
         self.streamer.start()
+        self.link = Link(self.streamer)
 
-    def _end_ble_session(self, why: str) -> None:
-        """Over BLE the tracker outlives the app: it runs as a service on this
-        board while Godot runs on the tablet, which comes and goes. So a STOP or
-        a lost heartbeat closes the session and waits for the next central
-        instead of exiting, which would leave nothing to reconnect to."""
-        print(f"[BLE] {why}; session closed, waiting for the next connection.")
+    def _end_link(self, why: str) -> None:
+        """The app has gone (closed, crashed, out of range). The tracker
+        outlives it, over either transport: the session closes and it waits for
+        the next HELLO."""
+        print(f"[LINK] {why}; session closed, waiting for the app.")
         self._close_session()
-        self._app_seen = False
-        self.streamer.reset()
+        self.link.reset()
 
-    def _handle_messages(self) -> None:
-        """Everything the app sent since the last frame (docs/PROTOCOL.md).
+    def _on_message(self, kind: int, body: bytes):
+        """One app command, from Link.poll -> (ok, detail) for its ACK."""
+        if kind == protocol.HELLO:
+            self._reload_settings()
+            return True, ""
+        if kind == protocol.CONFIG:
+            return self._apply_config(body)
+        if kind == protocol.TRUNK:
+            return self._trunk_command(body)
+        if kind == protocol.SESSION:
+            hid = body.decode(errors="replace").strip()
+            if not hid:
+                return False, "empty patient id"
+            self._open_session(hid)
+            return True, hid
+        if kind == protocol.STOP:
+            # The session ends now; the link itself when the app goes quiet.
+            print("[LINK] STOP from the app; session closed.")
+            self._close_session()
+            return True, ""
+        return False, "unknown command"
 
-        Drained, not one per frame: a backlog delayed a CONFIG by seconds. Each
-        message is acted on as it is read, so a STOP or SESSION does not depend
-        on a marker being in view."""
-        while True:
-            msg = self.streamer.receive()
-            if not msg:
-                return
-            kind, payload = protocol.decode(msg)
-            self._app_seen = True
-            self._last_command_at = time.time()
-            if kind == protocol.CONFIG:
-                self._apply_config(payload)
-            elif kind == protocol.TRUNK:
-                self._trunk_command(payload)
-            elif kind == protocol.SESSION:
-                self._open_session(payload.decode(errors="replace").strip())
-            elif kind == protocol.STOP:
-                if self.stream_type == "ble":
-                    self._end_ble_session("STOP from the app")
-                    return
-                self._stop_requested = True
-            elif kind != protocol.HEARTBEAT:
-                print(f"[NET] Unknown message type 0x{kind:02x}, ignored")
+    # settings.json key -> CONFIG key, for what can change without a restart.
+    # The rest (cameras, transport, trunk thresholds, cores) need
+    # `systemctl restart noark-tracker`.
+    _LIVE_SETTINGS = {
+        "tracker_solver": "solver", "tracker_refine": "refine",
+        "tracker_camera": "camera", "corner_deadband_px": "deadband",
+        "trunk_enabled": "trunk", "trunk_method": "trunk_method",
+        "recording": "recording", "recording_fps": "recording_fps",
+        "recording_scale": "recording_scale",
+        "recording_chunk_frames": "recording_chunk_frames",
+    }
 
-    def _apply_config(self, payload: bytes) -> None:
-        """Live tuning from Godot: CONFIG `<key>=<value>`, answered by CONFIG_ACK.
+    def _reload_settings(self) -> None:
+        """At each HELLO: apply what settings.json now says, so an edit made in
+        the app since the tracker started takes effect when the app connects
+        (over UDP the two share the file)."""
+        if self._settings_path is None or not Path(self._settings_path).exists():
+            return
+        try:
+            settings = _load_settings(Path(self._settings_path))
+        except (OSError, ValueError) as exc:
+            print(f"[CFG] could not re-read {self._settings_path}: {exc}")
+            return
+        for name, key in self._LIVE_SETTINGS.items():
+            if name not in settings:
+                continue
+            value = settings[name]
+            if isinstance(value, bool):
+                value = "on" if value else "off"
+            try:
+                self._apply_setting(key, str(value))
+            except ValueError as exc:
+                print(f"[CFG] settings.json {name}={value!r} ignored: {exc}")
+
+    def _apply_config(self, payload: bytes):
+        """CONFIG `<key>=<value>` from the app -> (ok, detail) for its ACK.
+        Bad values are reported and refused, never fatal mid-session."""
+        try:
+            key, value = payload.decode().strip().split("=", 1)
+            self._apply_setting(key, value)
+        except ValueError as exc:
+            print(f"[CFG] refused {payload!r}: {exc}")
+            return False, str(exc)
+        print(f"[CFG] {key} = {value}")
+        return True, f"{key}={value}"
+
+    def _apply_setting(self, key: str, value: str) -> None:
+        """One live setting (docs/PROTOCOL.md, CONFIG). ValueError if refused.
 
         Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
         camera (both|cam0|cam1), deadband (px; 0 = stabilizer off),
-        trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot).
-        Bad values are reported and ignored, never fatal mid-session.
+        trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot),
+        recording (on|off), recording_fps, recording_scale (0-1],
+        recording_chunk_frames — the recording ones from the next session.
         """
-        try:
-            key, value = payload.decode().strip().split("=", 1)
-            if key == "solver" and value in RigidBody.POSE_SOLVERS:
-                self.solver = value
-            elif key == "refine" and value in ("crop", "contour", "subpix", "none"):
-                if value == "crop" and not _CROP_REFINE:
-                    raise ValueError("rapidtag build has no crop refine")
-                self.refine_mode = value
-                _set_detector_refine(value)
-            elif key == "camera" and value in _CAMERA_CHOICES:
-                self.camera_choice = value
-                self.stereo_refine = value == "both"
-                self._primary = 1 if value == "cam1" else 0
-            elif key == "deadband":
-                self.stabilizer.threshold_px = max(0.0, float(value))
-            elif key == "trunk" and value in ("on", "off"):
+        if key == "solver" and value in RigidBody.POSE_SOLVERS:
+            self.solver = value
+        elif key == "refine" and value in ("crop", "contour", "subpix", "none"):
+            if value == "crop" and not _CROP_REFINE:
+                raise ValueError("rapidtag build has no crop refine")
+            self.refine_mode = value
+            _set_detector_refine(value)
+        elif key == "camera" and value in _CAMERA_CHOICES:
+            self.camera_choice = value
+            self.stereo_refine = value == "both"
+            self._primary = 1 if value == "cam1" else 0
+        elif key == "deadband":
+            self.stabilizer.threshold_px = max(0.0, float(value))
+        elif key == "trunk" and value in ("on", "off"):
+            if (value == "on") != self.trunk_on:
                 self._set_trunk(value == "on")
-            elif key == "trunk_method" and value in ("icp", "msam_r18", "msam_v3rot"):
+        elif key == "trunk_method" and value in ("icp", "msam_r18", "msam_v3rot"):
+            if self._trunk_settings.get("trunk_method", "icp") != value:
                 self._trunk_settings = {**self._trunk_settings, "trunk_method": value}
                 if self.trunk is not None:
                     self.trunk.set_method(value)
-            else:
-                raise ValueError("unknown key or value")
-        except Exception as exc:
-            print(f"[CFG] ignored {payload!r}: {exc}")
-            return
-        print(f"[CFG] {key} = {value}")
-        # So the UI can show it took effect.
-        self.streamer.send(protocol.encode(protocol.CONFIG_ACK, f"{key}={value}"))
+        elif key == "recording" and value in ("on", "off"):
+            self.record_session = value == "on"
+        elif key == "recording_fps" and float(value) > 0:
+            self.recording_hz = float(value)
+        elif key == "recording_scale" and 0 < float(value) <= 1:
+            self.recording_scale = float(value)
+        elif key == "recording_chunk_frames" and int(value) >= 0:
+            self.recording_chunk = int(value)
+        else:
+            raise ValueError(f"unknown key or value: {key}={value}")
 
     def _send_position(self, centroid, ref_rvec, ref_tvec, ref_id: int) -> None:
-        status = protocol.STATUS_STOPPING if self._stop_requested else protocol.STATUS_RUNNING
-        self.streamer.send(protocol.encode_position(
-            status, ref_id, np.ravel(centroid), np.ravel(ref_rvec), np.ravel(ref_tvec)))
+        self.link.send(protocol.encode_position(
+            ref_id, np.ravel(centroid), np.ravel(ref_rvec), np.ravel(ref_tvec)))
         self._send_count += 1
 
     # ── Pose estimation ───────────────────────────────────────────────────────
@@ -1114,7 +1105,8 @@ class TrackerClass:
 
         # Before pose estimation: a STOP or SESSION must not wait for a marker
         # to be in view (recording exists for exactly the frames that fail).
-        self._handle_messages()
+        self.link.poll(self._on_message)
+        self.link.tick()
 
         if self.trunk is not None and self.trunk_on:
             self._send_trunk()
@@ -1149,7 +1141,7 @@ class TrackerClass:
                 ref_rvec = rvecs[0]
                 ref_tvec = tvecs[0]
 
-            if self._app_seen:
+            if self.link.connected:
                 self._send_position(centroid, ref_rvec, ref_tvec, ref_id)
 
                 if self.record and self.csv_writer:
@@ -1169,29 +1161,15 @@ class TrackerClass:
             cv2.imshow("frame", np.hstack([disp0, disp1]))
 
     def run(self) -> None:
-        # The watcher hands the socket back now that the loop will read it.
-        self._startup_done.set()
-        if self._stop_requested:
-            print("STOP received during startup, exiting…")
-            return
-        self._last_command_at = time.time()
+        """Track until stopped (Ctrl-C, the service stopping). Apps come and go."""
         last_rate_log  = time.time()
         last_resync    = time.time()
 
         try:
             while True:
-                try:
-                    self.process_frame()
-                    if time.time() - self._last_command_at > 3.0:
-                        if self.stream_type == "udp":
-                            print("Lost connection to Godot, exiting…")
-                            break
-                        if self._app_seen:
-                            self._end_ble_session("No heartbeat for 3 s")
-                        self._last_command_at = time.time()
-                except Exception as exc:
-                    print(f"Error: {exc} — Godot likely closed")
-                    break
+                self.process_frame()
+                if self.link.connected and self.link.silent_for() > 3.0:
+                    self._end_link("No heartbeat for 3 s")
 
                 now = time.time()
                 if self.resync_every_s > 0 and now - last_resync >= self.resync_every_s:
@@ -1226,10 +1204,6 @@ class TrackerClass:
                     self.capture.reset_counters()
                     self._stage_time  = {k: 0.0 for k in self._stage_time}
                     last_rate_log     = now
-
-                if self._stop_requested:
-                    print("STOP received from Godot, exiting…")
-                    break
 
                 if self.display and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
@@ -1311,25 +1285,22 @@ if __name__ == "__main__":
     # Before anything spawns a thread.
     _pin_to_cpus(args.cpus if args.cpus is not None else settings.get("tracker_cpus"))
 
-    try:
-        tracker = TrackerClass(
-            stereo_calib_path=_SCRIPT_DIR / "calibration" / "sterio_calibration.toml",
-            aruco_calib_path=_SCRIPT_DIR / "calibration" / "good.toml",
-            rigidbody_path=args.rigidbody,
-            device_path=_SCRIPT_DIR / "calibration" / "device.toml",
-            stereo_refine=args.stereo_refine,
-            solver=args.solver,
-            camera=args.camera,
-            settings=settings,
-            record_frames=args.record,
-            fps_value=args.fps,
-            flip_frames=args.flip,
-            frame_sync=args.frame_sync,
-            phase_tol_us=args.phase_tol,
-            resync_every_s=args.resync_every,
-            resync_threshold_us=args.resync_threshold,
-        )
-    except StartupAborted:
-        print("STOP received while the cameras were starting, exiting…")
-        raise SystemExit(0)
+    tracker = TrackerClass(
+        stereo_calib_path=_SCRIPT_DIR / "calibration" / "sterio_calibration.toml",
+        aruco_calib_path=_SCRIPT_DIR / "calibration" / "good.toml",
+        rigidbody_path=args.rigidbody,
+        device_path=_SCRIPT_DIR / "calibration" / "device.toml",
+        stereo_refine=args.stereo_refine,
+        solver=args.solver,
+        camera=args.camera,
+        settings=settings,
+        settings_path=args.settings,
+        record_frames=args.record,
+        fps_value=args.fps,
+        flip_frames=args.flip,
+        frame_sync=args.frame_sync,
+        phase_tol_us=args.phase_tol,
+        resync_every_s=args.resync_every,
+        resync_threshold_us=args.resync_threshold,
+    )
     tracker.run()

@@ -1,30 +1,38 @@
 """The app <-> tracker wire protocol, shared by the UDP and BLE transports.
 
-Every message is one type byte and a payload (docs/PROTOCOL.md). The Godot side
-is Main_screen/Scripts/link_protocol.gd; change the two together.
+Every message is one type byte and a payload (docs/PROTOCOL.md). The app's
+commands carry a sequence number and are acknowledged; link.py does that part.
+The Godot side is Main_screen/Scripts/link_protocol.gd; change the two together.
 """
 
 import struct
 
+VERSION = 2
+
 NONE = 0x00
 
-# App -> tracker
+# App -> tracker. HEARTBEAT has no payload; the rest are [seq u16][body].
 HEARTBEAT = 0x01
-SESSION = 0x02        # patient id
-STOP = 0x03
-CONFIG = 0x04         # "key=value"
-TRUNK = 0x05          # "neutral" | "snapshot" | "select=<n>"
+HELLO = 0x02          # version u8
+SESSION = 0x03        # patient id
+STOP = 0x04
+CONFIG = 0x05         # "key=value"
+TRUNK = 0x06          # "neutral" | "snapshot" | "select=<n>"
+RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK})
 
 # Tracker -> app
-POSITION = 0x81
-CONFIG_ACK = 0x82     # "key=value"
+TRACKER_HEARTBEAT = 0x80
+POSITION = 0x81       # <BH9f: ref_id, centroid, rvec, tvec
+ACK = 0x82            # seq u16, ok u8, detail
 TRUNK_STATUS = 0x83   # CSV
-SNAPSHOT_CHUNK = 0x84 # snap_id u8, index u8, total u8, data
+SNAPSHOT = 0x84       # u16 json_len, json, jpeg
+CHUNK = 0x85          # msg_id u8, index u8, total u8, part of another message
 
-STATUS_RUNNING, STATUS_STOPPING = 0, 1
-
-_POSITION = struct.Struct("<BBH9f")   # type, status, ref_id, centroid, rvec, tvec
-POSITION_SIZE = _POSITION.size        # 40
+_SEQ = struct.Struct("<H")
+_ACK = struct.Struct("<BHB")
+_POSITION = struct.Struct("<BH9f")
+POSITION_SIZE = _POSITION.size        # 39
+CHUNK_HEADER = 4
 
 
 def encode(kind: int, payload: bytes | str = b"") -> bytes:
@@ -40,11 +48,42 @@ def decode(message: bytes) -> tuple[int, bytes]:
     return message[0], message[1:]
 
 
-def encode_position(status: int, ref_id: int, centroid, rvec, tvec) -> bytes:
-    return _POSITION.pack(POSITION, status, int(ref_id), *centroid, *rvec, *tvec)
+def encode_reliable(kind: int, seq: int, body: bytes | str = b"") -> bytes:
+    if isinstance(body, str):
+        body = body.encode()
+    return bytes([kind]) + _SEQ.pack(seq & 0xFFFF) + body
+
+
+def split_seq(payload: bytes) -> tuple[int, bytes]:
+    """A reliable message's payload -> (seq, body). ValueError if too short."""
+    if len(payload) < _SEQ.size:
+        raise ValueError("no sequence number")
+    return _SEQ.unpack_from(payload)[0], payload[_SEQ.size:]
+
+
+def encode_ack(seq: int, ok: bool, detail: str = "") -> bytes:
+    return _ACK.pack(ACK, seq & 0xFFFF, 1 if ok else 0) + detail.encode()
+
+
+def decode_ack(message: bytes) -> tuple[int, bool, str]:
+    _, seq, ok = _ACK.unpack_from(message)
+    return seq, bool(ok), message[_ACK.size:].decode(errors="replace")
+
+
+def encode_position(ref_id: int, centroid, rvec, tvec) -> bytes:
+    return _POSITION.pack(POSITION, int(ref_id), *centroid, *rvec, *tvec)
 
 
 def decode_position(message: bytes):
-    """-> (status, ref_id, centroid, rvec, tvec), for tools and tests."""
-    _, status, ref_id, *f = _POSITION.unpack(message[:POSITION_SIZE])
-    return status, ref_id, tuple(f[0:3]), tuple(f[3:6]), tuple(f[6:9])
+    """-> (ref_id, centroid, rvec, tvec), for tools and tests."""
+    _, ref_id, *f = _POSITION.unpack(message[:POSITION_SIZE])
+    return ref_id, tuple(f[0:3]), tuple(f[3:6]), tuple(f[6:9])
+
+
+def chunk(message: bytes, msg_id: int, max_size: int) -> list[bytes]:
+    """Split a message that does not fit the transport into CHUNK messages."""
+    step = max_size - CHUNK_HEADER
+    parts = [message[i:i + step] for i in range(0, len(message), step)]
+    if len(parts) > 255:
+        raise ValueError(f"message of {len(message)} bytes needs {len(parts)} chunks")
+    return [bytes([CHUNK, msg_id & 0xFF, i, len(parts)]) + p for i, p in enumerate(parts)]

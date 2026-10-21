@@ -1,111 +1,130 @@
 # NOARK app ↔ tracker protocol (v2)
 
-How the Godot app and `pyscripts/tracker.py` talk, over UDP or BLE. One protocol;
-the transport only moves bytes. Single sources of truth:
+How the Godot app and `pyscripts/tracker.py` talk, over UDP or BLE. One
+protocol; the transport only moves bytes.
 
-- Python: `pyscripts/protocol.py`
-- Godot: `Main_screen/Scripts/link_protocol.gd` (`LinkProtocol`)
+| | Python (tracker) | Godot (app) |
+|---|---|---|
+| Wire format | `pyscripts/protocol.py` | `Main_screen/Scripts/link_protocol.gd` |
+| Link (acks, retries, chunks, liveness) | `pyscripts/link.py` | `Main_screen/Scripts/tracker_link.gd` |
+| UDP | `pyscripts/udp_streamer.py` | `Main_screen/Scripts/udp_transport.gd` |
+| BLE | `pyscripts/ble_streamer.py` | `Main_screen/Scripts/ble_transport.gd` |
 
-Change both together, and this file with them.
+The transport is chosen in one place on each side (`_init_transport` in
+tracker.py, `_start_link` in global_script.gd), from settings.json
+`stream_type`. Change the two wire-format files together, bump `VERSION` in both
+for an incompatible change, and update this file.
 
 ---
 
-## 1. Transports
+## 1. Lifecycle
+
+The tracker is a long-running service (`noark-tracker`, systemd) over both
+transports. The app never starts or stops it; it connects, runs sessions, and
+goes. Cameras are brought up once, at boot — frame-sync alignment takes tens of
+seconds, which an app launch no longer pays.
+
+```
+app                                  tracker
+ │── HELLO(version) ───────────────▶ │  re-reads settings.json (live keys), ACK
+ │◀─────────────────────────── ACK ──│
+ │── SESSION(patient) ─────────────▶ │  opens logs / recordings, ACK
+ │── CONFIG / TRUNK … ─────────────▶ │  applies, ACK(ok, detail)
+ │◀── POSITION, TRUNK_STATUS, SNAPSHOT, TRACKER_HEARTBEAT …
+ │── HEARTBEAT (every 0.1 s) ──────▶ │
+ │── STOP ─────────────────────────▶ │  closes the session, ACK; keeps running
+```
+
+| Event | App | Tracker |
+|---|---|---|
+| Nothing from the other side for 3 s | link lost; HELLO again until answered, then SESSION again | session closed; waits for the next HELLO |
+| Tracker restarted under a running app | its next command is refused with `no HELLO`, or 3 s of silence → reconnects as above | — |
+| HELLO with another protocol version | refused; retries every 5 s and logs why | — |
+
+`SESSION` with the id already open is a no-op; a different id closes the open
+session first. `STOP` ends the session, not the tracker.
+
+## 2. Transports
 
 | | UDP | BLE |
 |---|---|---|
-| Selected by | settings.json `"stream_type": "udp"` | `"stream_type": "ble"` |
 | Typical setup | Godot and tracker on the board | Godot on an Android tablet, tracker on the board |
-| Endpoint | tracker binds `127.0.0.1:<udp_port>` (8000) | GATT service `4e4f4152-4b00-…`, device `ble_device_name` |
+| Endpoint | tracker binds `127.0.0.1:<udp_port>` (8000); the app sends from an ephemeral port (`udp_host` to reach another machine) | GATT service `4e4f4152-4b00-…`, device `ble_device_name` |
 | App → tracker | one datagram per message | one write per message to `…4b02…` |
 | Tracker → app | one datagram per message | one notification per message on `…4b01…` |
-| Max message | 1024 bytes (receive buffer) | 244 bytes (247 MTU − 3) |
+| Largest message | 1400 bytes | 244 bytes (247 MTU) |
 
-A transport's interface is the same on both sides: send one message (bytes),
-poll for the messages that arrived. `udp_streamer.py` / `ble_streamer.py` and the
-UDP / BLE branches in `global_script.gd` do nothing else — no parsing, no packing.
+Over UDP the tracker answers whoever sent it the last message. Anything larger
+than the transport takes is split into `CHUNK`s by the link and reassembled
+before the app sees it.
 
-Over UDP the tracker answers whoever sent it the last message, so it sends
-nothing until the app's first message arrives.
+## 3. Framing
 
-## 2. Framing
+Every message is **one type byte, then the payload**; told apart by that byte
+alone. Little-endian. Text is UTF-8 without a terminator. `0x00` is "nothing"
+and is ignored (the BLE characteristic's initial value).
 
-Every message is **one type byte, then the payload**. Messages are told apart
-by the type byte only — never by size or text prefix. Multi-byte numbers are
-little-endian. Text payloads are UTF-8, with no terminator.
+App commands carry a sequence number: `type · seq u16 · body`. The tracker
+answers each with an `ACK` for that `seq`. The app keeps **one command in
+flight**, re-sending it every 0.3 s until its ACK (10 tries; HELLO for as long as
+it takes) — which also keeps Android from refusing overlapping BLE writes. The
+tracker remembers the last `seq` it handled: a retry of it gets the same ACK
+again and is not applied twice.
 
-`0x00` is reserved as "nothing" and is ignored by both sides (the BLE position
-characteristic's initial value).
+## 4. App → tracker
 
-## 3. App → tracker
-
-| Type | Name | Payload | Effect |
+| Type | Name | Body | ACK detail |
 |---|---|---|---|
-| `0x01` | `HEARTBEAT` | — | Liveness only |
-| `0x02` | `SESSION` | patient id (text) | Opens the session for that patient (logs, recordings). Repeating the same id is a no-op; a **different** id closes the current session and opens a new one |
-| `0x03` | `STOP` | — | UDP: the tracker exits. BLE: the session closes and the tracker waits for the next connection |
-| `0x04` | `CONFIG` | `key=value` (text) | Live tuning; answered by `CONFIG_ACK`. Keys: `solver`, `refine`, `camera`, `deadband`, `trunk` (`on`/`off`), `trunk_method` (`icp`/`msam_r18`/`msam_v3rot`) |
-| `0x05` | `TRUNK` | `neutral` \| `snapshot` \| `select=<n>` (text) | Capture neutral; send the subject picker's image; follow person n (−1 = centre-most) |
+| `0x01` | `HEARTBEAT` | (no seq, no body) | — |
+| `0x02` | `HELLO` | version u8 (2) | `v2`, or why refused |
+| `0x03` | `SESSION` | patient id | the id |
+| `0x04` | `STOP` | — | — |
+| `0x05` | `CONFIG` | `key=value` | `key=value` as applied, or why refused |
+| `0x06` | `TRUNK` | `neutral` \| `snapshot` \| `select=<n>` | the command, or why refused |
 
-Every message also counts as a heartbeat. The tracker drains everything that
-arrived each frame, so a command never waits behind a backlog.
+CONFIG keys (tracker.py `_apply_setting`): `solver` (joint/ransac), `refine`
+(crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
+`trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `recording`
+(on/off), `recording_fps`, `recording_scale` (0–1], `recording_chunk_frames` —
+the recording ones from the next session. At each HELLO the tracker applies the
+same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
+`tracker_camera`, `corner_deadband_px`, `trunk_enabled`, `trunk_method`,
+`recording*`). Everything else in settings.json needs
+`sudo systemctl restart noark-tracker`.
 
-## 4. Tracker → app
+## 5. Tracker → app
 
 | Type | Name | Payload |
 |---|---|---|
-| `0x81` | `POSITION` | see below, 40 bytes |
-| `0x82` | `CONFIG_ACK` | `key=value` (text) as applied |
-| `0x83` | `TRUNK_STATUS` | CSV text, fields below |
-| `0x84` | `SNAPSHOT_CHUNK` | `snap_id u8 · index u8 · total u8 · data` |
+| `0x80` | `TRACKER_HEARTBEAT` | — ; sent when nothing else went out for 0.5 s |
+| `0x81` | `POSITION` | `<BH9f`, 39 bytes, below |
+| `0x82` | `ACK` | `seq u16 · ok u8 · detail` |
+| `0x83` | `TRUNK_STATUS` | CSV, below |
+| `0x84` | `SNAPSHOT` | `u16 json_len · json · jpeg` (`trunk/snapshot_packet.py`) |
+| `0x85` | `CHUNK` | `msg_id u8 · index u8 · total u8 · part`, of a message too big for the transport |
 
-**POSITION** (`<BBH9f`, 40 bytes):
+**POSITION**, one per frame with a solved pose (no marker in view → none; the
+heartbeat still shows the tracker is alive):
 
 | Offset | Field | |
 |---|---|---|
 | 0 | type `0x81` | |
-| 1 | status u8 | `0` running, `1` stopping (the app quits on it, UDP) |
-| 2 | ref_id u16 | reference tag / rigid-body id |
-| 4 | centroid xyz f32 ×3 | tracked point, metres, camera frame |
-| 16 | rvec f32 ×3 | Rodrigues rotation of the reference tag / rigid body |
-| 28 | tvec f32 ×3 | its translation |
-
-Sent once per frame in which a pose was solved. No marker in view → no
-POSITION.
+| 1 | ref_id u16 | reference tag / rigid-body id |
+| 3 | centroid f32 ×3 | tracked point, metres, camera frame |
+| 15 | rvec f32 ×3 | Rodrigues rotation of the reference tag / rigid body |
+| 27 | tvec f32 ×3 | its translation |
 
 **TRUNK_STATUS** fields, in order:
 `state, level, lvl_flex, lvl_lat, lvl_axi, flex, lat, axi, progress, has_neutral,
 reason, capture_result, people, locked, q_how, q_rms_mm, q_frac, raw_pts, mask_px, held`
-(meanings in `pyscripts/trunk/tracker.py` `TrunkStatus` and `trunk_monitor.gd`).
+(`TrunkStatus` in `pyscripts/trunk/tracker.py`; `trunk_monitor.gd`).
 
-**SNAPSHOT_CHUNK**: the subject picker's image, `u16 json_len · json · jpeg`
-split into ≤ 200-byte pieces (`pyscripts/trunk/snapshot_packet.py`), reassembled
-by `TrunkMonitor` when all `total` pieces of one `snap_id` are in.
+**SNAPSHOT** json: `{"w", "h", "locked", "people": [[[x, y], ...], ...]}` in
+snapshot pixels — the subject picker's image and one outline per person.
 
-## 5. Liveness and lifecycle (as of step 1)
+## 6. Tools
 
-| | UDP | BLE |
-|---|---|---|
-| Tracker process | Spawned by Godot (`.venv/bin/python pyscripts/tracker.py --settings …`); Godot restarts it if it dies | systemd service `noark-tracker`, outlives the app |
-| App heartbeat | every 0.1 s: `SESSION(id)` once logged in, else `HEARTBEAT` | same |
-| 3 s with no message | tracker exits | session closes, tracker waits for the next central |
-| `STOP` | tracker answers with POSITION status 1 and exits | session closes |
-
-## 6. Roadmap
-
-The cleanup is done in steps; each leaves UDP and BLE working.
-
-1. **Done** — this framing: a type byte on every message, one protocol module
-   per side, transports that only move bytes. Dropped: the 44-byte size guess,
-   the `IMG:` padding hack, the control code inside the position floats, the
-   unused `RESET` / `CHANGE:` commands, the 30-byte command limit, and the
-   app's reply to every position packet over UDP.
-2. Heartbeat carries nothing but liveness; `SESSION` / `CONFIG` / `TRUNK` are
-   sent once with a sequence number and retried until `ACK(seq)`. A `HELLO`
-   with the protocol version opens each connection. Generic chunking for any
-   message over the transport's limit.
-3. The tracker runs as the service for UDP too: Godot connects instead of
-   spawning it, and the spawn / watchdog / startup-STOP code goes. `STOP` ends
-   the session over both transports.
-4. Remove the remaining `stream_type` branches; the transport is chosen in one
-   place on each side.
+- `uv run pyscripts/ble_test.py` — a BLE peripheral with the tracker's service
+  and link, no cameras, streaming a fake hand circle.
+- `pyscripts/tests/test_ble_receiver.py`, `test_btplug_connect.py` — minimal BLE
+  centrals (HELLO, print what arrives, STOP).

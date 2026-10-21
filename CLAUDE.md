@@ -24,7 +24,7 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Settings** live at `{DOCUMENTS}/NOARK_demo/settings.json` (this `demo` branch uses `NOARK_demo` — `Settings.APP_DIR` — so the real `{DOCUMENTS}/NOARK` data is never touched), not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). `location` (the site written to sessions.csv and raw logs) is set from the login dose dialog. Godot passes the path to `tracker.py` with `--settings`.
+**Settings** live at `{DOCUMENTS}/NOARK_demo/settings.json` (this `demo` branch uses `NOARK_demo` — `Settings.APP_DIR` — so the real `{DOCUMENTS}/NOARK` data is never touched), not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). `location` (the site written to sessions.csv and raw logs) is set from the login dose dialog. The tracker reads the same file on the board (default path; `--settings` overrides).
 
 **Debug mode** — edit that file (a `debug.json` also exists but nothing reads it):
 ```json
@@ -48,7 +48,7 @@ python pyscripts/main.py
 
 **Dependencies** (`pyproject.toml`): `opencv-contrib-python>=4.13`, `scipy>=1.17`
 
-**Architecture**: `pyscripts/tracker.py` detects AprilTags on both cameras, solves one pose for the calibrated rigid body, and UDP-streams 11 float32s to `127.0.0.1:8000`. Godot's `GlobalScript` receives and scales these to screen coordinates.
+**Architecture**: `pyscripts/tracker.py` detects AprilTags on both cameras, solves one pose for the calibrated rigid body, and sends it to the app as POSITION messages over UDP or BLE (`docs/PROTOCOL.md`). Godot's `GlobalScript` receives and scales these to screen coordinates.
 
 There is **no temporal smoothing**: `ExponentialMovingAverageFilter3D` is constructed with `alpha=1`, which passes the input straight through. Smoothness comes from the geometry, not from a filter — so a jitter problem is a calibration or camera-mapping problem, and reaching for a filter would only hide it. `CornerStabilizer` freezes the pose when no contributing corner has moved, which saves the solve but measured no change to noise.
 
@@ -76,7 +76,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | 14 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
 | 15 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
 | 16 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
-| 17 | TrunkMonitor | `Main_screen/Scripts/trunk_monitor.gd` | Trunk posture from the tracker (`TRK:` packets) |
+| 17 | TrunkMonitor | `Main_screen/Scripts/trunk_monitor.gd` | Trunk posture from the tracker (TRUNK_STATUS messages) |
 
 ### Data Flow
 
@@ -166,8 +166,8 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
 - Stereo refinement is off unless the calibration carries a self-calibrated
   extrinsic: with a multi-tag board it measured no better than one camera
   (1.19 mm vs 1.02 mm jitter) at four times the cost.
-- The two choices that change tracking live in `settings.json`, because
-  `global_script.gd` launches `tracker.py` with no arguments — a flag cannot
+- The two choices that change tracking live in `settings.json`, because the
+  `noark-tracker` service starts `tracker.py` with no arguments — a flag cannot
   affect a real session. `tracker_solver` is `joint` (fit every visible corner)
   or `ransac` (rapidtag's consensus fit, dropping corners that disagree);
   `tracker_camera` is `both`, `cam0` or `cam1`. `device.toml` describes the rig;
@@ -199,16 +199,16 @@ neutral cloud → flexion / lateral / axial and a state machine
 - ICP registers about the neutral centroid, not the camera origin — about the
   origin a 15° lean converged to 64°.
 - Thresholds live in `settings.json` (`trunk_warn_deg` 8, `trunk_comp_deg` 15;
-  a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off — one switch: `TrunkMonitor.enabled()` gates `available()`, which every panel, cue, pause and CSV column asks. Flip it in the main Settings panel or the in-game Tune panel (F2) via `TrunkMonitor.set_enabled()`: saved, and sent as `CFG:trunk=on|off` so the tracker stops/starts trunk work live (first `on` after a disabled start loads the model).
+  a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off — one switch: `TrunkMonitor.enabled()` gates `available()`, which every panel, cue, pause and CSV column asks. Flip it in the main Settings panel or the in-game Tune panel (F2) via `TrunkMonitor.set_enabled()`: saved, and sent as CONFIG `trunk=on|off` so the tracker stops/starts trunk work live (first `on` after a disabled start loads the model).
   No NPU / model → the tracker carries on with hand tracking only.
 - **Two ways to measure the rotation**, `trunk_method` in settings.json (main Settings
-  panel, Tune panel, live as `CFG:trunk_method=…`; a switch clears the neutral):
+  panel, Tune panel, live as CONFIG `trunk_method=…`; a switch clears the neutral):
   `icp` (above) or minisam3d (`trunk/pose.py`): `msam_r18` / `msam_v3rot`, the
   upper-body pose student from `E:/NOARK_CV/minisam3d` (W8A16 QDQ on the NPU, AI Hub
   jobs `j56ojzy65` / `j5wy9o3jg`), one camera, no SGBM. It crops from the trunk_seg
   subject box (then from its own keypoints), predicts the c_spine3 segment rotation,
   and the angles are that rotation relative to neutral, through the same
-  `trunk_angles` and state machine — the `TRK:` packet is unchanged. r18 is the
+  `trunk_angles` and state machine — TRUNK_STATUS is the same either way. r18 is the
   better one (0.5–0.6° frame-to-frame jitter vs ~1°); ~10 ms a frame on the NPU.
   Re-quantize after any retrain (minisam3d `scripts/npu_quantize.py`) and copy
   `model.onnx` + `model.data` into `trunk/models/minisam3d_*_w8a16/`.
@@ -216,16 +216,16 @@ neutral cloud → flexion / lateral / axial and a state machine
   is mounted both ways (the Oct-10 sessions are upside down, the Oct-14 bench
   upright). Auto tries the other way when no torso is found; masks are rotated back,
   so the stereo geometry never sees the rotation.
-- Godot → tracker `TRUNK:neutral` (the game menus' "Capture neutral posture");
-  tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held`.
+- Godot → tracker TRUNK `neutral` (the game menus' "Capture neutral posture");
+  tracker → Godot TRUNK_STATUS `state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held`.
   The last six are *this frame's* quality (how it fit or why it did not, ICP residual, matched
   share, shell points, mask area, whether the angles are held from the last good frame). Random
   Reach writes them to its raw CSV (`trunk_how` … `trunk_held`) and the tracker prints a journal
   line on every state / level / outcome change, for working out why a reading paused the game.
 - **Several people in view:** the subject is the centre-most torso unless picked.
-  `TRUNK:snapshot` → the tracker sends a ~160 px JPEG with one outline per person as
-  chunked `IMG:` packets (`trunk/snapshot_packet.py`, same over UDP and BLE;
-  `TrunkMonitor` reassembles → `snapshot_ready`); `TRUNK:select=<n>` (-1 = centre-most)
+  TRUNK `snapshot` → the tracker sends a ~160 px JPEG with one outline per person as
+  one SNAPSHOT message (`trunk/snapshot_packet.py`, chunked by the link over either transport;
+  `TrunkMonitor.on_snapshot` → `snapshot_ready`); TRUNK `select=<n>` (-1 = centre-most)
   locks onto person n. The lock follows them by mask overlap (IoU ≥ `trunk_lock_iou`
   0.3 with their last mask), not by class, which can flip; if nobody overlaps that much (a fast move, a short occlusion) the lock
   moves to the person nearest its last position, within `trunk_lock_dist` (0.3 of the image
@@ -238,31 +238,41 @@ neutral cloud → flexion / lateral / axial and a state machine
   `Main_screen/Scripts/trunk_feedback.gd` is the overlay any game can add.
 - `uv run pyscripts/trunk_live.py --show` tests it without Godot (stop the tracker first).
 
-### BLE transport
+### App ↔ tracker link (UDP or BLE)
 
-`stream_type` in settings.json is `udp` (Godot on the board spawns `tracker.py`)
-or `ble` (Godot on an Android tablet; `tracker.py` runs on the board and is a
-GATT peripheral). Never both; the tracker and Godot each read the key.
+`docs/PROTOCOL.md` is the spec. One protocol over both transports: a type byte
+per message, commands with a sequence number acknowledged by the tracker, chunks
+for big messages, heartbeats both ways.
 
-- One notify characteristic carries everything the UDP socket does: the 44-byte
-  position packet and the text `TRK:` / `CFG:` packets, told apart by size and
-  prefix (`global_script.gd` `_handle_text_packet`). Commands (heartbeat,
-  `TRUNK:neutral`, `USER:`, `STOP`) are writes to the command characteristic.
-- Over BLE the tracker outlives the app: STOP or 3 s without a heartbeat closes
-  the session and it waits for the next connection instead of exiting.
+- The tracker is the `noark-tracker` systemd service on the board over **both**
+  transports; Godot never starts it, it connects (HELLO) and the session ends on
+  STOP or 3 s of silence, the tracker running on. Cameras come up once at boot.
+  `stream_type` in settings.json picks `udp` (Godot on the board) or `ble`
+  (Godot on a tablet); the tracker and Godot each read it, in one place each.
+- Python: `protocol.py` (wire format), `link.py` (acks, chunks, heartbeat,
+  liveness), `udp_streamer.py` / `ble_streamer.py` (bytes only). Godot:
+  `link_protocol.gd`, `tracker_link.gd`, `udp_transport.gd` / `ble_transport.gd`;
+  `GlobalScript.link` is the link, `link_status` drives the status dot.
+- Changing a setting: the Settings panel sends it live as a CONFIG; at every HELLO
+  the tracker also re-applies the live keys from its own settings.json. Anything
+  else (cameras, `stream_type`, trunk thresholds, `display`) needs
+  `sudo systemctl restart noark-tracker`.
+- Godot and the tracker must speak the same `VERSION` (protocol.py /
+  link_protocol.gd): a tablet APK built before a protocol change will not
+  connect — rebuild it with the board's code.
 - **Advertising on the Radxa:** the AIC8800's BlueZ advertising fails — the
   kernel rejects the advertising data (MGMT Add Extended Advertising Data →
   Invalid Parameters, on 7.0.11-6/-7-qcom) though the controller accepts it.
   `ble_streamer.py` falls back to `RawAdvertiser`, which sends the HCI commands
   itself through `sudo -n hcitool`; that needs `/etc/sudoers.d/noark-ble`
   (`radxa ALL=(root) NOPASSWD: /usr/bin/hcitool`), set up per board.
-- `uv run pyscripts/ble_test.py` advertises the same service with a fake hand
-  circle, no cameras. `external/GdAndroidBLE/` (submodule) is the Android plugin; its
-  `plugin/demo` is a test app for the tracker over BLE. Build with
+- `uv run pyscripts/ble_test.py` advertises the same service and link with a fake
+  hand circle, no cameras. `external/GdAndroidBLE/` (submodule) is the Android
+  plugin; its `plugin/demo` is a test app (still on the old wire format). Build with
   `./gradlew assemble` there (Java 17 + Android SDK — not on the Radxa).
 
-### Network Position (UDP Input)
-- `GlobalScript` listens on `127.0.0.1:8000`, receives `net_x, net_y, net_z, net_a`
+### Network Position
+- `GlobalScript._apply_position` turns each POSITION into `net_x, net_y, net_z, net_a`
 - 2D scalers: `PLAYER_POS_SCALER_X`, `PLAYER_POS_SCALER_Z`
 - 3D scalers: `PLAYER3D_POS_SCALER_X`, `PLAYER3D_POS_SCALER_Y`
 - Positions are clamped to `MIN_X/MAX_X/MIN_Y/MAX_Y` screen bounds

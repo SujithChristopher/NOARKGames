@@ -2,7 +2,8 @@
 
 Python is the GATT peripheral; Godot (GDBLE / the Android plugin) the central.
 One notification or write is one protocol message — this class only moves
-bytes, protocol.py says what they mean. Same interface as UDPStreamer.
+bytes; protocol.py says what they mean and link.py keeps the link. Same
+interface as UDPStreamer.
 
 UUIDs
 -----
@@ -103,6 +104,10 @@ class RawAdvertiser:
 class BLEStreamer:
     """Thread-safe BLE GATT peripheral that mirrors the UDP interface."""
 
+    # A notification's value at the 247-byte MTU the app negotiates; larger
+    # messages go out as CHUNKs (link.py).
+    max_message = 244
+
     def __init__(self, device_name: str = "NOARK_Tracker") -> None:
         self.device_name = device_name
         self._server: Optional[BlessServer] = None
@@ -126,7 +131,7 @@ class BLEStreamer:
             raise RuntimeError("BLE server did not start within 10 seconds")
 
     def send(self, message: bytes) -> None:
-        """Notify the central with one message (at most 244 bytes at a 247 MTU)."""
+        """Notify the central with one message (at most max_message bytes)."""
         if not self._running or self._loop is None:
             return
         if not self._streaming:
@@ -145,7 +150,7 @@ class BLEStreamer:
             return b""
 
     def reset(self) -> None:
-        """Clear connection state so the server keeps advertising for a new central."""
+        """The app is gone: clear its state and keep advertising for the next one."""
         self._connected = False
         self._streaming = False
         self._commands.clear()

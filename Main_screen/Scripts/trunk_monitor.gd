@@ -48,10 +48,6 @@ var held := false                   # angles are the last good ones, not this fr
 var _last_packet_ms := -100000
 
 var _beep: AudioStreamPlayer
-# Snapshot chunks being collected: id index total data (trunk/snapshot_packet.py)
-var _snap_id := -1
-var _snap_total := 0
-var _snap_chunks := {}
 
 
 func _ready() -> void:
@@ -103,31 +99,8 @@ func select_person(index: int) -> void:
 	GlobalScript.send_trunk_command("select=%d" % index)
 
 
-## One SNAPSHOT_CHUNK payload (id, index, total, data). Called (deferred) from GlobalScript.
-func on_image_chunk(packet: PackedByteArray) -> void:
-	if packet.size() < 3:
-		return
-	var id := packet[0]
-	var index := packet[1]
-	var total := packet[2]
-	if id != _snap_id:
-		_snap_id = id
-		_snap_total = total
-		_snap_chunks.clear()
-	_snap_chunks[index] = packet.slice(3)
-	if _snap_chunks.size() < _snap_total:
-		return
-	var blob := PackedByteArray()
-	for i in _snap_total:
-		if not _snap_chunks.has(i):
-			return
-		blob.append_array(_snap_chunks[i])
-	_snap_id = -1
-	_snap_chunks.clear()
-	_decode_snapshot(blob)
-
-
-func _decode_snapshot(blob: PackedByteArray) -> void:
+## A SNAPSHOT payload, reassembled by the link (trunk/snapshot_packet.py).
+func on_snapshot(blob: PackedByteArray) -> void:
 	var meta_len := blob.decode_u16(0)
 	var meta = JSON.parse_string(blob.slice(2, 2 + meta_len).get_string_from_utf8())
 	var image := Image.new()
@@ -143,7 +116,7 @@ func _decode_snapshot(blob: PackedByteArray) -> void:
 	snapshot_ready.emit(ImageTexture.create_from_image(image), outlines, int(meta.get("locked", -1)))
 
 
-## A TRUNK_STATUS payload. Called (deferred) from GlobalScript's network thread.
+## A TRUNK_STATUS payload, from GlobalScript.
 func on_packet(text: String) -> void:
 	var f := text.split(",")
 	if f.size() < 12:
