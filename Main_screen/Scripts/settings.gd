@@ -40,6 +40,8 @@ const DEFAULTS := {
 	# captured in the game menu, a number for every axis or a dictionary
 	# {"flexion": .., "lateral": .., "axial": ..}.
 	"trunk_enabled": true,
+	# icp = stereo shell + ICP; msam_r18 / msam_v3rot = minisam3d pose student on the NPU
+	"trunk_method": "icp",
 	"trunk_cpus": "7",
 	"trunk_warn_deg": 8,
 	"trunk_comp_deg": 15,

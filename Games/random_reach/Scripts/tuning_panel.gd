@@ -7,8 +7,10 @@ const OPTIONS := {
 	"refine": ["contour", "subpix", "crop", "none"],
 	"camera": ["both", "cam0", "cam1"],
 	"deadband": ["0", "0.5", "1", "2"],
+	"trunk_method": ["icp", "msam_r18", "msam_v3rot"],
 }
-const SETTINGS_KEYS := {"solver": "tracker_solver", "refine": "tracker_refine", "camera": "tracker_camera"}
+const SETTINGS_KEYS := {"solver": "tracker_solver", "refine": "tracker_refine", "camera": "tracker_camera",
+	"trunk_method": "trunk_method"}
 
 var _box: VBoxContainer
 var _toggle: Button

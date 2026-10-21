@@ -743,7 +743,8 @@ class TrackerClass:
         """Live tuning from Godot: `CFG:<key>=<value>` (30-byte datagram limit).
 
         Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
-        camera (both|cam0|cam1), deadband (px; 0 = stabilizer off).
+        camera (both|cam0|cam1), deadband (px; 0 = stabilizer off),
+        trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot).
         Bad values are reported and ignored, never fatal mid-session.
         """
         try:
@@ -763,6 +764,10 @@ class TrackerClass:
                 self.stabilizer.threshold_px = max(0.0, float(value))
             elif key == "trunk" and value in ("on", "off"):
                 self._set_trunk(value == "on")
+            elif key == "trunk_method" and value in ("icp", "msam_r18", "msam_v3rot"):
+                self._trunk_settings = {**self._trunk_settings, "trunk_method": value}
+                if self.trunk is not None:
+                    self.trunk.set_method(value)
             else:
                 raise ValueError("unknown key or value")
         except Exception as exc:

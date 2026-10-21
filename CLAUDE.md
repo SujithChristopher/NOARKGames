@@ -201,6 +201,21 @@ neutral cloud → flexion / lateral / axial and a state machine
 - Thresholds live in `settings.json` (`trunk_warn_deg` 8, `trunk_comp_deg` 15;
   a number or `{"flexion", "lateral", "axial"}`); `trunk_enabled` turns it off — one switch: `TrunkMonitor.enabled()` gates `available()`, which every panel, cue, pause and CSV column asks. Flip it in the main Settings panel or the in-game Tune panel (F2) via `TrunkMonitor.set_enabled()`: saved, and sent as `CFG:trunk=on|off` so the tracker stops/starts trunk work live (first `on` after a disabled start loads the model).
   No NPU / model → the tracker carries on with hand tracking only.
+- **Two ways to measure the rotation**, `trunk_method` in settings.json (main Settings
+  panel, Tune panel, live as `CFG:trunk_method=…`; a switch clears the neutral):
+  `icp` (above) or minisam3d (`trunk/pose.py`): `msam_r18` / `msam_v3rot`, the
+  upper-body pose student from `E:/NOARK_CV/minisam3d` (W8A16 QDQ on the NPU, AI Hub
+  jobs `j56ojzy65` / `j5wy9o3jg`), one camera, no SGBM. It crops from the trunk_seg
+  subject box (then from its own keypoints), predicts the c_spine3 segment rotation,
+  and the angles are that rotation relative to neutral, through the same
+  `trunk_angles` and state machine — the `TRK:` packet is unchanged. r18 is the
+  better one (0.5–0.6° frame-to-frame jitter vs ~1°); ~10 ms a frame on the NPU.
+  Re-quantize after any retrain (minisam3d `scripts/npu_quantize.py`) and copy
+  `model.onnx` + `model.data` into `trunk/models/minisam3d_*_w8a16/`.
+- `trunk_rot180` (`auto`): trunk_seg and the student only work upright, and the rig
+  is mounted both ways (the Oct-10 sessions are upside down, the Oct-14 bench
+  upright). Auto tries the other way when no torso is found; masks are rotated back,
+  so the stereo geometry never sees the rotation.
 - Godot → tracker `TRUNK:neutral` (the game menus' "Capture neutral posture");
   tracker → Godot `TRK:state,level,lf,ll,la,flex,lat,axi,progress,has_neutral,reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held`.
   The last six are *this frame's* quality (how it fit or why it did not, ICP residual, matched

@@ -37,7 +37,9 @@ import cv2
 import numpy as np
 
 from .geometry import StereoShell, voxel_downsample
-from .icp import Neutral, Registration, trunk_angles
+from .icp import ROT_MAX_DEG, Neutral, Registration, rot_deg, trunk_angles
+from .pose import TRUNK_JOINTS, mean_rotation
+from .pose import anatomical_frame as anatomical_frame_pose
 from .segment import mask_iou, pick_subject
 
 NO_NEUTRAL, CAPTURING, TRACKING, OCCLUDED = 0, 1, 2, 3
@@ -61,12 +63,33 @@ DEFAULTS = {
     "trunk_lock_iou": 0.3,         # min overlap with the last mask to stay on the subject
     "trunk_lock_dist": 0.3,        # else: nearest person within this fraction of the image width
     "trunk_snapshot_w": 160,       # picker image width, px
+    # How the rotation is measured: "icp" (stereo shell registered to the
+    # neutral shell) or a minisam3d model, "msam_r18" / "msam_v3rot" (pose.py).
+    # Switchable live with CFG:trunk_method=<value>.
+    "trunk_method": "icp",
+    # Camera mounted upside down: true / false / "auto" (whichever way up
+    # trunk_seg finds a torso). trunk_seg and the student only work upright.
+    "trunk_rot180": "auto",
+    # neck + shoulders heatmap confidence below this = low_conf. Measured on a
+    # seated subject: r18 p5 2.3 / median 3.7, v3rot p5 0.15 / median 2.5.
+    "trunk_msam_min_conf": 1.0,
+    # p90 of the trunk rotation's spread about its mean over a neutral capture.
+    # The max let one outlier frame reject a still subject (r18 jitters ~0.8 deg
+    # frame to frame).
+    "trunk_msam_neutral_deg": 4.0,
     # Cores for the trunk worker. The prime core (7) is the measured choice on
     # this board: with the hand tracker on 4-7 it cost hand tracking 1-3 fps
     # (~33.5 -> 31-34) at 11-12 Hz of trunk updates. Little cores (0-3) kept
     # hand tracking but gave 2 Hz, and they are the game's. "" = no pin.
     "trunk_cpus": "7",
 }
+
+
+@dataclass
+class PoseNeutral:
+    """minisam3d's neutral: the trunk rotation and anatomical frame, camera axes."""
+    R_trunk: np.ndarray
+    R_neu: np.ndarray
 
 
 def _per_axis(value):
@@ -141,6 +164,12 @@ class TrunkEngine:
         self.comp = _per_axis(cfg["trunk_comp_deg"])
         self.shell = StereoShell(K0, D0, K1, D1, R, T, size)
         self.seg = TorsoSegmenter()
+        self._ref = ((K1, D1) if self.shell.swap else (K0, D0)), size
+        self.method = "icp"
+        self._pose = None                 # pose.PoseTrunk, loaded on first use
+        r = cfg["trunk_rot180"]
+        self._rot180 = None if r == "auto" else bool(r)   # None = not known yet
+        self._rot_auto = r == "auto"
         self._lock_mask = None            # the followed person's last mask; None = centre-most
         self._seen = None                 # (left image, [masks]) of the last frame
         self._offered = []                # the masks the last snapshot numbered
@@ -161,6 +190,7 @@ class TrunkEngine:
         self._last = None                 # last good (angles, rms, how)
         self._seq = 0
         self._rate = []
+        self.set_method(cfg["trunk_method"])
 
     def small_pair(self, raw0, raw1):
         """Sensor-resolution stream0/stream1 -> (left, right) at working size."""
@@ -168,9 +198,70 @@ class TrunkEngine:
         return (cv2.resize(left, self.shell.size, interpolation=cv2.INTER_AREA),
                 cv2.resize(right, self.shell.size, interpolation=cv2.INTER_AREA))
 
-    def _cloud(self, ls, rs, timing):
+    def set_method(self, method):
+        """Switch how the rotation is measured. A neutral from one method means
+        nothing to the other, so a change drops it. False if the model will not
+        load (the current method stays)."""
+        if method == self.method:
+            return True
+        if method != "icp":
+            from .pose import MODELS, PoseTrunk
+            if method not in MODELS:
+                print(f"[TRUNK] unknown trunk_method {method!r}", flush=True)
+                return False
+            try:
+                if self._pose is None:
+                    (Kr, Dr), sensor = self._ref
+                    self._pose = PoseTrunk(Kr, Dr, sensor, self.shell.size, method,
+                                           self.cfg["trunk_msam_min_conf"])
+                else:
+                    self._pose.set_model(method)
+            except Exception as exc:
+                print(f"[TRUNK] {method} unavailable, staying on {self.method}: {exc!r}", flush=True)
+                return False
+        print(f"[TRUNK] method {self.method} -> {method}", flush=True)
+        self.method = method
+        self._clear_neutral()
+        return True
+
+    def _clear_neutral(self):
+        if self._neutral is not None or self._capture is not None:
+            print("[TRUNK] neutral cleared", flush=True)
+        self._neutral = self._reg = self._capture = None
+        self._fail_since, self._last = None, None
+        self._levels[:] = OK
+        self._pending[:] = OK
+        self._capture_result = ""
+        if self._pose is not None:
+            self._pose.reset()
+
+    def _seg_way(self, ls, rot180):
+        """Torso masks in the left frame's own pixels, segmented the right way up."""
+        if not rot180:
+            return self.seg.instances(ls, self.shell.size)
+        masks = self.seg.instances(cv2.rotate(ls, cv2.ROTATE_180), self.shell.size)
+        return [cv2.rotate(m, cv2.ROTATE_180) for m in masks]
+
+    def _segment(self, ls):
+        """trunk_seg, with trunk_rot180 "auto": until a torso is seen, and
+        whenever none is, the other way up is tried too and adopted if it finds one."""
+        way = bool(self._rot180)
+        masks = self._seg_way(ls, way)
+        if masks or not self._rot_auto:
+            if masks and self._rot180 is None:
+                self._rot180 = way
+            return masks
+        other = self._seg_way(ls, not way)
+        if other:
+            self._rot180 = not way
+            print(f"[TRUNK] camera is {'upside down' if self._rot180 else 'upright'} "
+                  "(trunk_rot180 auto)", flush=True)
+        return other
+
+    def _subject(self, ls, timing):
+        """trunk_seg on the left frame, then the followed person's mask."""
         t1 = time.perf_counter()
-        masks = self.seg.instances(ls, self.shell.size)
+        masks = self._segment(ls)
         t2 = time.perf_counter()
         timing["seg"] = (t2 - t1) * 1e3
         self._seen, self._people = (ls, masks), len(masks)
@@ -187,6 +278,24 @@ class TrunkEngine:
             return None, "no_torso" if self._lock_mask is None or not masks else "lost_subject"
         if self._lock_mask is not None:
             self._lock_mask = mask       # follow them as they move
+        return mask, ""
+
+    def _pose_obs(self, ls, timing):
+        """minisam3d: ((R_trunk, xyz, conf), "") or (None, why)."""
+        mask, bad = self._subject(ls, timing)
+        if bad:
+            return None, bad
+        self._q = (0, int(np.count_nonzero(mask)))
+        t = time.perf_counter()
+        obs, bad = self._pose.measure(ls, mask, bool(self._rot180))
+        timing["pose"] = (time.perf_counter() - t) * 1e3
+        return obs, bad
+
+    def _cloud(self, ls, rs, timing):
+        mask, bad = self._subject(ls, timing)
+        if bad:
+            return None, bad
+        t2 = time.perf_counter()
         pts = self.shell.shell(ls, rs, mask)
         self._q = (len(pts), int(np.count_nonzero(mask)))
         cloud = voxel_downsample(pts, max_pts=int(self.cfg["trunk_cloud_points"]),
@@ -204,8 +313,12 @@ class TrunkEngine:
         self._rate = [t for t in self._rate if now - t < 2.0] + [now]
         hz = (len(self._rate) - 1) / max(now - self._rate[0], 1e-6) if len(self._rate) > 1 else 0.0
 
-        cloud, bad = self._cloud(ls, rs, timing)
-        npts = 0 if cloud is None else len(cloud)
+        if self.method == "icp":
+            cloud, bad = self._cloud(ls, rs, timing)
+            npts = 0 if cloud is None else len(cloud)
+        else:
+            cloud, bad = self._pose_obs(ls, timing)   # (R_trunk, xyz, conf), not a cloud
+            npts = 0
 
         if start_capture:
             self._capture = (now, [], [], 0)
@@ -233,11 +346,12 @@ class TrunkEngine:
         self._offered = masks
         w = int(self.cfg["trunk_snapshot_w"])
         h = max(1, round(ls.shape[0] * w / ls.shape[1]))
-        small = cv2.resize(ls, (w, h), interpolation=cv2.INTER_AREA)
+        up = cv2.rotate if self._rot180 else (lambda img, _: img)   # show it upright
+        small = up(cv2.resize(ls, (w, h), interpolation=cv2.INTER_AREA), cv2.ROTATE_180)
         ok, jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 60])
         people, followed = [], -1
         for i, m in enumerate(masks):
-            ms = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
+            ms = up(cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST), cv2.ROTATE_180)
             cnts, _ = cv2.findContours(ms, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if not cnts:
                 people.append([])
@@ -269,18 +383,24 @@ class TrunkEngine:
         if new is None and self._lock_mask is None:
             return True
         self._lock_mask = new
-        if self._neutral is not None or self._capture is not None:
-            print("[TRUNK] subject changed: neutral cleared", flush=True)
-        self._neutral = self._reg = self._capture = None
-        self._fail_since, self._last = None, None
-        self._levels[:] = OK
-        self._pending[:] = OK
-        self._capture_result = ""
+        print("[TRUNK] subject changed", flush=True)
+        self._clear_neutral()
         return True
+
+    def _pose_step(self, obs):
+        """minisam3d's counterpart of Registration.step: neutral -> now, or None
+        past the same ~45 deg a seated trunk never reaches."""
+        R_body = obs[0] @ self._neutral.R_trunk.T
+        if rot_deg(R_body) > ROT_MAX_DEG:
+            return None, dict(how="gated")
+        conf = obs[2][TRUNK_JOINTS]
+        return R_body, dict(how="direct", frac=float(conf.min()))
 
     def _track(self, now, cloud, bad, timing, st):
         if bad:
             R_body, info = None, dict(how=bad)
+        elif self.method != "icp":
+            R_body, info = self._pose_step(cloud)
         else:
             t = time.perf_counter()
             R_body, info = self._reg.step(cloud)
@@ -292,7 +412,7 @@ class TrunkEngine:
         if R_body is not None:
             self._fail_since = None
             angles = trunk_angles(R_body @ self._neutral.R_neu, self._neutral.R_neu)
-            self._last = (angles, info["rms"] * 1e3, info["how"])
+            self._last = (angles, info.get("rms", float("nan")) * 1e3, info["how"])
             self._classify(np.array(angles), now)
         elif self._fail_since is None:
             self._fail_since = now
@@ -335,7 +455,8 @@ class TrunkEngine:
         seen += 1
         if not bad:
             clouds.append(cloud)
-            cents.append(cloud.mean(axis=0))
+            if self.method == "icp":
+                cents.append(cloud.mean(axis=0))
         self._capture = (t0, clouds, cents, seen)
         dur = self.cfg["trunk_neutral_s"]
         if now - t0 < dur:
@@ -343,6 +464,8 @@ class TrunkEngine:
             return True
 
         self._capture = None
+        if self.method != "icp":
+            return self._finish_pose_capture(clouds, seen)
         motion = float(np.linalg.norm(np.std(cents, axis=0))) if cents else float("nan")
         if len(clouds) < max(3, 0.6 * seen):
             self._capture_result = "not_visible"
@@ -352,7 +475,8 @@ class TrunkEngine:
             pooled = voxel_downsample(np.concatenate(clouds),
                                       max_pts=int(self.cfg["trunk_neutral_points"]),
                                       rng=self.rng)
-            self._neutral = Neutral(pooled)
+            # upside down, image-right is the patient's right
+            self._neutral = Neutral(pooled, -1.0 if self._rot180 else 1.0)
             self._reg = Registration(self._neutral)
             self._fail_since, self._last = None, None
             self._levels[:] = OK
@@ -364,6 +488,32 @@ class TrunkEngine:
         print(f"[TRUNK] neutral capture failed: {self._capture_result} "
               f"({len(clouds)}/{seen} usable frames, centroid std {motion * 1e3:.0f} mm)",
               flush=True)
+        return False
+
+    def _finish_pose_capture(self, obs, seen):
+        """minisam3d neutral: the mean trunk rotation over the capture, and the
+        anatomical frame from the mean joints. Still = 90% of the rotations
+        within trunk_msam_neutral_deg of their mean."""
+        spread = float("nan")
+        if len(obs) < max(3, 0.6 * seen):
+            self._capture_result = "not_visible"
+        else:
+            R_mean = mean_rotation([o[0] for o in obs])
+            spread = float(np.percentile([rot_deg(o[0] @ R_mean.T) for o in obs], 90))
+            if spread > self.cfg["trunk_msam_neutral_deg"]:
+                self._capture_result = "moving"
+            else:
+                self._neutral = PoseNeutral(R_mean, anatomical_frame_pose(
+                    np.mean([o[1] for o in obs], axis=0)))
+                self._fail_since, self._last = None, None
+                self._levels[:] = OK
+                self._pending[:] = OK
+                self._capture_result = "ok"
+                print(f"[TRUNK] neutral captured ({self.method}): {len(obs)}/{seen} frames, "
+                      f"rotation spread {spread:.1f} deg", flush=True)
+                return False
+        print(f"[TRUNK] neutral capture failed: {self._capture_result} "
+              f"({len(obs)}/{seen} usable frames, rotation spread {spread:.1f} deg)", flush=True)
         return False
 
 
@@ -431,6 +581,10 @@ class TrunkThread:
         with self._lock:
             return self.engine.select(index)
 
+    def set_method(self, method):
+        with self._lock:
+            return self.engine.set_method(method)
+
     def status(self) -> TrunkStatus:
         with self._lock:
             return self._status
@@ -493,6 +647,8 @@ def _process_main(shm_name, shape, lock, seq, new, cmds, out, calib, settings):
                         out.put(snap)
                 elif isinstance(cmd, tuple) and cmd[0] == "select":
                     engine.select(cmd[1])
+                elif isinstance(cmd, tuple) and cmd[0] == "method":
+                    engine.set_method(cmd[1])
             if not new.wait(0.5):
                 continue
             last = _throttle(cfg, last)
@@ -577,6 +733,10 @@ class TrunkProcess:
     def select(self, index):
         """Follow person `index` of the last snapshot; -1 = centre-most again."""
         self._cmds.put(("select", int(index)))
+
+    def set_method(self, method):
+        """icp / msam_r18 / msam_v3rot (see DEFAULTS); clears the neutral."""
+        self._cmds.put(("method", str(method)))
 
     def take_snapshot(self):
         """The newest snapshot not yet taken, or None."""

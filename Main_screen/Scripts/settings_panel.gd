@@ -7,6 +7,7 @@ extends CanvasLayer
 const LIVE_KEYS := {
 	"tracker_solver": "solver", "tracker_refine": "refine",
 	"tracker_camera": "camera", "corner_deadband_px": "deadband",
+	"trunk_method": "trunk_method",
 }
 
 # [key, label, kind, options]   kind: "bool" or "choice" (choices are compared as strings)
@@ -15,6 +16,7 @@ const FIELDS := [
 	["recording_fps", "Recording fps", "choice", ["15", "30", "60"]],
 	["recording_scale", "Recording scale", "choice", ["0.25", "0.5", "1"]],
 	["trunk_enabled", "Trunk tracking", "bool", []],
+	["trunk_method", "Trunk method", "choice", ["icp", "msam_r18", "msam_v3rot"]],
 	["display", "Show tracker window", "bool", []],
 	["tracker_solver", "Pose solver", "choice", ["joint", "ransac"]],
 	["tracker_refine", "Corner refine", "choice", ["contour", "subpix", "crop", "none"]],
