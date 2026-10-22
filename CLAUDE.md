@@ -210,6 +210,18 @@ neutral cloud → flexion / lateral / axial and a state machine
   and the angles are that rotation relative to neutral, through the same
   `trunk_angles` and state machine — TRUNK_STATUS is the same either way. r18 is the
   better one (0.5–0.6° frame-to-frame jitter vs ~1°); ~10 ms a frame on the NPU.
+  `trunk_reference` (`neutral` | `model`; Settings, the Trunk angles screen's "Model frame"
+  switch, Tune panel, live as CONFIG): `model` measures the minisam3d angles from the model's own
+  frame instead of a captured neutral — its rotations are MHR global joint rotations in camera axes,
+  which carry c_spine3's bind orientation: upright, squarely facing a level camera reads as the axis
+  permutation `MODEL_REST`, not identity (measured from the model's own joints; `model_frame()` in
+  trunk/tracker.py). With identity every frame sat ~126° off and was gated. No
+  capture, no NO_NEUTRAL, no re-neutral after occlusion; camera tilt reads as a constant offset
+  (not corrected, by choice). Games, warnings and CSVs use these angles as they would neutral ones,
+  with their own thresholds `trunk_model_warn_deg` 15 / `trunk_model_comp_deg` 25. "Set zero" (the
+  capture button in the model frame, TRUNK `neutral`) makes a held-still pose read 0 on the
+  model frame's (camera) axes; "Clear zero" (TRUNK `zero_clear`) goes back to the model's rest pose.
+  icp ignores it. TRUNK_STATUS's last field says which is in use.
   Re-quantize after any retrain (minisam3d `scripts/npu_quantize.py`) and copy
   `model.onnx` + `model.data` into `trunk/models/minisam3d_*_w8a16/`.
 - `trunk_rot180` (`auto`): trunk_seg and the student only work upright, and the rig

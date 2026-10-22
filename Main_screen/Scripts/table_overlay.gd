@@ -1,13 +1,14 @@
 extends Control
 
-# "Define Table": the hand is put on the four corners of the table (top-left,
-# top-right, bottom-left, bottom-right, as seen on screen) and each is recorded.
+# "Define Table": the hand is put on the four corners of the table, once round
+# it (top-left, bottom-left, bottom-right, top-right, as seen on screen; the
+# order GlobalScript.set_table expects) and each is recorded.
 # GlobalScript.set_table() turns them into the screen mapping, so the origin
 # does not need setting. Enter records / saves, Esc cancels.
 
 signal table_done
 
-const CORNER_LABELS: Array = ["top-left", "top-right", "bottom-left", "bottom-right"]
+const CORNER_LABELS: Array = ["top-left", "bottom-left", "bottom-right", "top-right"]
 
 var _corners: Array = []      # Vector2(camera x, z) per recorded corner
 var _ys: Array = []
@@ -140,4 +141,4 @@ func _refresh() -> void:
 	else:
 		_instruction.text = "All 4 corners recorded"
 		_btn.text = "Save table   [Enter]"
-		_status.text = "Corners are as seen on the screen: top-left first, bottom-right last"
+		_status.text = "Corners are as seen on the screen: top-left first, then round the table"

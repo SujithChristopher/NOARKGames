@@ -15,6 +15,8 @@ States
 NO_NEUTRAL  nothing to compare against yet
 CAPTURING   collecting the neutral pose; needs a visible, still torso
 TRACKING    angles from neutral, each axis classed OK / WARN / COMPENSATING
+            (trunk_reference "model": from minisam3d's own frame, which
+            stands in for the neutral, so there is no NO_NEUTRAL / CAPTURING)
 OCCLUDED    the torso cannot be measured right now (no torso found, too few
             stereo points, or the registration did not converge)
 
@@ -38,7 +40,7 @@ import numpy as np
 
 from .geometry import StereoShell, voxel_downsample
 from .icp import ROT_MAX_DEG, Neutral, Registration, rot_deg, trunk_angles
-from .pose import TRUNK_JOINTS, mean_rotation
+from .pose import RZ, TRUNK_JOINTS, mean_rotation
 from .pose import anatomical_frame as anatomical_frame_pose
 from .segment import mask_iou, pick_subject
 
@@ -67,6 +69,15 @@ DEFAULTS = {
     # neutral shell) or a minisam3d model, "msam_r18" / "msam_v3rot" (pose.py).
     # Switchable live with CONFIG trunk_method=<value>.
     "trunk_method": "icp",
+    # What the angles are measured from: "neutral" (a captured neutral pose) or,
+    # minisam3d only, "model" (the model's own frame: upright and squarely
+    # facing a level camera = 0; no capture, camera tilt reads as an offset).
+    # Switchable live with CONFIG trunk_reference=<value>.
+    "trunk_reference": "neutral",
+    # Thresholds in the model frame, which reads camera tilt and the model's
+    # own bias as posture: wider than the neutral ones above.
+    "trunk_model_warn_deg": 15.0,
+    "trunk_model_comp_deg": 25.0,
     # Camera mounted upside down: true / false / "auto" (whichever way up
     # trunk_seg finds a torso). trunk_seg and the student only work upright.
     "trunk_rot180": "auto",
@@ -104,13 +115,37 @@ class PoseNeutral:
     R_neu: np.ndarray
 
 
+# The anatomical frame (lateral = patient's left, up, anterior) of someone
+# upright and squarely facing the camera, in camera axes (x right, y down, z forward).
+CAM_FRAME = np.array([[1.0, 0, 0], [0, -1.0, 0], [0, 0, -1.0]]).T
+
+
+# minisam3d's trunk rotation of someone upright and squarely facing a level
+# camera: the student predicts MHR global joint rotations (in camera axes), which
+# carry c_spine3's bind orientation, so the rest pose is not identity but this
+# axis permutation. Measured 2026-10-22 (r18, seated, CAM_FRAME F^T R from the
+# model's own joints): within ~5 deg of it on every frame, the rest being the
+# segment's tilt against the neck-hip line plus noise.
+MODEL_REST = np.array([[0.0, 0, -1], [-1, 0, 0], [0, 1, 0]])
+
+
+def model_frame(rot180, zero=None):
+    """trunk_reference "model": minisam3d's own frame as the neutral, i.e. its
+    rest pose upright facing a level camera, or `zero` (a rotation set with
+    "Set zero") in place of that rest pose; the axes stay the camera's either
+    way. Upside down, PoseTrunk has already turned the rotations into the
+    physical camera's axes, so the reference turns with them."""
+    R = RZ if rot180 else np.eye(3)
+    return PoseNeutral(R @ MODEL_REST if zero is None else zero, R @ CAM_FRAME)
+
+
 def _log_pose_frame(F, conf):
     """How the anatomical frame built from the neutral joints sits against the
     camera's (lateral +x, up -y, anterior -z) and how sure the joints were: a
     badly placed axis moves one movement into another angle."""
     from .pose import J
 
-    cam = np.array([[1.0, 0, 0], [0, -1.0, 0], [0, 0, -1.0]]).T
+    cam = CAM_FRAME
     off = [float(np.degrees(np.arccos(np.clip(F[:, i] @ cam[:, i], -1, 1)))) for i in range(3)]
     print(f"[TRUNK] neutral frame vs camera: lateral {off[0]:.0f} deg, up {off[1]:.0f} deg, "
           f"anterior {off[2]:.0f} deg; conf neck {conf[J['neck']]:.1f} "
@@ -180,6 +215,7 @@ class TrunkStatus:
     seq: int = 0
     hz: float = 0.0                       # trunk updates per second, last 2 s
     method: str = ""                      # icp / msam_r18 / msam_v3rot, what measured it
+    reference: str = "neutral"            # neutral / model: what the angles are from
     timing_ms: dict = field(default_factory=dict)
 
     @property
@@ -198,6 +234,9 @@ class TrunkEngine:
         self.cfg = cfg
         self.warn = _per_axis(cfg["trunk_warn_deg"])
         self.comp = _per_axis(cfg["trunk_comp_deg"])
+        self.model_warn = _per_axis(cfg["trunk_model_warn_deg"])
+        self.model_comp = _per_axis(cfg["trunk_model_comp_deg"])
+        self._zero = None                 # model frame: (rotation set as zero, rot180 then)
         self.shell = StereoShell(K0, D0, K1, D1, R, T, size)
         self.seg = TorsoSegmenter()
         self._ref = ((K1, D1) if self.shell.swap else (K0, D0)), size
@@ -225,9 +264,35 @@ class TrunkEngine:
         self._levels = np.zeros(3, int)
         self._last = None                 # last good (angles, rms, how)
         self._debug_at = 0.0
+        self._rest_debug_at = 0.0
         self._seq = 0
         self._rate = []
+        self.reference = "model" if cfg["trunk_reference"] == "model" else "neutral"
         self.set_method(cfg["trunk_method"])
+
+    def model_frame(self):
+        """Angles from minisam3d's own frame, not a captured neutral."""
+        return self.reference == "model" and self.method != "icp"
+
+    def set_reference(self, reference):
+        """trunk_reference: "neutral" or "model". Either way the old neutral goes."""
+        if reference not in ("neutral", "model"):
+            print(f"[TRUNK] unknown trunk_reference {reference!r}", flush=True)
+            return False
+        if reference != self.reference:
+            print(f"[TRUNK] reference {self.reference} -> {reference}", flush=True)
+            self.reference = reference
+            self._clear_neutral()
+        return True
+
+    def clear_zero(self):
+        """Model frame: measure from the model's own rest pose again."""
+        if self._zero is not None:
+            print("[TRUNK] zero cleared: model frame", flush=True)
+        self._zero = None
+        self._capture_result = ""
+        self._levels[:] = OK
+        self._pending[:] = OK
 
     def small_pair(self, raw0, raw1):
         """Sensor-resolution stream0/stream1 -> (left, right) at working size."""
@@ -266,6 +331,7 @@ class TrunkEngine:
         if self._neutral is not None or self._capture is not None:
             print("[TRUNK] neutral cleared", flush=True)
         self._neutral = self._reg = self._capture = None
+        self._zero = None
         self._fail_since, self._last = None, None
         self._levels[:] = OK
         self._pending[:] = OK
@@ -362,9 +428,14 @@ class TrunkEngine:
             cloud, bad = self._pose_obs(ls, timing)   # (R_trunk, xyz, conf), not a cloud
             npts = 0
 
-        if start_capture:
+        if self.model_frame():
+            if self._zero is not None and self._zero[1] != bool(self._rot180):
+                self.clear_zero()                       # set the other way up
+            self._neutral = model_frame(self._rot180, self._zero and self._zero[0])
+        if start_capture:   # in the model frame: "Set zero"
             self._capture = (now, [], [], 0)
-        st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, method=self.method, timing_ms=timing,
+        st = TrunkStatus(npts=npts, seq=self._seq, hz=hz, method=self.method,
+                         reference="model" if self.model_frame() else "neutral", timing_ms=timing,
                          people=self._people, locked=self._lock_mask is not None,
                          raw_pts=self._q[0], mask_px=self._q[1])
         if self._capture is not None and self._capture_step(now, cloud, bad, st):
@@ -373,7 +444,8 @@ class TrunkEngine:
             st.state = NO_NEUTRAL
         else:
             self._track(now, cloud, bad, timing, st)
-        st.has_neutral = self._neutral is not None
+        # model frame: whether a zero is set (there is always a reference)
+        st.has_neutral = self._zero is not None if self.model_frame() else self._neutral is not None
         st.capture_result = self._capture_result
         return st
 
@@ -433,6 +505,17 @@ class TrunkEngine:
         """minisam3d's counterpart of Registration.step: neutral -> now, or None
         past the same ~45 deg a seated trunk never reaches."""
         R_body = obs[0] @ self._neutral.R_trunk.T
+        if self.model_frame() and self.cfg["trunk_debug"]:
+            now = time.perf_counter()
+            if now - self._rest_debug_at >= 1.0:
+                self._rest_debug_at = now
+                # The model's rotation of someone upright facing a level camera,
+                # estimated from this frame's own joints: CAM_FRAME F^T R.
+                B = CAM_FRAME @ anatomical_frame_pose(obs[1]).T @ obs[0]
+                print(f"[TRUNK-DBG] model rest estimate rotvec="
+                      f"{np.round(np.degrees(cv2.Rodrigues(B)[0].ravel()), 1).tolist()} "
+                      f"matrix={np.round(B, 3).tolist()} off_model_frame={rot_deg(R_body):.0f} deg",
+                      flush=True)
         if rot_deg(R_body) > ROT_MAX_DEG:
             return None, dict(how="gated")
         conf = obs[2][TRUNK_JOINTS]
@@ -468,7 +551,7 @@ class TrunkEngine:
         elif self._fail_since is None:
             self._fail_since = now
 
-        if (self._fail_since is not None and self._neutral is not None
+        if (self._fail_since is not None and self._neutral is not None and not self.model_frame()
                 and now - self._fail_since >= self.cfg["trunk_reneutral_s"]):
             print(f"[TRUNK] occluded {self.cfg['trunk_reneutral_s']:.0f} s: neutral dropped", flush=True)
             self._clear_neutral()
@@ -490,13 +573,14 @@ class TrunkEngine:
     def _classify(self, angles, now):
         a = np.abs(angles)
         h = self.cfg["trunk_hysteresis_deg"]
+        warn, comp = (self.model_warn, self.model_comp) if self.model_frame() else (self.warn, self.comp)
         for i in range(3):
             cur = self._levels[i]
             # where the reading belongs, with slack on the way down
-            target = COMPENSATING if a[i] >= self.comp[i] else WARN if a[i] >= self.warn[i] else OK
+            target = COMPENSATING if a[i] >= comp[i] else WARN if a[i] >= warn[i] else OK
             if target < cur:
-                down_to = (COMPENSATING if a[i] >= self.comp[i] - h
-                           else WARN if a[i] >= self.warn[i] - h else OK)
+                down_to = (COMPENSATING if a[i] >= comp[i] - h
+                           else WARN if a[i] >= warn[i] - h else OK)
                 self._levels[i] = min(cur, down_to)
                 self._pending[i] = self._levels[i]
                 continue
@@ -561,6 +645,17 @@ class TrunkEngine:
             spread = float(np.percentile([rot_deg(o[0] @ R_mean.T) for o in obs], 90))
             if spread > self.cfg["trunk_msam_neutral_deg"]:
                 self._capture_result = "moving"
+            elif self.model_frame():
+                # "Set zero": this pose reads 0 from now on, on the model frame's axes.
+                self._zero = (R_mean, bool(self._rot180))
+                self._fail_since, self._last = None, None
+                self._levels[:] = OK
+                self._pending[:] = OK
+                self._capture_result = "ok"
+                off = rot_deg(R_mean @ model_frame(self._rot180).R_trunk.T)
+                print(f"[TRUNK] zero set ({self.method}): {len(obs)}/{seen} frames, "
+                      f"{off:.1f} deg from the model's rest pose", flush=True)
+                return False
             else:
                 self._neutral = PoseNeutral(R_mean, anatomical_frame_pose(
                     np.mean([o[1] for o in obs], axis=0)))
@@ -645,6 +740,14 @@ class TrunkThread:
         with self._lock:
             return self.engine.set_method(method)
 
+    def set_reference(self, reference):
+        with self._lock:
+            return self.engine.set_reference(reference)
+
+    def clear_zero(self):
+        with self._lock:
+            self.engine.clear_zero()
+
     def status(self) -> TrunkStatus:
         with self._lock:
             return self._status
@@ -701,6 +804,8 @@ def _process_main(shm_name, shape, lock, seq, new, cmds, out, calib, settings):
                     return
                 if cmd == "neutral":
                     capture = True
+                elif cmd == "zero_clear":
+                    engine.clear_zero()
                 elif cmd == "snapshot":
                     snap = engine.snapshot()
                     if snap is not None:
@@ -709,6 +814,8 @@ def _process_main(shm_name, shape, lock, seq, new, cmds, out, calib, settings):
                     engine.select(cmd[1])
                 elif isinstance(cmd, tuple) and cmd[0] == "method":
                     engine.set_method(cmd[1])
+                elif isinstance(cmd, tuple) and cmd[0] == "reference":
+                    engine.set_reference(cmd[1])
             if not new.wait(0.5):
                 continue
             last = _throttle(cfg, last)
@@ -790,6 +897,10 @@ class TrunkProcess:
     def capture_neutral(self):
         self._cmds.put("neutral")
 
+    def clear_zero(self):
+        """Model frame: drop a "Set zero", back to the model's rest pose."""
+        self._cmds.put("zero_clear")
+
     def request_snapshot(self):
         """Ask for the picker image; it arrives through `take_snapshot`."""
         self._cmds.put("snapshot")
@@ -801,6 +912,10 @@ class TrunkProcess:
     def set_method(self, method):
         """icp / msam_r18 / msam_v3rot (see DEFAULTS); clears the neutral."""
         self._cmds.put(("method", str(method)))
+
+    def set_reference(self, reference):
+        """neutral / model (see DEFAULTS); clears the neutral."""
+        self._cmds.put(("reference", str(reference)))
 
     def take_snapshot(self):
         """The newest snapshot not yet taken, or None."""

@@ -42,6 +42,12 @@ const DEFAULTS := {
 	"trunk_enabled": true,
 	# icp = stereo shell + ICP; msam_r18 / msam_v3rot = minisam3d pose student on the NPU
 	"trunk_method": "icp",
+	# neutral = angles from the captured neutral; model = minisam3d's own frame
+	# (upright facing a level camera = 0, no capture; msam_* only)
+	"trunk_reference": "neutral",
+	# the model frame reads camera tilt as posture, so it warns / pauses later
+	"trunk_model_warn_deg": 15,
+	"trunk_model_comp_deg": 25,
 	"trunk_cpus": "7",
 	"trunk_warn_deg": 8,
 	"trunk_comp_deg": 15,

@@ -1,8 +1,9 @@
 extends CanvasLayer
-## In-game trunk posture overlay, for any game: a small status line (top right)
-## and a cue banner when the patient compensates (a rounded panel while the game
-## is paused for it). Display only; what the game
-## does about compensation is up to the game (see random_reach player.gd).
+## In-game trunk posture overlay, for any game: a small status line (top right),
+## a cue banner when the patient compensates (a rounded panel while the game
+## is paused for it) and a "Capture neutral" button (bottom left) to reset the
+## neutral without leaving the game. What the game does about compensation is
+## up to the game (see random_reach player.gd).
 ## Hidden while the tracker sends no trunk data.
 
 ## By level: OK, WARN, COMPENSATING (TrunkMonitor's enum).
@@ -19,6 +20,10 @@ var _status: Label
 var _banner: Label
 var _pause_panel: PanelContainer
 var _pause_cue: Label
+var _capture: Button
+var _capture_result: Label
+var _capture_asked := false   # show the outcome only of a capture asked for here
+var _capture_seen := false    # ...and only once it ran: capture_result still holds the last one
 
 
 func _ready() -> void:
@@ -38,6 +43,7 @@ func _ready() -> void:
 	add_child(_banner)
 
 	_build_pause_panel()
+	_build_capture()
 
 	TrunkMonitor.updated.connect(_refresh)
 	TrunkMonitor.enabled_changed.connect(func(_on): _refresh())
@@ -79,6 +85,62 @@ func _build_pause_panel() -> void:
 	box.add_child(_pause_cue)
 
 
+## Bottom left, clear of the score (top left) and the pause button (bottom right).
+func _build_capture() -> void:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	box.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	box.position += Vector2(16, -16)
+	box.alignment = BoxContainer.ALIGNMENT_END
+	add_child(box)
+	_capture_result = _label(18)
+	box.add_child(_capture_result)
+	_capture = Button.new()
+	_capture.add_theme_font_size_override("font_size", 18)
+	_capture.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	# Keyboard play (space, arrows) must not press it.
+	_capture.focus_mode = Control.FOCUS_NONE
+	_capture.pressed.connect(_on_capture_pressed)
+	box.add_child(_capture)
+
+
+func _on_capture_pressed() -> void:
+	_capture_asked = true
+	_capture_seen = false
+	TrunkMonitor.capture_neutral()
+	_capture_result.text = "Sit upright and hold still..."
+	_capture_result.modulate = Color.WHITE
+
+
+func _refresh_capture(on: bool) -> void:
+	var model := TrunkMonitor.model_frame()
+	_capture.visible = on
+	_capture.text = "Set zero" if model else "Capture neutral"
+	_capture.disabled = TrunkMonitor.state == TrunkMonitor.CAPTURING
+	if not on or not _capture_asked:
+		_capture_result.text = ""
+		return
+	if TrunkMonitor.state == TrunkMonitor.CAPTURING:
+		_capture_seen = true
+		return
+	if not _capture_seen:
+		return
+	match TrunkMonitor.capture_result:
+		"ok":
+			_capture_result.text = "Zero set ✓" if model else "Neutral captured ✓"
+			_capture_result.modulate = COLOURS[TrunkMonitor.OK]
+		"moving":
+			_capture_result.text = "Capture failed: hold still and try again"
+			_capture_result.modulate = COLOURS[TrunkMonitor.COMPENSATING]
+		"not_visible":
+			_capture_result.text = "Capture failed: trunk not visible"
+			_capture_result.modulate = COLOURS[TrunkMonitor.COMPENSATING]
+		_:
+			return
+	# One outcome per press; it clears with the next press.
+	_capture_asked = false
+
+
 func _label(size: int) -> Label:
 	var l := Label.new()
 	l.add_theme_font_size_override("font_size", size)
@@ -96,6 +158,7 @@ func _refresh() -> void:
 	if _status == null:
 		return
 	var on := TrunkMonitor.available()
+	_refresh_capture(on)
 	_status.visible = on
 	_banner.visible = false
 	_pause_panel.visible = false

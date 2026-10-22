@@ -85,7 +85,7 @@ again and is not applied twice.
 | `0x03` | `SESSION` | patient id | the id |
 | `0x04` | `STOP` | — | — |
 | `0x05` | `CONFIG` | `key=value` | `key=value` as applied, or why refused |
-| `0x06` | `TRUNK` | `neutral` \| `snapshot` \| `select=<n>` | the command, or why refused |
+| `0x06` | `TRUNK` | `neutral` (model frame: set zero) \| `zero_clear` \| `snapshot` \| `select=<n>` | the command, or why refused |
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
 | `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
 
@@ -99,12 +99,13 @@ says the job was taken; each finished job answers with a `STORAGE_LIST`.
 CONFIG keys (tracker.py `_apply_setting`): `track` (on/off: the app wants
 tracking now; not a setting, never in settings.json), `solver` (joint/ransac), `refine`
 (crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
-`trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `recording`
+`trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `trunk_reference`
+(neutral/model), `recording`
 (on/off), `recording_fps`, `recording_scale` (0–1], `recording_chunk_frames` —
 the recording ones from the next session. At each HELLO the tracker applies the
 same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 `tracker_camera`, `corner_deadband_px`, `trunk_enabled`, `trunk_method`,
-`recording*`). Everything else in settings.json needs
+`trunk_reference`, `recording*`). Everything else in settings.json needs
 `sudo systemctl restart noark-tracker`.
 
 ## 5. Tracker → app
@@ -133,8 +134,10 @@ heartbeat still shows the tracker is alive):
 **TRUNK_STATUS** fields, in order:
 `state, level, lvl_flex, lvl_lat, lvl_axi, flex, lat, axi, progress, has_neutral,
 reason, capture_result, people, locked, q_how, q_rms_mm, q_frac, raw_pts, mask_px, held,
-hz, method, doubt` (hz: trunk updates per second; method: icp / msam_r18 / msam_v3rot;
-doubt: "" or why this reading is less trusted, `low_conf` / `arm_over_chest`)
+hz, method, doubt, reference` (hz: trunk updates per second; method: icp / msam_r18 / msam_v3rot;
+doubt: "" or why this reading is less trusted, `low_conf` / `arm_over_chest`;
+reference: `neutral` = angles from the captured neutral, `model` = from minisam3d's own frame;
+in the model frame has_neutral = a zero has been set)
 (`TrunkStatus` in `pyscripts/trunk/tracker.py`; `trunk_monitor.gd`).
 
 **SNAPSHOT** json: `{"w", "h", "locked", "people": [[[x, y], ...], ...]}` in

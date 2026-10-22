@@ -5,8 +5,9 @@ extends Node
 ## tracker.py sends a TRUNK_STATUS message per trunk update (~10 Hz), whose
 ## CSV payload GlobalScript hands to on_packet() (docs/PROTOCOL.md):
 ##   state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-##       reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
-## (the last six describe this frame's own quality, for the raw log)
+##       reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,
+##       hz,method,doubt,reference
+## (q_how..held describe this frame's own quality, for the raw log)
 ## The thresholds, hysteresis and dwell are applied in Python
 ## (settings.json trunk_warn_deg / trunk_comp_deg); this only reports them.
 ##
@@ -48,12 +49,20 @@ var held := false                   # angles are the last good ones, not this fr
 var hz := 0.0                       # trunk updates per second, measured by the tracker
 var method := ""                    # what measures it: icp / msam_r18 / msam_v3rot
 var doubt := ""                     # used but less trusted: "low_conf" / "arm_over_chest"
+## What the tracker measures the angles from right now: "neutral" (the captured
+## neutral) or "model" (minisam3d's own frame, no capture). See set_reference().
+var reference := "neutral"
 
 ## How each trunk_method is shown (Settings, the Trunk angles screen).
 const METHOD_NAMES := {
 	"icp": "ICP (stereo point cloud)",
 	"msam_r18": "minisam3d r18 (v3mix)",
 	"msam_v3rot": "minisam3d v3rot (older)",
+}
+## How each trunk_reference is shown.
+const REFERENCE_NAMES := {
+	"neutral": "From captured neutral",
+	"model": "Model frame (no capture, minisam3d only)",
 }
 var _last_packet_ms := -100000
 
@@ -92,6 +101,42 @@ func set_enabled(on: bool) -> void:
 		level = OK
 		has_neutral = false
 	enabled_changed.emit(on)
+
+
+## settings.json trunk_reference: "neutral" or "model". Saved and sent to the
+## tracker now; either way the old neutral is dropped. "model" applies to the
+## minisam3d methods only (with icp the tracker stays on a captured neutral).
+func set_reference(value: String) -> void:
+	Settings.set_value("trunk_reference", value)
+	Settings.save()
+	GlobalScript.send_tracker_config("trunk_reference", value)
+
+
+## The angles come from minisam3d's own frame: no neutral needed. capture_neutral()
+## then sets the zero ("Set zero") and has_neutral says whether one is set.
+func model_frame() -> bool:
+	return available() and reference == "model"
+
+
+## Model frame: drop a "Set zero", back to the model's own rest pose.
+func clear_zero() -> void:
+	GlobalScript.send_trunk_command("zero_clear")
+
+
+## (warn, compensating) per axis as Vector3s, from settings.json: the model
+## frame has its own (trunk_model_*_deg), wider ones.
+func thresholds() -> Array:
+	var model := model_frame()
+	return [_threshold("trunk_model_warn_deg" if model else "trunk_warn_deg", 15.0 if model else 8.0),
+		_threshold("trunk_model_comp_deg" if model else "trunk_comp_deg", 25.0 if model else 15.0)]
+
+
+static func _threshold(key: String, fallback: float) -> Vector3:
+	var v = Settings.get_value(key, fallback)
+	if v is Dictionary:
+		return Vector3(float(v.get("flexion", fallback)), float(v.get("lateral", fallback)),
+			float(v.get("axial", fallback)))
+	return Vector3.ONE * float(v)
 
 
 func capture_neutral() -> void:
@@ -154,6 +199,7 @@ func on_packet(text: String) -> void:
 		hz = float(f[20])
 		method = f[21]
 	doubt = f[22] if f.size() >= 23 else ""
+	reference = f[23] if f.size() >= 24 else "neutral"
 	if new_state != state:
 		state = new_state
 		state_changed.emit(state)

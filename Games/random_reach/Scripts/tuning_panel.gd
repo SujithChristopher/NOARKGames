@@ -8,9 +8,10 @@ const OPTIONS := {
 	"camera": ["both", "cam0", "cam1"],
 	"deadband": ["0", "0.5", "1", "2"],
 	"trunk_method": ["icp", "msam_r18", "msam_v3rot"],
+	"trunk_reference": ["neutral", "model"],
 }
 const SETTINGS_KEYS := {"solver": "tracker_solver", "refine": "tracker_refine", "camera": "tracker_camera",
-	"trunk_method": "trunk_method"}
+	"trunk_method": "trunk_method", "trunk_reference": "trunk_reference"}
 
 var _box: VBoxContainer
 var _toggle: Button

@@ -14,7 +14,7 @@ const TrunkMonitorScript := preload("res://Main_screen/Scripts/trunk_monitor.gd"
 const LIVE_KEYS := {
 	"tracker_solver": "solver", "tracker_refine": "refine",
 	"tracker_camera": "camera", "corner_deadband_px": "deadband",
-	"trunk_method": "trunk_method", "recording": "recording",
+	"trunk_method": "trunk_method", "trunk_reference": "trunk_reference", "recording": "recording",
 	"recording_fps": "recording_fps", "recording_scale": "recording_scale",
 }
 
@@ -32,6 +32,7 @@ const FIELDS := [
 	["Trunk"],
 	["trunk_enabled", "Trunk tracking", "bool", []],
 	["trunk_method", "Trunk method", "choice", ["msam_r18", "msam_v3rot", "icp"], TrunkMonitorScript.METHOD_NAMES],
+	["trunk_reference", "Trunk angles from", "choice", ["neutral", "model"], TrunkMonitorScript.REFERENCE_NAMES],
 	["Hand tracker"],
 	["tracker_solver", "Pose solver", "choice", ["joint", "ransac"]],
 	["tracker_refine", "Corner refine", "choice", ["contour", "subpix", "crop", "none"]],
@@ -252,6 +253,6 @@ static func _as_text(v: Variant) -> String:
 
 # Keep numbers numeric in the file: the tracker int()/float()s them, but a string would be sloppy.
 static func _typed(key: String, text: String) -> Variant:
-	if key in ["stream_type", "tracker_solver", "tracker_refine", "tracker_camera", "trunk_method"]:
+	if key in ["stream_type", "tracker_solver", "tracker_refine", "tracker_camera", "trunk_method", "trunk_reference"]:
 		return text
 	return text.to_float() if "." in text else text.to_int()

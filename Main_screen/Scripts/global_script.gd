@@ -250,7 +250,7 @@ func hand_camera() -> Vector3:
 	return _last_centroid
 
 
-# corners: camera (x, z) of the hand at TL, TR, BL, BR of the table, in metres.
+# corners: camera (x, z) of the hand at TL, BL, BR, TR of the table, in metres.
 # Fits the affine that stretches them onto the screen corners, then keeps its
 # rotation and centre but one scale (the smaller), so the table fits and a
 # circle on the table stays a circle on screen. Returns false if degenerate.
@@ -258,7 +258,8 @@ func set_table(corners: Array, y0: float) -> bool:
 	if corners.size() < 4:
 		return false
 	var sz := screen_size if screen_size.x > 0.0 else get_viewport().get_visible_rect().size
-	var dst: Array = [Vector2(0, 0), Vector2(sz.x, 0), Vector2(0, sz.y), Vector2(sz.x, sz.y)]
+	# The corners in table_overlay.gd's order: once round, from the top-left.
+	var dst: Array = [Vector2(0, 0), Vector2(0, sz.y), Vector2(sz.x, sz.y), Vector2(sz.x, 0)]
 	var fit = TableFit.fit(corners, dst)
 	if fit == null:
 		return false

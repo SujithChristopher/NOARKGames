@@ -561,7 +561,8 @@ class TrackerClass:
         print(f"[TRUNK] {'On' if self.trunk_on else 'Off'} (live).")
 
     def _trunk_command(self, arg: bytes):
-        """TRUNK `neutral` starts a neutral capture; `snapshot` sends the
+        """TRUNK `neutral` starts a neutral capture (in the model frame: sets the
+        zero; `zero_clear` drops it again); `snapshot` sends the
         subject picker's image; `select=<n>` follows person n of it (-1 = the
         centre-most again). -> (ok, detail) for the ACK."""
         if self.trunk is None or not self.trunk_on:
@@ -570,6 +571,9 @@ class TrackerClass:
         if arg == b"neutral":
             print("[TRUNK] Neutral capture requested.")
             self.trunk.capture_neutral()
+        elif arg == b"zero_clear":
+            print("[TRUNK] Zero clear requested.")
+            self.trunk.clear_zero()
         elif arg == b"snapshot":
             self.trunk.request_snapshot()
         elif arg.startswith(b"select="):
@@ -594,7 +598,7 @@ class TrackerClass:
         """One TRUNK_STATUS per trunk update, CSV:
         state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
         reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,
-        hz,method,doubt
+        hz,method,doubt,reference
         (trunk/tracker.py has the states and levels.)
         """
         st = self.trunk.status()
@@ -611,7 +615,7 @@ class TrackerClass:
             f"{f:.2f},{l:.2f},{a:.2f},{st.progress:.2f},{int(st.has_neutral)},"
             f"{st.reason},{st.capture_result},{st.people},{int(st.locked)},"
             f"{st.q_how},{st.q_rms_mm:.1f},{st.q_frac:.2f},{st.raw_pts},{st.mask_px},"
-            f"{int(st.held)},{st.hz:.1f},{st.method},{st.doubt}"))
+            f"{int(st.held)},{st.hz:.1f},{st.method},{st.doubt},{st.reference}"))
         # One journal line whenever the state, level or this frame's outcome
         # changes, with the quality numbers: why a reading was bad (a shrunk
         # mask or cloud, a poor fit) is not visible from the angles alone.
@@ -817,7 +821,7 @@ class TrackerClass:
         "tracker_solver": "solver", "tracker_refine": "refine",
         "tracker_camera": "camera", "corner_deadband_px": "deadband",
         "trunk_enabled": "trunk", "trunk_method": "trunk_method",
-        "recording": "recording", "recording_fps": "recording_fps",
+        "trunk_reference": "trunk_reference", "recording": "recording", "recording_fps": "recording_fps",
         "recording_scale": "recording_scale",
         "recording_chunk_frames": "recording_chunk_frames",
     }
@@ -862,6 +866,7 @@ class TrackerClass:
         Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
         camera (both|cam0|cam1), deadband (px; 0 = stabilizer off),
         trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot),
+        trunk_reference (neutral|model),
         track (on|off: the app wants tracking now; the cameras run only then),
         recording (on|off), recording_fps, recording_scale (0-1],
         recording_chunk_frames — the recording ones from the next session.
@@ -887,6 +892,11 @@ class TrackerClass:
                 self._trunk_settings = {**self._trunk_settings, "trunk_method": value}
                 if self.trunk is not None:
                     self.trunk.set_method(value)
+        elif key == "trunk_reference" and value in ("neutral", "model"):
+            if self._trunk_settings.get("trunk_reference", "neutral") != value:
+                self._trunk_settings = {**self._trunk_settings, "trunk_reference": value}
+                if self.trunk is not None:
+                    self.trunk.set_reference(value)
         elif key == "track" and value in ("on", "off"):
             self._want_tracking = value == "on"
         elif key == "recording" and value in ("on", "off"):
@@ -913,7 +923,7 @@ class TrackerClass:
             "time", "method", "state", "held", "doubt", "has_neutral", "flex", "lat", "axi",
             "cam_rx", "cam_ry", "cam_rz", "conf", "people",
             "marker_age_s", "marker_id", "marker_rx", "marker_ry", "marker_rz",
-            "marker_tx", "marker_ty", "marker_tz", "flip"])
+            "marker_tx", "marker_ty", "marker_tz", "flip", "reference"])
         self._marker = None
         print(f"[TRUNK] Debug log: {path}", flush=True)
 
@@ -925,7 +935,7 @@ class TrackerClass:
         self._trunk_csv_writer.writerow([
             f"{now:.3f}", st.method, st.state_name, int(st.held), st.doubt, int(st.has_neutral),
             *(f"{a:.2f}" for a in st.angles), *(f"{c:.2f}" for c in st.cam_rot),
-            f"{st.q_frac:.2f}", st.people, *marker, int(self.flip_frames)])
+            f"{st.q_frac:.2f}", st.people, *marker, int(self.flip_frames), st.reference])
 
     def _send_position(self, centroid, ref_rvec, ref_tvec, ref_id: int) -> None:
         if self._trunk_csv is not None:
