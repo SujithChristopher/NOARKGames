@@ -1,6 +1,10 @@
 extends Node
 
 const TableFit := preload("res://Main_screen/Scripts/table_fit.gd")
+const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
+const TrackerLink := preload("res://Main_screen/Scripts/tracker_link.gd")
+const UdpTransport := preload("res://Main_screen/Scripts/udp_transport.gd")
+const BleTransport := preload("res://Main_screen/Scripts/ble_transport.gd")
 
 # ── screen bounds ─────────────────────────────────────────────────────────────
 var X_SCREEN_OFFSET: int
@@ -26,17 +30,10 @@ var MAX_Y: int = 1060
 var clamp_vector_x = Vector2(MIN_X, MIN_Y)
 var clamp_vector_y = Vector2(MAX_X, MAX_Y)
 
-enum BLEStatus { IDLE, SCANNING, CONNECTING, CONNECTED }
-
-var ble_status: BLEStatus:
+## Where the tracker link is, for the status indicator (LinkProtocol.LinkStatus).
+var link_status: int:
 	get:
-		if connected:
-			return BLEStatus.CONNECTED
-		if _ble_connecting:
-			return BLEStatus.CONNECTING
-		if _ble_scan_active:
-			return BLEStatus.SCANNING
-		return BLEStatus.IDLE
+		return link.status() if link else LinkProtocol.LinkStatus.IDLE
 
 # ── origin / local-coordinate state ──────────────────────────────────────────
 var _origin_set:       bool   = false
@@ -52,7 +49,7 @@ var _last_ref_id:   int     = -1
 # Defined on the main screen ("Define Table"): the hand is put on the four table
 # corners, which fixes the zero, the axis directions and the px-per-metre scale
 # in one go, so set_origin() is not needed. While set, it replaces the origin
-# lock in _apply_position_packet. Persisted in table.json next to settings.json.
+# lock in _apply_position. Persisted in table.json next to settings.json.
 var table_set:    bool        = false
 var table_k:      float       = 0.0            # screen px per real metre
 var table_r:      Vector2     = Vector2.ZERO   # hand, real metres from the table centre
@@ -60,46 +57,30 @@ var _table_basis: Transform2D = Transform2D.IDENTITY   # camera x-z -> screen-al
 var _table_centre: Vector2    = Vector2.ZERO   # camera x-z of the table centre (m)
 var _table_y0:    float       = 0.0
 
-# ── transport settings ────────────────────────────────────────────────────────
-var stream_type: String = "udp"
-var ble_device_name: String = "NOARK_Tracker"
-var udp_port: int = 8000
+# ── tracker link ──────────────────────────────────────────────────────────────
+## The app's end of the link to the tracker (tracker_link.gd), over the
+## transport settings.json `stream_type` picks — the one place that choice is
+## made (_start_link).
+var link: Node
+var _transport: Node
+## The link's own signals, re-emitted here: restart_link() replaces the link,
+## and whoever listens should not have to connect again.
+signal link_connected_changed(connected: bool)
+signal link_command_done(kind: int, ok: bool, detail: String)
+## The tracker's cameras (LinkProtocol.TrackerState): idle, starting, tracking.
+signal tracker_state_changed(state: int)
 
-const BLE_SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
-const BLE_POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
-const BLE_COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
-
-# ── UDP ───────────────────────────────────────────────────────────────────────
-@onready var udp: PacketPeerUDP = PacketPeerUDP.new()
-@onready var thread_network = Thread.new()
-@onready var thread_python = Thread.new()
-@onready var thread_path_check = Thread.new()
-
-# ── BLE ───────────────────────────────────────────────────────────────────────
-var _ble_manager = null          # BluetoothManager instance (gdble GDExtension — Windows/Linux)
-var _ble_android_plugin = null   # GdAndroidBLE singleton (Android plugin)
-var ble_device = null            # BleDevice instance (gdble only)
-var _ble_target_address: String = ""
-var _ble_connecting: bool = false
-var _ble_can_write_command: bool = false
-var _ble_command_with_response: bool = false
-var _ble_scan_active: bool = false
-var _ble_services_requested: bool = false
-var _ble_subscription_ready: bool = false
-var _ble_shutting_down: bool = false
-
-# ── connection state ──────────────────────────────────────────────────────────
-@onready var connected: bool = false
-@onready var disconnected: bool = false
-@onready var reset_position: bool = false
+## Tracking is asked of the tracker only while something needs it: a scene
+## under res://Games/, or a node that called hold_tracking(). Everywhere else
+## (main menu, Settings, dose, results) the tracker idles with its cameras off.
+var _tracking_holders: Array[Node] = []
+var _tracking_sent := -1   # the last track= sent: -1 none since connecting, 0 off, 1 on
+const TRACKER_SERVICE := "/etc/systemd/system/noark-tracker.service"
 
 # ── python launcher ───────────────────────────────────────────────────────────
 @onready var interpreter_path: String
 const SENDER_SCRIPT := "sender_raspberryPI.py"
 var _quitting := false   # the close request is being handled (it waits for the upload)
-@onready var pyscript_path: String
-@onready var pypath_checker_path: String
-@export var endgame: bool = false
 
 # ── networked position (raw) ──────────────────────────────────────────────────
 var net_x: float
@@ -134,21 +115,11 @@ var smooth_workspace: Vector2          = Vector2.ZERO
 var smooth_scaled_network_position: Vector2   = Vector2.ZERO
 var smooth_scaled_network_position3D: Vector2 = Vector2.ZERO
 
-# ── messaging ─────────────────────────────────────────────────────────────────
-var quit_request: bool = false
-@export var delay_time = 0.1
-@onready var message_timer: Timer = Timer.new()
-var _outgoing_message = "CONNECTED"
-var _incoming_message: float
-
 @onready var debug: bool
 
 
 func _ready() -> void:
 	debug           = Settings.get_value("debug", false)
-	stream_type     = Settings.get_value("stream_type", "udp")
-	ble_device_name = Settings.get_value("ble_device_name", "NOARK_Tracker")
-	udp_port        = Settings.get_value("udp_port", 8000)
 	_pin_to_cpus(Settings.get_value("game_cpus", ""))
 
 	load_table()
@@ -166,12 +137,6 @@ func _ready() -> void:
 	Y_SCREEN_OFFSET   = int(screen_size.y / 2)
 	Y_SCREEN_OFFSET3D = int(screen_size.y / 1.75)
 
-	message_timer.autostart = true
-	message_timer.wait_time = delay_time
-	message_timer.one_shot  = false
-	message_timer.timeout.connect(_on_heartbeat_tick)
-	add_child(message_timer)
-
 	GlobalSignals.SignalBus.connect(handle_quit_request)
 	get_tree().set_auto_accept_quit(false)
 
@@ -180,363 +145,82 @@ func _ready() -> void:
 		interpreter_path = root.path_join(".venv/Scripts/python.exe")
 	else:
 		interpreter_path = root.path_join(".venv/bin/python")
-	pyscript_path       = root.path_join("pyscripts/tracker.py")
-	pypath_checker_path = root.path_join("pyscripts/file_integrity.py")
 
-	match stream_type:
-		"udp":
-			_init_udp()
-		"ble":
-			_init_ble()
-		_:
-			push_error("Unknown stream_type '%s' — falling back to UDP" % stream_type)
-			stream_type = "udp"
-			_init_udp()
+	_start_link()
 
 	print(MAX_X, " " + str(MAX_Y))
 
 
-# ── UDP ───────────────────────────────────────────────────────────────────────
+# ── tracker link ──────────────────────────────────────────────────────────────
 
-func _init_udp() -> void:
-	udp.connect_to_host("127.0.0.1", udp_port)
-	thread_python.start(python_thread, Thread.PRIORITY_HIGH)
-	thread_network.start(network_thread)
-
-
-func network_thread() -> void:
-	while true:
-		if udp.get_available_packet_count() > 0:
-			handle_udp_packet()
-		else:
-			# Idle-sleep instead of busy-spinning a full core while waiting for
-			# the next packet; camera frames arrive every ~16-33ms, so this is
-			# well under one frame period and doesn't add perceptible latency.
-			OS.delay_usec(500)
-		if disconnected:
-			break
-
-
+## A CONFIG was applied by the tracker ("key=value"); the Tune panel shows it.
 signal tracker_config_applied(text: String)
+## The board's recordings and disk, after a STORAGE command (storage.py):
+## {total, free, event, recordings: [{path, patient, session, name, bytes, active}]}.
+signal storage_listed(info: Dictionary)
 
 
-func handle_udp_packet() -> void:
-	var packet    = udp.get_packet()
-	if _handle_text_packet(packet):
-		return
-	var my_floats = PackedByteArray(packet).to_float32_array()
-	udp.put_packet(_outgoing_message.to_utf8_buffer())
-	_apply_position_packet(my_floats)
+# The tracker runs on its own (the noark-tracker service on the board); the app
+# connects to it over UDP when they share the board, BLE from a tablet.
+func _start_link() -> void:
+	match Settings.get_value("stream_type", "ble"):
+		"udp":
+			_transport = UdpTransport.new(Settings.get_value("udp_host", "127.0.0.1"),
+				int(Settings.get_value("udp_port", 8000)))
+		var other:
+			if other != "ble":
+				push_error("Unknown stream_type '%s' — using BLE" % other)
+			_transport = BleTransport.new(Settings.get_value("ble_device_name", "NOARK_Tracker"), debug)
+	add_child(_transport)
+	link = TrackerLink.new(_transport)
+	add_child(link)
+	link.message.connect(_on_tracker_message)
+	link.command_done.connect(_on_command_done)
+	link.command_done.connect(link_command_done.emit)
+	link.connected_changed.connect(link_connected_changed.emit)
+	link.tracker_state_changed.connect(tracker_state_changed.emit)
+	_tracking_sent = -1
+	_transport.start()
 
 
-# The tracker's text packets, the same over UDP (a datagram) and BLE (a
-# notification on the position characteristic); position packets are 44 bytes.
-# Told apart by prefix, not size: a TRK: packet is 44 bytes about a third of the
-# time, and read as a position it is a centroid of ~0 — the cursor jumps. A
-# position packet cannot start with one of these (its first float is a small
-# message code, whose bytes are not letters).
-# Deferred: UDP calls this from the network thread.
-func _handle_text_packet(packet: PackedByteArray) -> bool:
-	if packet.size() < 4:
-		return false
-	match packet.slice(0, 4).get_string_from_ascii():
-		"CFG:":   # ack for a CFG command
-			tracker_config_applied.emit.call_deferred(packet.get_string_from_ascii().substr(4))
-		"TRK:":   # trunk status (TrunkMonitor)
-			TrunkMonitor.on_packet.call_deferred(packet.get_string_from_ascii())
-		"IMG:":   # a chunk of the subject picker's snapshot (TrunkMonitor)
-			TrunkMonitor.on_image_chunk.call_deferred(packet)
+## stream_type changed (Settings): end this link — and its session at the
+## tracker — and connect again over the transport settings.json now names.
+func restart_link() -> void:
+	var session_id: String = link.session_id
+	link.stop_now()
+	link.close()
+	link.queue_free()
+	_transport.queue_free()
+	_start_link()
+	if not session_id.is_empty():
+		link.set_session(session_id)
+
+
+func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
+	match kind:
+		LinkProtocol.POSITION:
+			var pos := LinkProtocol.decode_position(msg)
+			if pos.is_empty():
+				push_error("[LINK] Short POSITION: %d bytes" % msg.size())
+				return
+			_apply_position(pos)
+		LinkProtocol.TRUNK_STATUS:
+			TrunkMonitor.on_packet(LinkProtocol.payload_text(msg))
+		LinkProtocol.SNAPSHOT:
+			TrunkMonitor.on_snapshot(msg.slice(1))
+		LinkProtocol.STORAGE_LIST:
+			var info = JSON.parse_string(LinkProtocol.payload_text(msg))
+			if info is Dictionary:
+				storage_listed.emit(info)
+			else:
+				push_error("[LINK] Unreadable STORAGE_LIST")
 		_:
-			return false
-	return true
+			push_warning("[LINK] Unexpected message type 0x%02x" % kind)
 
 
-# ── BLE ───────────────────────────────────────────────────────────────────────
-
-func _init_ble() -> void:
-	if OS.get_name() == "Android":
-		await _init_ble_android()
-	else:
-		_init_ble_gdextension()
-
-
-func _init_ble_android() -> void:
-	if not Engine.has_singleton("GdAndroidBLE"):
-		push_error("[BLE] GdAndroidBLE plugin singleton not found. Enable the plugin in Project Settings.")
-		return
-
-	OS.request_permission("android.permission.BLUETOOTH_SCAN")
-	OS.request_permission("android.permission.BLUETOOTH_CONNECT")
-	OS.request_permission("android.permission.ACCESS_FINE_LOCATION")
-	await get_tree().create_timer(1.0).timeout
-
-	_ble_android_plugin = Engine.get_singleton("GdAndroidBLE")
-	_ble_android_plugin.connect("adapter_initialized",   Callable(self, "_on_ble_adapter_initialized"))
-	_ble_android_plugin.connect("device_discovered",     Callable(self, "_on_ble_android_device_discovered"))
-	_ble_android_plugin.connect("scan_stopped",          Callable(self, "_on_ble_scan_stopped"))
-	_ble_android_plugin.connect("device_connected",      Callable(self, "_on_ble_device_connected"))
-	_ble_android_plugin.connect("device_disconnected",   Callable(self, "_on_ble_device_disconnected"))
-	_ble_android_plugin.connect("connection_failed",     Callable(self, "_on_ble_connection_failed"))
-	_ble_android_plugin.connect("services_discovered",   Callable(self, "_on_ble_android_services_discovered"))
-	_ble_android_plugin.connect("characteristic_notified", Callable(self, "_on_ble_characteristic_notified"))
-	_ble_android_plugin.connect("operation_failed",      Callable(self, "_on_ble_operation_failed"))
-	_ble_android_plugin.connect("manager_error",         Callable(self, "_on_ble_manager_error"))
-	_ble_android_plugin.initialize()
-
-
-func _init_ble_gdextension() -> void:
-	if not ClassDB.class_exists("BluetoothManager"):
-		push_error("[BLE] BluetoothManager class not found. Check the GDBLE addon installation.")
-		return
-
-	_ble_manager = ClassDB.instantiate("BluetoothManager")
-	if _ble_manager == null:
-		push_error("[BLE] Failed to instantiate BluetoothManager")
-		return
-
-	add_child(_ble_manager)
-
-	_ble_manager.adapter_initialized.connect(_on_ble_adapter_initialized)
-	_ble_manager.device_discovered.connect(_on_ble_device_discovered)
-	_ble_manager.scan_stopped.connect(_on_ble_scan_stopped)
-	_ble_manager.error_occurred.connect(_on_ble_manager_error)
-
-	if _ble_manager.has_method("set_debug_mode"):
-		_ble_manager.set_debug_mode(debug)
-
-	_ble_manager.initialize()
-
-
-func _ble_start_scan(timeout_seconds: float = 10.0) -> void:
-	if ble_device != null or _ble_connecting or _ble_scan_active:
-		return
-	if _ble_android_plugin == null and _ble_manager == null:
-		return
-
-	_ble_scan_active = true
-	_ble_target_address = ""
-	print("[BLE] Starting scan for %.1f seconds…" % timeout_seconds)
-	if _ble_android_plugin:
-		_ble_android_plugin.start_scan(timeout_seconds)
-	else:
-		_ble_manager.start_scan(timeout_seconds)
-
-
-func _ble_connect_once(signal_ref: Signal, method_name: String) -> void:
-	var callable := Callable(self, method_name)
-	if not signal_ref.is_connected(callable):
-		signal_ref.connect(callable)
-
-
-func _on_ble_adapter_initialized(success: bool, error: String) -> void:
-	if not success:
-		push_error("[BLE] Failed to initialise Bluetooth adapter: " + error)
-		return
-
-	print("[BLE] Adapter ready — starting scan…")
-	_ble_start_scan(10.0)
-
-
-func _on_ble_device_discovered(device_info: Dictionary) -> void:
-	if ble_device != null or _ble_connecting or _ble_target_address != "":
-		return
-
-	var dname := str(device_info.get("name", ""))
-	var daddr := str(device_info.get("address", ""))
-	print("[BLE] Device: '%s'  addr=%s" % [dname, daddr])
-
-	if dname == ble_device_name and daddr != "":
-		_ble_target_address = daddr
-		print("[BLE] Target found — stopping scan…")
-		if _ble_android_plugin:
-			_ble_android_plugin.stop_scan()
-		else:
-			_ble_manager.stop_scan()
-
-
-func _on_ble_scan_stopped() -> void:
-	_ble_scan_active = false
-
-	if disconnected or endgame:
-		return
-
-	if ble_device != null or _ble_connecting:
-		return
-
-	var target_address := _ble_target_address
-	_ble_target_address = ""
-
-	if target_address == "":
-		print("[BLE] Target not found — rescanning…")
-		_ble_start_scan(10.0)
-		return
-
-	_ble_connect_to_target(target_address)
-
-
-func _ble_connect_to_target(address: String) -> void:
-	if address == "" or _ble_connecting:
-		return
-	if _ble_android_plugin == null and ble_device != null:
-		return
-
-	_ble_connecting = true
-	_ble_can_write_command = false
-	_ble_command_with_response = false
-	_ble_services_requested = false
-	_ble_subscription_ready = false
-
-	print("[BLE] Connecting to %s…" % address)
-
-	if _ble_android_plugin:
-		_ble_android_plugin.connect_device(address)
-		return
-
-	ble_device = _ble_manager.connect_device(address)
-	if ble_device == null:
-		_ble_connecting = false
-		push_error("[BLE] Failed to create device handle for " + address)
-		_ble_target_address = ""
-		_ble_start_scan(10.0)
-		return
-
-	_ble_connect_once(ble_device.connected, "_on_ble_device_connected")
-	_ble_connect_once(ble_device.disconnected, "_on_ble_device_disconnected")
-	_ble_connect_once(ble_device.connection_failed, "_on_ble_connection_failed")
-	_ble_connect_once(ble_device.services_discovered, "_on_ble_services_discovered")
-	_ble_connect_once(ble_device.characteristic_notified, "_on_ble_characteristic_notified")
-	_ble_connect_once(ble_device.operation_failed, "_on_ble_operation_failed")
-	ble_device.connect_async()
-
-
-func _on_ble_device_connected() -> void:
-	if _ble_services_requested:
-		return
-	if _ble_android_plugin == null and ble_device == null:
-		return
-
-	_ble_connecting = false
-	_ble_services_requested = true
-	print("[BLE] Device connected — discovering services…")
-	if _ble_android_plugin:
-		_ble_android_plugin.discover_services()
-	else:
-		ble_device.discover_services()
-
-
-func _on_ble_connection_failed(error: String) -> void:
-	_ble_connecting = false
-	connected = false
-	_ble_services_requested = false
-	_ble_subscription_ready = false
-	_ble_can_write_command = false
-	push_error("[BLE] Connection failed: " + error)
-	ble_device = null
-	_ble_target_address = ""
-	_ble_start_scan(10.0)
-
-
-func _on_ble_device_disconnected() -> void:
-	connected = false
-	_ble_connecting = false
-	_ble_can_write_command = false
-	_ble_scan_active = false
-	_ble_services_requested = false
-	_ble_subscription_ready = false
-	ble_device = null
-	_ble_target_address = ""
-
-	if _ble_shutting_down or disconnected or endgame:
-		print("[BLE] Device disconnected during shutdown")
-		return
-
-	print("[BLE] Device disconnected — rescanning…")
-	if not disconnected and not endgame:
-		_ble_start_scan(10.0)
-
-
-func _on_ble_android_device_discovered(dev_name: String, dev_address: String) -> void:
-	_on_ble_device_discovered({"name": dev_name, "address": dev_address})
-
-
-func _on_ble_android_services_discovered(services_json: String) -> void:
-	var services = JSON.parse_string(services_json)
-	if typeof(services) == TYPE_ARRAY:
-		_on_ble_services_discovered(services)
-	else:
-		push_error("[BLE] Failed to parse services JSON")
-
-
-func _on_ble_services_discovered(services: Array) -> void:
-	if _ble_subscription_ready:
-		return
-	if _ble_android_plugin == null and ble_device == null:
-		return
-
-	var found_position := false
-	var found_command := false
-
-	print("[BLE] Discovered %d service(s)" % services.size())
-	for service in services:
-		var service_uuid := str(service.get("uuid", "")).to_lower()
-		if service_uuid != BLE_SERVICE_UUID:
-			continue
-
-		for characteristic in service.get("characteristics", []):
-			var char_uuid := str(characteristic.get("uuid", "")).to_lower()
-			var properties: Dictionary = characteristic.get("properties", {})
-
-			if char_uuid == BLE_POSITION_UUID:
-				found_position = true
-			elif char_uuid == BLE_COMMAND_UUID:
-				var can_write := bool(properties.get("write", false))
-				var can_write_without_response := bool(
-					properties.get("write_without_response", properties.get("write_no_response", false))
-				)
-				found_command = true
-				_ble_command_with_response = can_write and not can_write_without_response
-
-	_ble_can_write_command = found_command
-
-	if not found_position:
-		push_error("[BLE] Position characteristic not found")
-		return
-
-	_ble_subscription_ready = true
-	if _ble_android_plugin:
-		_ble_android_plugin.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
-	else:
-		ble_device.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
-	connected = true
-	print("[BLE] Connected and subscribed — streaming position data")
-
-	if not found_command:
-		push_error("[BLE] Command characteristic not writable")
-
-
-func _on_ble_characteristic_notified(char_uuid: String, data: PackedByteArray) -> void:
-	if char_uuid.to_lower() != BLE_POSITION_UUID:
-		return
-	if _handle_text_packet(data):
-		return
-
-	if data.size() < 44 or (data.size() % 4) != 0:
-		push_error("[BLE] Unexpected position payload size: %d" % data.size())
-		return
-
-	_apply_position_packet(data.to_float32_array())
-
-
-func _on_ble_manager_error(error_message: String) -> void:
-	push_error("[BLE] Manager error: " + error_message)
-
-
-func _on_ble_operation_failed(operation: String, error: String) -> void:
-	push_error("[BLE] %s failed: %s" % [operation, error])
-
-	if operation == "write_characteristic" and error.to_lower().contains("closed"):
-		print("[BLE] Characteristic handle was closed — resetting BLE connection")
-		_on_ble_device_disconnected()
+func _on_command_done(kind: int, ok: bool, detail: String) -> void:
+	if kind == LinkProtocol.CONFIG and ok:
+		tracker_config_applied.emit(detail)
 
 
 # ── shared position update (UDP + BLE) ───────────────────────────────────────
@@ -566,7 +250,7 @@ func hand_camera() -> Vector3:
 	return _last_centroid
 
 
-# corners: camera (x, z) of the hand at TL, TR, BL, BR of the table, in metres.
+# corners: camera (x, z) of the hand at TL, BL, BR, TR of the table, in metres.
 # Fits the affine that stretches them onto the screen corners, then keeps its
 # rotation and centre but one scale (the smaller), so the table fits and a
 # circle on the table stays a circle on screen. Returns false if degenerate.
@@ -574,7 +258,8 @@ func set_table(corners: Array, y0: float) -> bool:
 	if corners.size() < 4:
 		return false
 	var sz := screen_size if screen_size.x > 0.0 else get_viewport().get_visible_rect().size
-	var dst: Array = [Vector2(0, 0), Vector2(sz.x, 0), Vector2(0, sz.y), Vector2(sz.x, sz.y)]
+	# The corners in table_overlay.gd's order: once round, from the top-left.
+	var dst: Array = [Vector2(0, 0), Vector2(0, sz.y), Vector2(sz.x, sz.y), Vector2(sz.x, 0)]
 	var fit = TableFit.fit(corners, dst)
 	if fit == null:
 		return false
@@ -632,19 +317,18 @@ func load_table() -> void:
 	table_set = true
 
 
-func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
-	_incoming_message = my_floats[0]
+func _apply_position(pos: Dictionary) -> void:
 	_packet_count += 1
 	last_packet_ms = Time.get_ticks_msec()
 
 	# Cache what set_origin() needs: the board orientation, and the id that
-	# says a packet has been seen at all. The board translation in floats 7-9
-	# is not cached — the tracked point itself arrives in floats 1-3.
-	_last_rvec   = Vector3(my_floats[4], my_floats[5], my_floats[6])
-	_last_ref_id = int(my_floats[10])
+	# says a packet has been seen at all. The board translation is not cached —
+	# the tracked point itself arrives as the centroid.
+	_last_rvec   = pos["rvec"]
+	_last_ref_id = pos["ref_id"]
 
 	# Compute local coordinates (rotation + translation relative to origin)
-	var centroid := Vector3(my_floats[1], my_floats[2], my_floats[3])
+	var centroid: Vector3 = pos["centroid"]
 	_last_centroid = centroid
 	var local: Vector3
 	if table_set:
@@ -680,40 +364,72 @@ func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	scaled_network_position3D = Vector2(scaled_x, scaled_y)
 
 
-# Live tracker tuning (tracker.py _apply_config). Datagrams are capped at 30 bytes.
+# Live tracker tuning (tracker.py _apply_setting); applied ones come back as
+# tracker_config_applied.
 func send_tracker_config(key: String, value: String) -> void:
-	_send_transport_message("CFG:%s=%s" % [key, value])
+	link.send_command(LinkProtocol.CONFIG, "%s=%s" % [key, value])
 
 
-# ── transport send ────────────────────────────────────────────────────────────
-
-func _send_transport_message(message: String) -> void:
-	match stream_type:
-		"udp":
-			udp.put_packet(message.to_utf8_buffer())
-		"ble":
-			if _ble_android_plugin:
-				if connected and _ble_can_write_command:
-					_ble_android_plugin.write_characteristic(
-						BLE_SERVICE_UUID, BLE_COMMAND_UUID,
-						message.to_utf8_buffer(), _ble_command_with_response)
-			elif ble_device != null and ble_device.is_connected() and _ble_can_write_command:
-				ble_device.write_characteristic(
-					BLE_SERVICE_UUID, BLE_COMMAND_UUID,
-					message.to_utf8_buffer(), _ble_command_with_response)
+# Trunk commands (TrunkMonitor): "neutral", "snapshot", "select=<n>".
+func send_trunk_command(arg: String) -> void:
+	link.send_command(LinkProtocol.TRUNK, arg)
 
 
-func _on_heartbeat_tick() -> void:
-	_send_transport_message(_outgoing_message)
+# The board's recordings (Settings > Storage): "list", "delete=<path>". Each
+# answer comes as storage_listed; a refused one as link.command_done.
+func send_storage_command(arg: String) -> void:
+	link.send_command(LinkProtocol.STORAGE, arg)
+
+
+## Keep the tracker tracking while `node` is in the tree (a screen outside
+## res://Games/ that shows the hand or the trunk: the trunk panel in the game
+## menus, Trunk angles, Define Table).
+func hold_tracking(node: Node) -> void:
+	if node in _tracking_holders:
+		return
+	_tracking_holders.append(node)
+	node.tree_exiting.connect(func(): _tracking_holders.erase(node), CONNECT_ONE_SHOT)
+
+
+func tracking_wanted() -> bool:
+	var scene := get_tree().current_scene
+	if scene != null and scene.scene_file_path.begins_with("res://Games/"):
+		return true
+	return not _tracking_holders.is_empty()
+
+
+# CONFIG track=on|off whenever that changes, and once after every (re)connect:
+# a tracker starts each app idle.
+func _update_tracking() -> void:
+	if link == null or not link.connected:
+		_tracking_sent = -1
+		return
+	var want := int(tracking_wanted())
+	if want != _tracking_sent:
+		_tracking_sent = want
+		link.send_command(LinkProtocol.CONFIG, "track=%s" % ("on" if want else "off"))
+
+
+## Restart the tracker service. Over the link when the tracker answers (it
+## exits and systemd starts it again); otherwise, on the board itself, through
+## systemctl (/etc/sudoers.d/noark-tracker lets it). -> "" or why it could not.
+func restart_tracker() -> String:
+	if link.connected:
+		link.send_command(LinkProtocol.RESTART)
+		return ""
+	if OS.get_name() == "Linux" and FileAccess.file_exists(TRACKER_SERVICE):
+		var out := []
+		var code := OS.execute("sudo", ["-n", "systemctl", "--no-block", "restart", "noark-tracker"], out, true)
+		if code == 0:
+			return ""
+		return "systemctl failed: %s" % "".join(out).strip_edges()
+	return "The tracker is not answering. Power the board off and on."
 
 
 # ── process ───────────────────────────────────────────────────────────────────
 
 func _process(_delta: float) -> void:
-	# UDP: watchdog to restart Python if it crashes
-	if stream_type == "udp" and not thread_python.is_alive() and not endgame and not debug:
-		thread_python = Thread.new()
-		thread_python.start(python_thread, Thread.PRIORITY_HIGH)
+	_update_tracking()
 
 	# Packet rate: tally the running counter into packets_per_second once a second
 	_pps_accum_time += _delta
@@ -730,57 +446,21 @@ func _process(_delta: float) -> void:
 	smooth_scaled_network_position = smooth_scaled_network_position.lerp(scaled_network_position, t)
 	smooth_scaled_network_position3D = smooth_scaled_network_position3D.lerp(scaled_network_position3D, t)
 
-	match _incoming_message:
-		-99.0:
-			disconnected = true
-			endgame      = true
-			if stream_type == "udp":
-				thread_network.wait_to_finish()
-				thread_python.wait_to_finish()
-			get_tree().quit()
-		2.0:
-			connected = true
-		5.0:
-			reset_position = true
-
-
-# ── UDP threads ───────────────────────────────────────────────────────────────
-
-func python_thread() -> void:
-	if not debug:
-		var output = []
-		print("Python thread started.")
-		OS.execute(interpreter_path, [pyscript_path, "--settings", Settings.path], output)
-		print(output)
-	else:
-		print("Debugging…")
-
-
-func _path_checker() -> void:
-	var output = []
-	print(output)
-
 
 # ── quit / patient change ─────────────────────────────────────────────────────
 
+# GlobalSignals.SignalBus: a screen is about to quit at once (main_window). The
+# STOP goes out now, without waiting for its ACK; the tracker would close the
+# session 3 s later anyway.
 func handle_quit_request() -> void:
-	disconnected = true
-	endgame = true
-	_ble_shutting_down = true
-	_ble_scan_active = false
-	_ble_target_address = ""
-	connected = false
-
-	if is_instance_valid(message_timer):
-		message_timer.stop()
-
-	_outgoing_message = "STOP"
-	print("Camera closed properly")
-	_send_transport_message(_outgoing_message)
+	if link:
+		link.stop_now()
 
 
+# Opens the tracker's session for this patient (its logs and recordings); a
+# different id than before closes the previous session first.
 func change_patient() -> void:
-	_outgoing_message = "USER:" + PatientDB.current_patient_id
+	link.set_session(PatientDB.current_patient_id)
 
 
 func _notification(what: int) -> void:
@@ -788,18 +468,9 @@ func _notification(what: int) -> void:
 		if _quitting:
 			return
 		_quitting = true
-		handle_quit_request()
-		if stream_type == "udp":
-			thread_python.wait_to_finish()
-		elif stream_type == "ble":
-			if _ble_android_plugin:
-				_ble_android_plugin.stop_scan()
-				_ble_android_plugin.disconnect_device()
-			else:
-				if ble_device != null:
-					ble_device.disconnect()
-				if _ble_manager != null:
-					_ble_manager.stop_scan()
+		# The tracker keeps running for the next app: only the session ends.
+		await link.stop_session()
+		link.close()
 		# The last trial's row goes to the server before the app goes.
 		SessionLog.end_trial()
 		if SessionLog.is_uploading():

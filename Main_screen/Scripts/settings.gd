@@ -20,7 +20,7 @@ const DEFAULTS := {
 	# How the tracker reaches the app: "udp" (Godot on the tracker board spawns
 	# tracker.py) or "ble" (Godot on a tablet; tracker.py runs on the board and
 	# advertises as ble_device_name). One or the other — tracker.py reads it too.
-	"stream_type": "udp",
+	"stream_type": "ble",
 	"ble_device_name": "NOARK_Tracker",
 	"udp_port": 8000,
 	"display": false,
@@ -40,6 +40,14 @@ const DEFAULTS := {
 	# captured in the game menu, a number for every axis or a dictionary
 	# {"flexion": .., "lateral": .., "axial": ..}.
 	"trunk_enabled": true,
+	# icp = stereo shell + ICP; msam_r18 / msam_v3rot = minisam3d pose student on the NPU
+	"trunk_method": "icp",
+	# neutral = angles from the captured neutral; model = minisam3d's own frame
+	# (upright facing a level camera = 0, no capture; msam_* only)
+	"trunk_reference": "neutral",
+	# the model frame reads camera tilt as posture, so it warns / pauses later
+	"trunk_model_warn_deg": 15,
+	"trunk_model_comp_deg": 25,
 	"trunk_cpus": "7",
 	"trunk_warn_deg": 8,
 	"trunk_comp_deg": 15,
@@ -88,9 +96,6 @@ func _load() -> void:
 		return
 	# First run.
 	data = DEFAULTS.duplicate()
-	# A tablet cannot run tracker.py, so it can only reach the board over BLE.
-	if OS.get_name() == "Android":
-		data["stream_type"] = "ble"
 	if FileAccess.file_exists(LEGACY_PATH):
 		var legacy = JSON.parse_string(FileAccess.get_file_as_string(LEGACY_PATH))
 		if typeof(legacy) == TYPE_DICTIONARY:

@@ -2,11 +2,12 @@ extends Node
 ## Trunk posture from the tracker (pyscripts/trunk/): neutral capture, angles
 ## from neutral and a per-axis compensation level.
 ##
-## tracker.py sends a text datagram per trunk update (~10 Hz), which
-## GlobalScript hands to on_packet():
-##   TRK:state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
-##       reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held
-## (the last six describe this frame's own quality, for the raw log)
+## tracker.py sends a TRUNK_STATUS message per trunk update (~10 Hz), whose
+## CSV payload GlobalScript hands to on_packet() (docs/PROTOCOL.md):
+##   state,level,lvl_flex,lvl_lat,lvl_axi,flex,lat,axi,progress,has_neutral,
+##       reason,capture_result,people,locked,q_how,q_rms_mm,q_frac,raw_pts,mask_px,held,
+##       hz,method,doubt,reference
+## (q_how..held describe this frame's own quality, for the raw log)
 ## The thresholds, hysteresis and dwell are applied in Python
 ## (settings.json trunk_warn_deg / trunk_comp_deg); this only reports them.
 ##
@@ -36,7 +37,7 @@ var angles := Vector3.ZERO          # flexion, lateral, axial (degrees)
 var progress := 0.0                 # neutral capture, 0..1
 var has_neutral := false
 var reason := ""                    # why OCCLUDED
-var capture_result := ""            # "", "ok", "moving", "not_visible"
+var capture_result := ""            # "", "ok", "moving", "not_visible", "away"
 var people := 0                     # torsos the tracker sees
 var locked := false                 # following a picked person
 var q_how := ""                     # this frame: direct/odometry/failed/gated/no_torso/...
@@ -45,13 +46,27 @@ var q_frac := NAN                   # share of the cloud that matched
 var raw_pts := 0                    # shell points before the cloud cap
 var mask_px := 0                    # torso mask area
 var held := false                   # angles are the last good ones, not this frame's
+var hz := 0.0                       # trunk updates per second, measured by the tracker
+var method := ""                    # what measures it: icp / msam_r18 / msam_v3rot
+var doubt := ""                     # used but less trusted: "low_conf" / "arm_over_chest"
+## What the tracker measures the angles from right now: "neutral" (the captured
+## neutral) or "model" (minisam3d's own frame, no capture). See set_reference().
+var reference := "neutral"
+
+## How each trunk_method is shown (Settings, the Trunk angles screen).
+const METHOD_NAMES := {
+	"icp": "ICP (stereo point cloud)",
+	"msam_r18": "minisam3d r18 (v3mix)",
+	"msam_v3rot": "minisam3d v3rot (older)",
+}
+## How each trunk_reference is shown.
+const REFERENCE_NAMES := {
+	"neutral": "From captured neutral",
+	"model": "Model frame (no capture, minisam3d only)",
+}
 var _last_packet_ms := -100000
 
 var _beep: AudioStreamPlayer
-# Snapshot chunks being collected: "IMG:" id index total data (trunk/snapshot_packet.py)
-var _snap_id := -1
-var _snap_total := 0
-var _snap_chunks := {}
 
 
 func _ready() -> void:
@@ -88,46 +103,59 @@ func set_enabled(on: bool) -> void:
 	enabled_changed.emit(on)
 
 
+## settings.json trunk_reference: "neutral" or "model". Saved and sent to the
+## tracker now; either way the old neutral is dropped. "model" applies to the
+## minisam3d methods only (with icp the tracker stays on a captured neutral).
+func set_reference(value: String) -> void:
+	Settings.set_value("trunk_reference", value)
+	Settings.save()
+	GlobalScript.send_tracker_config("trunk_reference", value)
+
+
+## The angles come from minisam3d's own frame: no neutral needed. capture_neutral()
+## then sets the zero ("Set zero") and has_neutral says whether one is set.
+func model_frame() -> bool:
+	return available() and reference == "model"
+
+
+## Model frame: drop a "Set zero", back to the model's own rest pose.
+func clear_zero() -> void:
+	GlobalScript.send_trunk_command("zero_clear")
+
+
+## (warn, compensating) per axis as Vector3s, from settings.json: the model
+## frame has its own (trunk_model_*_deg), wider ones.
+func thresholds() -> Array:
+	var model := model_frame()
+	return [_threshold("trunk_model_warn_deg" if model else "trunk_warn_deg", 15.0 if model else 8.0),
+		_threshold("trunk_model_comp_deg" if model else "trunk_comp_deg", 25.0 if model else 15.0)]
+
+
+static func _threshold(key: String, fallback: float) -> Vector3:
+	var v = Settings.get_value(key, fallback)
+	if v is Dictionary:
+		return Vector3(float(v.get("flexion", fallback)), float(v.get("lateral", fallback)),
+			float(v.get("axial", fallback)))
+	return Vector3.ONE * float(v)
+
+
 func capture_neutral() -> void:
-	GlobalScript._send_transport_message("TRUNK:neutral")
+	GlobalScript.send_trunk_command("neutral")
 
 
 ## Ask the tracker for the picker image; it arrives as snapshot_ready.
 func request_snapshot() -> void:
-	GlobalScript._send_transport_message("TRUNK:snapshot")
+	GlobalScript.send_trunk_command("snapshot")
 
 
 ## Follow person `index` of the last snapshot (-1 = the centre-most again). A new
 ## person has no neutral: has_neutral goes false and it must be captured again.
 func select_person(index: int) -> void:
-	GlobalScript._send_transport_message("TRUNK:select=%d" % index)
+	GlobalScript.send_trunk_command("select=%d" % index)
 
 
-## One chunk of a snapshot. Called (deferred) from GlobalScript.
-func on_image_chunk(packet: PackedByteArray) -> void:
-	if packet.size() < 8:
-		return
-	var id := packet[4]
-	var index := packet[5]
-	var total := packet[6]
-	if id != _snap_id:
-		_snap_id = id
-		_snap_total = total
-		_snap_chunks.clear()
-	_snap_chunks[index] = packet.slice(7)
-	if _snap_chunks.size() < _snap_total:
-		return
-	var blob := PackedByteArray()
-	for i in _snap_total:
-		if not _snap_chunks.has(i):
-			return
-		blob.append_array(_snap_chunks[i])
-	_snap_id = -1
-	_snap_chunks.clear()
-	_decode_snapshot(blob)
-
-
-func _decode_snapshot(blob: PackedByteArray) -> void:
+## A SNAPSHOT payload, reassembled by the link (trunk/snapshot_packet.py).
+func on_snapshot(blob: PackedByteArray) -> void:
 	var meta_len := blob.decode_u16(0)
 	var meta = JSON.parse_string(blob.slice(2, 2 + meta_len).get_string_from_utf8())
 	var image := Image.new()
@@ -143,9 +171,9 @@ func _decode_snapshot(blob: PackedByteArray) -> void:
 	snapshot_ready.emit(ImageTexture.create_from_image(image), outlines, int(meta.get("locked", -1)))
 
 
-## Called (deferred) from GlobalScript's network thread.
+## A TRUNK_STATUS payload, from GlobalScript.
 func on_packet(text: String) -> void:
-	var f := text.substr(4).split(",")
+	var f := text.split(",")
 	if f.size() < 12:
 		return
 	_last_packet_ms = Time.get_ticks_msec()
@@ -167,6 +195,11 @@ func on_packet(text: String) -> void:
 		raw_pts = int(f[17])
 		mask_px = int(f[18])
 		held = f[19] == "1"
+	if f.size() >= 22:
+		hz = float(f[20])
+		method = f[21]
+	doubt = f[22] if f.size() >= 23 else ""
+	reference = f[23] if f.size() >= 24 else "neutral"
 	if new_state != state:
 		state = new_state
 		state_changed.emit(state)

@@ -21,12 +21,18 @@ IOU = 0.7
 ARM_EXCLUDE_DILATE_PX = 9   # at full sensor resolution, as in 06_trunk_axis.py
 
 
+_registered = False
+
+
 def npu_session(model):
     """ONNX Runtime session with the graph on the HTP. Raises without an NPU."""
     import onnxruntime as ort
     import onnxruntime_qnn as oq
 
-    ort.register_execution_provider_library(oq.EP_NAME, oq.get_library_path())
+    global _registered
+    if not _registered:   # a second registration in one process raises
+        ort.register_execution_provider_library(oq.EP_NAME, oq.get_library_path())
+        _registered = True
     devices = [d for d in ort.get_ep_devices() if d.ep_name == oq.EP_NAME]
     if not devices:
         raise RuntimeError("QNN EP registered but no NPU device found")
@@ -44,7 +50,7 @@ def npu_session(model):
     })
     sess = ort.InferenceSession(str(model), so)
     if "QNNExecutionProvider" not in sess.get_providers():
-        raise RuntimeError(f"trunk_seg is not on the NPU: {sess.get_providers()}")
+        raise RuntimeError(f"{Path(model).parent.name} is not on the NPU: {sess.get_providers()}")
     return sess
 
 

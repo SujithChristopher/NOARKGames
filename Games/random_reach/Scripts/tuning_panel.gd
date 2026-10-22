@@ -1,14 +1,17 @@
 extends CanvasLayer
 ## Live tracker tuning overlay. F2 or the "Tune" button toggles it.
-## Each change is sent to tracker.py as `CFG:<key>=<value>` and applies on the next frame.
+## Each change is sent to tracker.py as a CONFIG message (docs/PROTOCOL.md) and applies on the next frame.
 
 const OPTIONS := {
 	"solver": ["joint", "ransac"],
 	"refine": ["contour", "subpix", "crop", "none"],
 	"camera": ["both", "cam0", "cam1"],
 	"deadband": ["0", "0.5", "1", "2"],
+	"trunk_method": ["icp", "msam_r18", "msam_v3rot"],
+	"trunk_reference": ["neutral", "model"],
 }
-const SETTINGS_KEYS := {"solver": "tracker_solver", "refine": "tracker_refine", "camera": "tracker_camera"}
+const SETTINGS_KEYS := {"solver": "tracker_solver", "refine": "tracker_refine", "camera": "tracker_camera",
+	"trunk_method": "trunk_method", "trunk_reference": "trunk_reference"}
 
 var _box: VBoxContainer
 var _toggle: Button

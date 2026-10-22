@@ -1,6 +1,6 @@
 [gd_resource type="Theme" format=4 uid="uid://5bq88mc6do74"]
 
-[ext_resource type="Texture2D" uid="uid://bg6dnr2juos5u" path="res://Assets/Background/Metallic Banner Set - Game UI vector image on VectorStock.png" id="1_y2w7e"]
+[ext_resource type="Texture2D" uid="uid://c0b7ja3o54eb0" path="res://Assets/Background/Metallic Banner Set - Game UI vector image on VectorStock.png" id="1_y2w7e"]
 
 [sub_resource type="Image" id="Image_4l5x6"]
 data = {

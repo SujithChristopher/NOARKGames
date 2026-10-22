@@ -18,23 +18,17 @@ var _graph: Control
 var _values: Array[Label] = []
 var _status: Label
 var _result: Label
+var _source: Label   # which method measures it, and how often
 var _capture: Button
+var _model: CheckButton   # trunk_reference: model frame / captured neutral
+var _clear_zero: Button   # model frame: back to the model's own zero
 
 
 func _ready() -> void:
+	GlobalScript.hold_tracking(self)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
-	_warn = _threshold("trunk_warn_deg", 8.0)
-	_comp = _threshold("trunk_comp_deg", 15.0)
 	_build()
 	TrunkMonitor.updated.connect(_on_updated)
-
-
-func _threshold(key: String, fallback: float) -> Vector3:
-	var v = Settings.get_value(key, fallback)
-	if v is Dictionary:
-		return Vector3(float(v.get("flexion", fallback)), float(v.get("lateral", fallback)),
-			float(v.get("axial", fallback)))
-	return Vector3.ONE * float(v)
 
 
 func _build() -> void:
@@ -83,9 +77,25 @@ func _build() -> void:
 	text.add_child(_status)
 	_result = _label("", 18)
 	text.add_child(_result)
+	_source = _label("", 16)
+	_source.modulate = Color(1, 1, 1, 0.6)
+	text.add_child(_source)
+	_model = CheckButton.new()
+	_model.text = "Model frame"
+	_model.tooltip_text = "Angles in minisam3d's own frame (upright, facing a level camera = 0), no neutral capture"
+	_model.focus_mode = Control.FOCUS_NONE
+	_model.add_theme_font_size_override("font_size", 22)
+	_model.button_pressed = Settings.get_value("trunk_reference", "neutral") == "model"
+	_model.toggled.connect(_on_model_toggled)
+	bottom.add_child(_model)
 	_capture = _button("Capture neutral posture")
 	_capture.pressed.connect(_on_capture_pressed)
 	bottom.add_child(_capture)
+	_clear_zero = _button("Clear zero")
+	_clear_zero.pressed.connect(func():
+		TrunkMonitor.clear_zero()
+		_samples.clear())
+	bottom.add_child(_clear_zero)
 	_refresh_text()
 
 
@@ -108,17 +118,28 @@ func _on_capture_pressed() -> void:
 	TrunkMonitor.capture_neutral()
 	_result.text = "Sit upright and hold still..."
 	_result.modulate = Color.WHITE
+	_samples.clear()   # the old lines are from the old zero
+
+
+func _on_model_toggled(on: bool) -> void:
+	TrunkMonitor.set_reference("model" if on else "neutral")
+	_samples.clear()   # the old lines are from the other reference
+	_result.text = ""
 
 
 func _on_updated() -> void:
 	var tracking := TrunkMonitor.state == TrunkMonitor.TRACKING
-	_samples.append([_now(), TrunkMonitor.angles if tracking else null])
+	_samples.append([_now(), TrunkMonitor.angles if tracking else null,
+		tracking and not TrunkMonitor.doubt.is_empty()])
 
 
 func _process(_delta: float) -> void:
 	var cutoff := _now() - GRAPH_S
 	while _samples.size() > 0 and _samples[0][0] < cutoff:
 		_samples.pop_front()
+	var limits := TrunkMonitor.thresholds()   # the model frame has its own
+	_warn = limits[0]
+	_comp = limits[1]
 	# Tracker gone: stop drawing the last angles as if they were live.
 	if not TrunkMonitor.available() and _samples.size() > 0 and _samples.back()[1] != null:
 		_samples.append([_now(), null])
@@ -136,18 +157,31 @@ func _refresh_text() -> void:
 		_values[i].text = "%s %s" % [NAMES[i], "%+.1f°" % TrunkMonitor.angles[i] if tracking else "--"]
 		_values[i].modulate = LEVEL_COLORS[TrunkMonitor.levels[i]] if tracking else Color(1, 1, 1, 0.5)
 	_status.text = TrunkMonitor.status_text()
+	_source.text = "" if not TrunkMonitor.available() or TrunkMonitor.method.is_empty() else 		"%s  ·  %.1f fps" % [TrunkMonitor.METHOD_NAMES.get(TrunkMonitor.method, TrunkMonitor.method), TrunkMonitor.hz]
 	_capture.disabled = not TrunkMonitor.available() or TrunkMonitor.state == TrunkMonitor.CAPTURING
+	# The model frame needs no neutral; it exists for the minisam3d methods only.
+	_model.visible = TrunkMonitor.method.begins_with("msam")
+	var model := TrunkMonitor.model_frame()
+	_capture.text = "Set zero" if model else "Capture neutral posture"
+	_clear_zero.visible = model and TrunkMonitor.has_neutral
 	if TrunkMonitor.state == TrunkMonitor.CAPTURING:
+		return
+	if model and TrunkMonitor.capture_result in ["", "away"]:
+		_result.text = "Zero: " + ("set by you" if TrunkMonitor.has_neutral else "the model's own (upright, facing the camera)")
+		_result.modulate = Color(1, 1, 1, 0.8)
 		return
 	match TrunkMonitor.capture_result:
 		"ok":
-			_result.text = "Neutral captured ✓"
+			_result.text = "Zero set ✓" if model else "Neutral captured ✓"
 			_result.modulate = Color(0.5, 1.0, 0.5)
 		"moving":
 			_result.text = "Capture failed: please hold still and try again"
 			_result.modulate = Color(1.0, 0.6, 0.4)
 		"not_visible":
 			_result.text = "Capture failed: the trunk is not visible to the cameras"
+			_result.modulate = Color(1.0, 0.6, 0.4)
+		"away":
+			_result.text = "Person was away: capture neutral posture again"
 			_result.modulate = Color(1.0, 0.6, 0.4)
 
 
@@ -185,6 +219,14 @@ func _draw_graph() -> void:
 		for sgn in [-1.0, 1.0]:
 			var y: float = y_of.call(sgn * pair[0])
 			_graph.draw_dashed_line(Vector2(0, y), Vector2(w, y), Color(pair[1], 0.6), 2.0, 10.0)
+
+	# Light yellow behind stretches the tracker was unsure of (an arm in front
+	# of the chest, low confidence): the angles there may be off.
+	for k in _samples.size():
+		if _samples[k][2]:
+			var x0: float = x_of.call(_samples[k][0])
+			var x1: float = x_of.call(_samples[k + 1][0]) if k + 1 < _samples.size() else w
+			_graph.draw_rect(Rect2(x0, 0, maxf(x1 - x0, 2.0), h), Color(1.0, 0.92, 0.45, 0.18))
 
 	for i in 3:
 		var line := PackedVector2Array()

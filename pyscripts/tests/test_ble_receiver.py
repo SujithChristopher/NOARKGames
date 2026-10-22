@@ -12,28 +12,36 @@ Usage
     python pyscripts/test_ble_receiver.py
 """
 
-import struct
 import sys
 import time
 
 import simplepyble
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import protocol  # noqa: E402
+
+HEARTBEAT = protocol.encode(protocol.HEARTBEAT)
+# The tracker streams only to an app that said HELLO; STOP ends its session.
+HELLO = protocol.encode_reliable(protocol.HELLO, 1, bytes([protocol.VERSION]))
+STOP = protocol.encode_reliable(protocol.STOP, 2)
 
 DEVICE_NAME   = "NOARK_Tracker"
 SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
 POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
 COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 
-MSG_CODES = {2.0: "START", -99.0: "STOP", 5.0: "RESET", 0.0: "IDLE"}
 packet_count = 0
 
 
 def on_notification(data: bytes) -> None:
     global packet_count
-    if len(data) < 16:
-        print(f"[RX] short packet ({len(data)} bytes): {data.hex()}")
+    kind, payload = protocol.decode(bytes(data))
+    if kind != protocol.POSITION:
+        print(f"[RX] message 0x{kind:02x}: {payload[:60]!r}")
         return
-    msg, x, y, z = struct.unpack_from("<ffff", data)
-    label = MSG_CODES.get(msg, f"code={msg:.1f}")
+    _, (x, y, z), _, _ = protocol.decode_position(bytes(data))
+    label = "POSITION"
     packet_count += 1
     print(f"[RX #{packet_count:04d}] {label:<8}  x={x:+.4f}  y={y:+.4f}  z={z:+.4f}")
 
@@ -100,19 +108,19 @@ def main() -> None:
     target.notify(SERVICE_UUID, POSITION_UUID, on_notification)
     print("\n[BLE] Subscribed to position notifications — streaming (Ctrl+C to stop)\n")
 
-    target.write_command(SERVICE_UUID, COMMAND_UUID, b"CONNECTED")
+    target.write_command(SERVICE_UUID, COMMAND_UUID, HELLO)
 
     try:
         while target.is_connected():
-            time.sleep(3.0)
-            target.write_command(SERVICE_UUID, COMMAND_UUID, b"CONNECTED")
+            time.sleep(1.0)   # the tracker gives up after 3 s of silence
+            target.write_command(SERVICE_UUID, COMMAND_UUID, HEARTBEAT)
     except KeyboardInterrupt:
         pass
 
     # ── cleanup ───────────────────────────────────────────────────────────────
     try:
         target.unsubscribe(SERVICE_UUID, POSITION_UUID)
-        target.write_command(SERVICE_UUID, COMMAND_UUID, b"STOP")
+        target.write_command(SERVICE_UUID, COMMAND_UUID, STOP)
     except Exception:
         pass
 

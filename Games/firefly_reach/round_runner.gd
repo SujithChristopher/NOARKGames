@@ -59,6 +59,7 @@ const MISS_PAUSE_S := 0.5         # after a timed miss, time to watch the bat ta
 const EDGE_MARGIN_PX := 12.0
 const REPOSITION_W_MM := 60.0     # the uncounted apple that brings the hand where a pair fits
 const SPOT_GRID_MM := 25.0        # grid for searching reposition spots
+const SPOT_SPREAD_MM := 75.0      # reposition spots this much farther than the nearest also qualify
 const FEW_SAMPLES := 20           # calibration check flags a pair with fewer apples
 
 const GOLD := Color("FFE27A")
@@ -700,9 +701,10 @@ func _fit_angles(start: Vector2, a: float, r: float, n: int) -> Array:
 	return out
 
 
-# Nearest spot to the hand from which pair k fits in plenty of directions
-# (at least half as many as the best spot), so where the hand ends up inside
-# the reposition circle does not matter. null when the pair fits from nowhere.
+# A spot near the hand (within SPOT_SPREAD_MM of the nearest) from which pair k
+# fits in plenty of directions (at least half as many as the best spot), so
+# where the hand ends up inside the reposition circle does not matter. null
+# when the pair fits from nowhere.
 func _reposition_spot(k: int) -> Variant:
 	var spots := _spots_for(k)
 	if spots.is_empty():
@@ -710,14 +712,16 @@ func _reposition_spot(k: int) -> Variant:
 	var most := 0
 	for s in spots:
 		most = maxi(most, s["n"])
-	var pick = null
+	var good: Array = []
 	var nearest := INF
 	for s in spots:
-		var d := _hand.distance_to(s["pos"])
-		if int(s["n"]) * 2 >= most and d < nearest:
-			nearest = d
-			pick = s["pos"]
-	return pick
+		if int(s["n"]) * 2 >= most:
+			good.append(s["pos"])
+			nearest = minf(nearest, _hand.distance_to(s["pos"]))
+	# Any good spot about as near as the nearest: always taking the nearest
+	# grid point put every reposition apple from one region in the same place.
+	var near: Array = good.filter(func(p): return _hand.distance_to(p) <= nearest + SPOT_SPREAD_MM)
+	return near.pick_random()
 
 
 # Grid points (every SPOT_GRID_MM) where a reposition apple fits and from which

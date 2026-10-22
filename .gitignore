@@ -167,3 +167,4 @@ AssetStoreTools/
 addons/gdble/~*
 android/build/
 /graphify-out/cache/
+/.superpowers/

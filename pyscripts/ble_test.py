@@ -4,10 +4,11 @@
     uv run pyscripts/ble_test.py --hz 20 --seconds 60
 
 Advertises as settings.json `ble_device_name` (default NOARK_Tracker) with the
-same service and characteristics as the tracker, and notifies a 44-byte
-position packet (11 float32) moving the tip round a 10 cm circle, so a central
+same service and characteristics as the tracker, answers the app's HELLO and
+commands like the tracker (link.py), and once connected notifies a POSITION
+(docs/PROTOCOL.md) moving the tip round a 10 cm circle, so a central
 (the GdAndroidBLE demo, or Godot in "ble" transport) can be checked end to end
-without a patient. Every command the central writes is printed.
+without a patient. Every command the central sends is printed and accepted.
 """
 
 import argparse
@@ -19,7 +20,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import protocol  # noqa: E402
 from ble_streamer import BLEStreamer  # noqa: E402
+from link import Link  # noqa: E402
 from tracker import DEFAULT_SETTINGS_PATH, _load_settings  # noqa: E402
 
 
@@ -33,6 +36,11 @@ def main():
     name = _load_settings(args.settings).get("ble_device_name", "NOARK_Tracker")
     ble = BLEStreamer(name)
     ble.start()
+    link = Link(ble)
+
+    def accept(kind, body):
+        print(f"[BLE] command 0x{kind:02x} {body!r}", flush=True)
+        return True, ""
 
     t0 = time.time()
     n = 0
@@ -40,12 +48,14 @@ def main():
         while not args.seconds or time.time() - t0 < args.seconds:
             t = time.time() - t0
             x, z = 0.1 * math.cos(t), 0.1 * math.sin(t)
-            ble.send([2.0, x, 0.0, 0.5 + z, 0, 0, 0, x, 0.0, 0.5 + z, 0.0])
-            n += 1
-            cmd = ble.get_command()
-            if cmd:
-                print(f"[BLE] command {cmd!r}", flush=True)
-            if n % int(args.hz * 5) == 0:
+            link.poll(accept)
+            if link.connected and link.silent_for() > 3.0:
+                print("[BLE] App went quiet; waiting for the next HELLO", flush=True)
+                link.reset()
+            if link.connected:
+                link.send(protocol.encode_position(0, (x, 0.0, 0.5 + z), (0, 0, 0), (x, 0.0, 0.5 + z)))
+                n += 1
+            if n and n % int(args.hz * 5) == 0:
                 print(f"[BLE] {n} packets, {n / t:.1f}/s", flush=True)
             time.sleep(1 / args.hz)
     except KeyboardInterrupt:

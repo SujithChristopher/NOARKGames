@@ -111,6 +111,10 @@ class StereoShell:
         m = SGBM_BLOCK + BILATERAL[0]
         y0, y1 = max(0, ys.min() - m), min(H, ys.max() + 1 + m)
         x0, x1 = max(0, xs.min() - m - self.num_disp), min(W, xs.max() + 1 + m)
+        if x1 - x0 <= self.num_disp + SGBM_BLOCK:
+            # A torso at the image's left edge: no column of it has a full
+            # search range, and SGBM fails on a strip this narrow.
+            return np.zeros((0, 3))
         disp_raw = self.sgbm.compute(rect0[y0:y1, x0:x1],
                                      rect1[y0:y1, x0:x1]).astype(np.float32) / 16.0
         # Smooth for the 3D values, but gate validity on the raw disparity so
