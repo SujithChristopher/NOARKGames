@@ -122,9 +122,10 @@ func _on_logout_pressed() -> void:
 	MusicManager.play_music("main")
 	GlobalSignals.selected_training_hand = ""
 	GlobalSignals.affected_hand = ""
+	DeviceAgent.stop()   # release the patient for the other devices
 	get_tree().change_scene_to_file(MAIN)
 
 
-## GlobalScript ends the session, waits for the upload, then quits.
+## GlobalScript ends the session, waits for the upload, releases the patient, then quits.
 func _on_exit_pressed() -> void:
-	GlobalScript._notification(NOTIFICATION_WM_CLOSE_REQUEST)
+	GlobalScript.request_quit()

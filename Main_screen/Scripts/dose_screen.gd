@@ -183,6 +183,13 @@ func _refresh() -> void:
 
 
 func _on_confirm() -> void:
+	# Claim the patient first: another device training them means no session here.
+	_confirm.disabled = true
+	var claim: Dictionary = await DeviceAgent.start(_pid)
+	if not claim["ok"]:
+		_note.text = claim["message"]
+		_confirm.disabled = false
+		return
 	var location := _location.text.strip_edges()
 	if _changed():
 		SessionLog.save_dose(_pid, _minutes("ML"), _minutes("AP"), _minutes("MLAP"), location)

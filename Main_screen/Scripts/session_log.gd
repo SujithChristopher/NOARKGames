@@ -201,6 +201,7 @@ func end_trial() -> void:
 	]
 	_append(session_path(patient_id), _session_header(patient_id), row)
 	upload(patient_id)
+	DeviceAgent.trial_ended()   # renew the patient lock; ends the session if another device took them
 
 
 # ── server upload ─────────────────────────────────────────────────────────────

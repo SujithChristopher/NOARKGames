@@ -359,6 +359,15 @@ theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9764706)
 theme_override_font_sizes/font_size = 13
 text = "Fetching patients..."
 
+[node name="RefreshButton" type="Button" parent="TextureRect"]
+layout_mode = 0
+offset_left = 764
+offset_top = 206
+offset_right = 864
+offset_bottom = 264
+theme = ExtResource("3_oasjk")
+text = "Refresh"
+
 [node name="PlayButton" type="Button" parent="." unique_id=2029755704]
 layout_mode = 0
 offset_left = 396

@@ -5,7 +5,12 @@ extends Node
 ##
 ## Patients created on this device (the main screen's "New Patient") go to
 ## local_patients.json beside it, in the same shape, so a sync never overwrites
-## them. A server patient with the same id wins.
+## them. Once the server lists the same id the patient is the server's: the
+## local entry is dropped, so a later removal on the server removes them here
+## too instead of bringing the local copy back.
+##
+## A server patient is shown only while they are active and this device is in
+## their "devices" (being in "assessment_devices" alone is not enough).
 ##
 ## Server format:
 ##   {"version": 2, "updated_at": "...", "patients": [
@@ -13,6 +18,9 @@ extends Node
 
 # Singleton instance for global access
 static var instance
+
+# This device in the server's "devices" lists (sender_raspberryPI.py DEVICE_ID).
+const DEVICE := "NOARK"
 
 const DB_FILE = "patients.json"
 const LOCAL_FILE = "local_patients.json"
@@ -25,7 +33,7 @@ const AFFECTED_SIDES := ["Left", "Right", "Both"]
 # so it carries one patient of its own to log in with.
 const ANDROID_TEST_PATIENT := "test"
 
-# Patient database: user_id -> {name, affected_hand, status}
+# Patient database: user_id -> {name, affected_hand, status, local}
 var patient_register: Dictionary = {}
 var current_patient_id: String = ""
 var version: int = 0
@@ -47,20 +55,28 @@ func load_database() -> bool:
 	if OS.get_name() == "Android":
 		patient_register[ANDROID_TEST_PATIENT] = {
 			"name": ANDROID_TEST_PATIENT, "affected_hand": "Both", "status": "active"}
-	var ok := _load_file(database_file_path)
+	var server_ids := {}   # every id in patients.json, shown here or not
+	var ok := _load_file(database_file_path, server_ids)
 	if not ok:
 		print("No usable patients.json yet; it arrives with the first server sync")
 	var local := _read_patients(local_file_path)
+	var kept := []
 	for p in local:
 		var id := str(p.get("user_id", ""))
+		if server_ids.has(id):
+			continue   # the server's patient now
+		kept.append(p)
 		if id != "" and not patient_register.has(id):
 			patient_register[id] = {"name": id, "affected_hand": _side(p), "status": "active", "local": true}
-	print("Loaded patient database v%d with %d patients (%d local)" % [version, patient_register.size(), local.size()])
+	if kept.size() < local.size():
+		print("Local patients now on the server, dropped here: %d" % (local.size() - kept.size()))
+		_write_local(kept)
+	print("Loaded patient database v%d with %d patients (%d local)" % [version, patient_register.size(), kept.size()])
 	return ok
 
 
-## The server's patients.json.
-func _load_file(path: String) -> bool:
+## The server's patients.json. Every id in it goes into `seen`.
+func _load_file(path: String, seen: Dictionary) -> bool:
 	if not FileAccess.file_exists(path):
 		return false
 	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
@@ -71,10 +87,13 @@ func _load_file(path: String) -> bool:
 	for p in data["patients"]:
 		if typeof(p) != TYPE_DICTIONARY or str(p.get("user_id", "")) == "":
 			continue
+		var id := str(p["user_id"])
+		seen[id] = true
 		if str(p.get("status", "active")).to_lower() != "active":
 			continue
-		var id := str(p["user_id"])
-		patient_register[id] = {"name": id, "affected_hand": _side(p), "status": p.get("status", "")}
+		if p.has("devices") and not DEVICE in p["devices"]:
+			continue   # not assigned to this device (maybe assessment only)
+		patient_register[id] = {"name": id, "affected_hand": _side(p), "status": p.get("status", ""), "local": false}
 	return true
 
 
@@ -111,13 +130,35 @@ func add_local_patient(id: String, side: String) -> String:
 	var local := _read_patients(local_file_path)
 	local.append({"user_id": id, "status": "active", "side": side.to_lower(),
 		"created_at": Time.get_datetime_string_from_system()})
+	var why := _write_local(local)
+	if why != "":
+		return why
+	patient_register[id] = {"name": id, "affected_hand": side, "status": "active", "local": true}
+	return ""
+
+
+## Returns "" on success, otherwise why not.
+func _write_local(patients: Array) -> String:
 	var f := FileAccess.open(local_file_path, FileAccess.WRITE)
 	if f == null:
 		return "Could not save: %s" % error_string(FileAccess.get_open_error())
-	f.store_string(JSON.stringify({"patients": local}, "  "))
+	f.store_string(JSON.stringify({"patients": patients}, "  "))
 	f.close()
-	patient_register[id] = {"name": id, "affected_hand": side, "status": "active", "local": true}
 	return ""
+
+
+## True for a patient created on this device (not from the server).
+func is_local(hospital_id: String) -> bool:
+	return patient_register.get(hospital_id, {}).get("local", false)
+
+
+## How many patients came from the server and how many were made here.
+func counts() -> Dictionary:
+	var local := 0
+	for id in patient_register:
+		if patient_register[id].get("local", false):
+			local += 1
+	return {"server": patient_register.size() - local, "local": local}
 
 # The file is the server's; the logged-in patient lives only in memory.
 func save_database() -> bool:

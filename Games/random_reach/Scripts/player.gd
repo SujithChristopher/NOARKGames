@@ -494,7 +494,7 @@ func _on_zero_pressed() -> void:
 	zero_offset = network_position
 
 func _on_button_pressed() -> void:
-	get_tree().quit()
+	GlobalScript.request_quit()
 
 func _on_logout_pressed() -> void:
 	MusicManager.play_music("main")

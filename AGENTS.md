@@ -115,7 +115,7 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 
 ### Results and Progress Visualization
 
-`Results/` contains `parse_files.gd` and `user_progress.gd/.tscn` for visualizing CSV session data using the **EasyCharts** addon (`addons/easy_charts/`). Supports line, bar, area, scatter, and pie charts.
+`Results/` contains `parse_files.gd` and `user_progress.gd/.tscn` for visualizing CSV session data. Charts are drawn by `Results/Scripts/line_chart.gd` (`LineChart`, a plain `_draw()` Control: `plot(x_labels, [{name, values, color}])`) — no chart addon.
 
 ## Critical Implementation Details
 
