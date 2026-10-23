@@ -6,6 +6,7 @@ extends Button
 @onready var patient_notfound = $"../Patient_notfound"
 @onready var hosp_id_edit: LineEdit = $"../TextureRect/HospID"
 @onready var sync_status: Label = $"../TextureRect/SyncStatus"
+@onready var refresh_button: Button = $"../TextureRect/RefreshButton"
 @onready var loading_dialog: AcceptDialog = AcceptDialog.new()
 const DOSE_SCENE = "res://Main_screen/Scenes/dose.tscn"
 const GameButton := preload("res://Main_screen/Scripts/game_button.gd")
@@ -18,9 +19,11 @@ var _restart_started_ms := 0
 const RESTART_TIMEOUT_S := 60
 var endgame : bool
 
-# Fetches patients.json from the server when the main screen opens. The
-# sender only uses the standard library, so any python3 runs it.
+# Fetches patients.json from the server when the main screen opens, and again
+# on Refresh. The sender only uses the standard library, so any python3 runs it.
 var sync_thread := Thread.new()
+const LOCAL_TAG := "  (this device)"
+const LOCAL_COLOR := Color(1.0, 0.8, 0.4)
 
 # The patient box is a combo box: typing filters the ids shown under it,
 # clicking it lists them all. Godot has none built in, so this ItemList
@@ -31,9 +34,11 @@ var suggestions := ItemList.new()
 
 
 func _ready() -> void:
+    DeviceAgent.stop()   # back at login, however we got here: nobody is training
     _style_menu()
     _build_suggestions()
-    sync_thread.start(_sync_patients)
+    refresh_button.pressed.connect(_refresh_patients)
+    _refresh_patients()
     GlobalScript.link_connected_changed.connect(_on_link_connected_changed)
 
 
@@ -44,12 +49,21 @@ func _style_menu() -> void:
     GameButton.apply($"../SettingsButton", GameButton.PURPLE, 17)
     GameButton.apply($"../TextureRect/ExitButton", GameButton.RED, 20)
     GameButton.apply(restart_button, GameButton.TEAL, 14)
+    GameButton.apply(refresh_button, GameButton.TEAL, 14)
     GameButton.style_line_edit(hosp_id_edit)
 
 
 func _exit_tree() -> void:
     if sync_thread.is_started():
         sync_thread.wait_to_finish()
+
+
+func _refresh_patients() -> void:
+    if sync_thread.is_started():
+        return   # one sync at a time
+    refresh_button.disabled = true
+    sync_status.text = "Fetching patients..."
+    sync_thread.start(_sync_patients)
 
 
 func _sync_patients() -> void:
@@ -61,14 +75,16 @@ func _sync_patients() -> void:
 
 func _on_sync_done(code: int) -> void:
     sync_thread.wait_to_finish()
+    refresh_button.disabled = false
     PatientDB.load_database()
     if suggestions.visible:
         _show_suggestions()
-    var count := PatientDB.patient_register.size()
+    var n := PatientDB.counts()
+    var local := " + %d on this device" % n["local"] if n["local"] > 0 else ""
     if code == 0:
-        sync_status.text = "%d patients from the server (v%d)" % [count, PatientDB.version]
-    elif count > 0:
-        sync_status.text = "Server unreachable - %d saved patients" % count
+        sync_status.text = "%d server patients (v%d)%s" % [n["server"], PatientDB.version, local]
+    elif n["server"] + n["local"] > 0:
+        sync_status.text = "Server unreachable - %d saved server patients%s" % [n["server"], local]
     else:
         sync_status.text = "Server unreachable - no patients yet"
 
@@ -112,14 +128,19 @@ func _show_suggestions() -> void:
         return
     suggestions.clear()
     for id in ids:
-        suggestions.add_item(id)
+        # Patients made here (New Patient) are tagged; the rest are the server's.
+        var local := PatientDB.is_local(id)
+        var row := suggestions.add_item(id + (LOCAL_TAG if local else ""))
+        suggestions.set_item_metadata(row, id)
+        if local:
+            suggestions.set_item_custom_fg_color(row, LOCAL_COLOR)
     suggestions.global_position = hosp_id_edit.global_position + Vector2(0, hosp_id_edit.size.y)
     suggestions.size = Vector2(hosp_id_edit.size.x, min(ids.size(), SUGGEST_ROWS) * SUGGEST_ROW_HEIGHT + 8)
     suggestions.show()
 
 
 func _pick(index: int) -> void:
-    hosp_id_edit.text = suggestions.get_item_text(index)
+    hosp_id_edit.text = suggestions.get_item_metadata(index)
     hosp_id_edit.caret_column = hosp_id_edit.text.length()
     suggestions.hide()
 
@@ -157,9 +178,8 @@ func _on_hosp_id_gui_input(event: InputEvent) -> void:
 
 
 func _on_exit_button_pressed():
-    GlobalScript._notification(NOTIFICATION_WM_CLOSE_REQUEST)
     GlobalSignals.SignalBus.emit()
-    get_tree().quit()
+    GlobalScript.request_quit()
 
 func _on_pressed():
     _login()

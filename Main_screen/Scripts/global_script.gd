@@ -465,19 +465,27 @@ func change_patient() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		if _quitting:
-			return
-		_quitting = true
-		# The tracker keeps running for the next app: only the session ends.
-		await link.stop_session()
-		link.close()
-		# The last trial's row goes to the server before the app goes.
-		SessionLog.end_trial()
-		if SessionLog.is_uploading():
-			get_tree().paused = true
-			_show_upload_notice()
-			await SessionLog.uploads_finished
-		get_tree().quit()
+		request_quit()
+
+
+## Closes the app the same way as the window's X: ends the tracker session,
+## waits for the upload and releases the patient, then quits. Exit buttons
+## call this, never get_tree().quit().
+func request_quit() -> void:
+	if _quitting:
+		return
+	_quitting = true
+	# The tracker keeps running for the next app: only the session ends.
+	await link.stop_session()
+	link.close()
+	# The last trial's row goes to the server before the app goes.
+	SessionLog.end_trial()
+	if SessionLog.is_uploading():
+		get_tree().paused = true
+		_show_upload_notice()
+		await SessionLog.uploads_finished
+	await DeviceAgent.stop()   # release the patient for the other devices
+	get_tree().quit()
 
 
 func _show_upload_notice() -> void:
@@ -528,6 +536,11 @@ func python() -> String:
 ## sender_raspberryPI.py: patient sync (--sync) and session upload (--upload).
 func sender_path() -> String:
 	return _project_root().path_join(SENDER_SCRIPT)
+
+
+## A helper script deployed next to the game (agent.py, sender_raspberryPI.py).
+func project_file(name: String) -> String:
+	return _project_root().path_join(name)
 
 
 func _project_root() -> String:
