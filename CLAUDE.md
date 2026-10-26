@@ -99,7 +99,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 ```
 
 See `docs/session_logging_spec.md` for the sessions.csv / configdata.csv columns.
-Movement per game: FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach, FireflyReach = MLAP (`SessionLog.MOVEMENT`).
+Movement per game: FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach, FireflyReach = MLAP · CannonDefense = ROT (`SessionLog.MOVEMENT`). ROT is scored but is not one of the dose's movements (`SessionLog.MOVEMENTS`), so it counts towards no daily dose.
 
 **Raw filename format**: `raw-sess{NN}-trial{NNN}-{Game}-{Mode}.csv` (trial = nth of that game+mode in the session)
 **Raw CSV header**: 7 lines — `headerrows, game_name, h_id, device_location, device_version, protocol_version, start_time`
@@ -116,9 +116,12 @@ Movement per game: FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach
 | Jumpify | `Games/Jumpify/` | 3D only | Platformer with level progression |
 | Random Reach | `Games/random_reach/` | 2D + 3D | Most complex; uses shaders and `@onready` dicts |
 | Reach Scan | `Games/firefly_reach/reach_assessment.tscn` | — | The workspace assessment; required once a day before any game |
+| Cannon Defense | `Games/cannon_defense/` | 2D only | Aim by **turning** the handle (orientation, not position); see below |
 | ~~Assessment~~ | `Games/assessment/` | — | Old workspace assessment, unhooked (Results still uses `workspace.gd` for area maths) |
 
 **Daily assessment gate**: every game button goes through `AssessmentGate.play()` (`Main_screen/Scripts/assessment_gate.gd`). If `reach_boundary.json` (`data/{pid}/`, `ReachStore`) was not saved today, the reach scan runs first and then the chosen game starts (`GlobalSignals.pending_game`). The menus' Assessment button always runs a fresh scan; Esc in the scan returns to the menu without playing. Adapt ROM was removed from all games.
+
+**Cannon Defense** aims a cannon by the handle's rotation (`GlobalScript.hand_rotation()`; the game calls `GlobalScript.want_rotation(self)`, so the tracker sends ROTATION — the rvec — instead of POSITION while it runs). Each game start calibrates: hold a relaxed middle, turn left and hold, turn right and hold (`rotation_input.gd`). The rotation axis is *measured* from left to right, not assumed, so it works for forearm rotation, wrist deviation or a dial turn with any grip; the aim is the swing-twist angle about that axis, each side of the patient's range mapped onto its half of the ±65° arc. Meteors fall straight at the cannon so each asks for one fixed angle; holding the aim on one for 0.4 s fires (no button). Play holds (meteors freeze, MoveTime and countdown pause) on pause, trunk compensation (as Random Reach) and the handle out of view. Raw CSV per frame plus `<raw name>_targets.csv` (one row per meteor, calibration in its header). "Play with mouse" (operator, during calibration) tries it without a tracker.
 
 Games supporting both modes maintain **separate high scores** — `game_name` is set dynamically:
 ```gdscript
@@ -161,8 +164,8 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
   stream. That last one is not cosmetic: the calibration tool's cam0/cam1 need
   not match rcam's enumeration order, and on this rig they do not.
 - `MARKER_OFFSETS` in `tracker.py` is the previous 5-tag bracket, kept only so an
-  uncalibrated rig still starts. GDScript no longer carries a copy — `set_origin()`
-  uses the tracked point from the packet.
+  uncalibrated rig still starts. GDScript no longer carries a copy — the tracked
+  point arrives as POSITION.
 - Stereo refinement is off unless the calibration carries a self-calibrated
   extrinsic: with a multi-tag board it measured no better than one camera
   (1.19 mm vs 1.02 mm jitter) at four times the cost.
@@ -276,10 +279,12 @@ for big messages, heartbeats both ways.
   transports; Godot never starts it, it connects (HELLO) and the session ends on
   STOP or 3 s of silence, the tracker running on.
 - **Idle unless a game runs:** the cameras, tag detection and trunk tracking are off
-  until Godot sends CONFIG `track=on`. `GlobalScript._update_tracking` sends it while
+  until Godot sends CONFIG `track=position`. `GlobalScript._update_tracking` sends it while
   the current scene is under `res://Games/` or a node called
   `GlobalScript.hold_tracking(self)` (trunk panel in the game menus when trunk is on,
-  Trunk angles, Define Table); everywhere else `track=off`. The cameras take 2–5 s to
+  Trunk angles, Define Table); `track=rotation` while a node that called
+  `GlobalScript.want_rotation(self)` is in the tree (Cannon Defense) — the tracker then
+  sends ROTATION (the rvec) instead of POSITION, never both; everywhere else `track=off`. The cameras take 2–5 s to
   come up (own thread; the link keeps answering) and go off `camera_idle_off_s` (20 s)
   after. Recordings cover only tracked stretches. Idle measured ~98% CPU free, 71 °C
   falling (tracking: ~170% CPU, 85–87 °C). The tracker's state rides on

@@ -40,7 +40,7 @@ def on_notification(data: bytes) -> None:
     if kind != protocol.POSITION:
         print(f"[RX] message 0x{kind:02x}: {payload[:60]!r}")
         return
-    _, (x, y, z), _, _ = protocol.decode_position(bytes(data))
+    x, y, z = protocol.decode_vec3(bytes(data))
     label = "POSITION"
     packet_count += 1
     print(f"[RX #{packet_count:04d}] {label:<8}  x={x:+.4f}  y={y:+.4f}  z={z:+.4f}")

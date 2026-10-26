@@ -6,7 +6,8 @@
 Advertises as settings.json `ble_device_name` (default NOARK_Tracker) with the
 same service and characteristics as the tracker, answers the app's HELLO and
 commands like the tracker (link.py), and once connected notifies a POSITION
-(docs/PROTOCOL.md) moving the tip round a 10 cm circle, so a central
+(docs/PROTOCOL.md) moving the tip round a 10 cm circle — or, after CONFIG
+track=rotation, a ROTATION turning ±40° about the camera's z axis — so a central
 (the GdAndroidBLE demo, or Godot in "ble" transport) can be checked end to end
 without a patient. Every command the central sends is printed and accepted.
 """
@@ -38,8 +39,12 @@ def main():
     ble.start()
     link = Link(ble)
 
+    mode = {"track": "position"}
+
     def accept(kind, body):
         print(f"[BLE] command 0x{kind:02x} {body!r}", flush=True)
+        if kind == protocol.CONFIG and body.startswith(b"track="):
+            mode["track"] = body[6:].decode()
         return True, ""
 
     t0 = time.time()
@@ -53,7 +58,10 @@ def main():
                 print("[BLE] App went quiet; waiting for the next HELLO", flush=True)
                 link.reset()
             if link.connected:
-                link.send(protocol.encode_position(0, (x, 0.0, 0.5 + z), (0, 0, 0), (x, 0.0, 0.5 + z)))
+                if mode["track"] == "rotation":
+                    link.send(protocol.encode_vec3(protocol.ROTATION, (0.0, 0.0, 0.7 * math.sin(t))))
+                else:
+                    link.send(protocol.encode_vec3(protocol.POSITION, (x, 0.0, 0.5 + z)))
                 n += 1
             if n and n % int(args.hz * 5) == 0:
                 print(f"[BLE] {n} packets, {n / t:.1f}/s", flush=True)

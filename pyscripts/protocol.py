@@ -7,7 +7,7 @@ The Godot side is Main_screen/Scripts/link_protocol.gd; change the two together.
 
 import struct
 
-VERSION = 3
+VERSION = 4
 
 NONE = 0x00
 
@@ -24,16 +24,21 @@ RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE, RESTART})
 
 # Tracker -> app
 TRACKER_HEARTBEAT = 0x80  # state u8: what the cameras are doing (below)
-POSITION = 0x81       # <BH9f: ref_id, centroid, rvec, tvec
+POSITION = 0x81       # <B3f: the tracked point, metres, camera frame
 ACK = 0x82            # seq u16, ok u8, detail
 TRUNK_STATUS = 0x83   # CSV
 SNAPSHOT = 0x84       # u16 json_len, json, jpeg
 CHUNK = 0x85          # msg_id u8, index u8, total u8, part of another message
 STORAGE_LIST = 0x86   # JSON: the board's recordings and disk (storage.py)
+ROTATION = 0x87       # <B3f: the rigid body's Rodrigues rvec, camera frame
+
+# What CONFIG track= asks for: one pose message per solved frame, POSITION or
+# ROTATION — a game uses one or the other, never both.
+TRACK_CHOICES = ("off", "position", "rotation")
 
 # TRACKER_HEARTBEAT state: the cameras are off until the app asks for tracking
-# (CONFIG track=on), take a few seconds to come up, and go off again after it
-# stops asking.
+# (CONFIG track=position|rotation), take a few seconds to come up, and go off
+# again after it stops asking.
 STATE_IDLE = 0
 STATE_STARTING = 1
 STATE_TRACKING = 2
@@ -41,8 +46,8 @@ STATE_FAILED = 3     # the cameras would not start; retried
 
 _SEQ = struct.Struct("<H")
 _ACK = struct.Struct("<BHB")
-_POSITION = struct.Struct("<BH9f")
-POSITION_SIZE = _POSITION.size        # 39
+_VEC3 = struct.Struct("<B3f")
+VEC3_SIZE = _VEC3.size                # 13: POSITION and ROTATION
 CHUNK_HEADER = 4
 
 
@@ -81,14 +86,14 @@ def decode_ack(message: bytes) -> tuple[int, bool, str]:
     return seq, bool(ok), message[_ACK.size:].decode(errors="replace")
 
 
-def encode_position(ref_id: int, centroid, rvec, tvec) -> bytes:
-    return _POSITION.pack(POSITION, int(ref_id), *centroid, *rvec, *tvec)
+def encode_vec3(kind: int, v) -> bytes:
+    """POSITION (the tracked point) or ROTATION (the rvec)."""
+    return _VEC3.pack(kind, *v)
 
 
-def decode_position(message: bytes):
-    """-> (ref_id, centroid, rvec, tvec), for tools and tests."""
-    _, ref_id, *f = _POSITION.unpack(message[:POSITION_SIZE])
-    return ref_id, tuple(f[0:3]), tuple(f[3:6]), tuple(f[6:9])
+def decode_vec3(message: bytes) -> tuple[float, float, float]:
+    """A POSITION or ROTATION -> (x, y, z), for tools and tests."""
+    return tuple(_VEC3.unpack(message[:VEC3_SIZE])[1:])
 
 
 def chunk(message: bytes, msg_id: int, max_size: int) -> list[bytes]:

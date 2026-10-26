@@ -41,6 +41,7 @@ MOVEMENT = {
     "FruitCatcher": "ML", "PingPong": "ML",
     "FlyThrough": "AP",
     "RandomReach": "MLAP", "FireflyReach": "MLAP",
+    "CannonDefense": "ROT",
 }
 MODE_OVERRIDE = {"Jumpify": "3D"}
 SESSION_COLUMNS = [

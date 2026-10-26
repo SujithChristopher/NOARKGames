@@ -1,4 +1,4 @@
-# NOARK app ↔ tracker protocol (v2)
+# NOARK app ↔ tracker protocol (v4)
 
 How the Godot app and `pyscripts/tracker.py` talk, over UDP or BLE. One
 protocol; the transport only moves bytes.
@@ -22,7 +22,8 @@ for an incompatible change, and update this file.
 The tracker is a long-running service (`noark-tracker`, systemd) over both
 transports. The app never starts or stops it; it connects, runs sessions, and
 goes. The cameras are **off until the app asks for tracking** (`CONFIG
-track=on`, sent while a game or a screen that shows the hand / trunk is open),
+track=position` or `track=rotation`, sent while a game or a screen that shows
+the hand / trunk is open),
 come up on their own thread in 2–5 s (the link keeps answering meanwhile), and
 go off again `camera_idle_off_s` (20 s) after the app asks for `track=off` or
 goes. Every HELLO starts the app idle. Session recordings cover only the tracked
@@ -35,8 +36,8 @@ app                                  tracker
  │◀─────────────────────────── ACK ──│
  │── SESSION(patient) ─────────────▶ │  opens logs / recordings, ACK
  │── CONFIG / TRUNK … ─────────────▶ │  applies, ACK(ok, detail)
- │◀── POSITION, TRUNK_STATUS, SNAPSHOT, TRACKER_HEARTBEAT …
- │── HEARTBEAT (every 0.1 s) ──────▶ │
+ │◀── POSITION or ROTATION, TRUNK_STATUS, SNAPSHOT, TRACKER_HEARTBEAT …
+ │── HEARTBEAT (every 0.5 s) ──────▶ │
  │── STOP ─────────────────────────▶ │  closes the session, ACK; keeps running
 ```
 
@@ -80,8 +81,8 @@ again and is not applied twice.
 
 | Type | Name | Body | ACK detail |
 |---|---|---|---|
-| `0x01` | `HEARTBEAT` | (no seq, no body) | — |
-| `0x02` | `HELLO` | version u8 (3) | `v3`, or why refused |
+| `0x01` | `HEARTBEAT` | (no seq, no body); every 0.5 s | — |
+| `0x02` | `HELLO` | version u8 (4) | `v4`, or why refused |
 | `0x03` | `SESSION` | patient id | the id |
 | `0x04` | `STOP` | — | — |
 | `0x05` | `CONFIG` | `key=value` | `key=value` as applied, or why refused |
@@ -96,8 +97,9 @@ board's camera recordings: `<patient>/<session>/Video/rec_*` and
 being written now. Listing and deleting run on a worker thread, so the ACK only
 says the job was taken; each finished job answers with a `STORAGE_LIST`.
 
-CONFIG keys (tracker.py `_apply_setting`): `track` (on/off: the app wants
-tracking now; not a setting, never in settings.json), `solver` (joint/ransac), `refine`
+CONFIG keys (tracker.py `_apply_setting`): `track` (off/position/rotation: the
+app wants tracking now, and which of POSITION or ROTATION to send — a game uses
+one, never both; not a setting, never in settings.json), `solver` (joint/ransac), `refine`
 (crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
 `trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `trunk_reference`
 (neutral/model), `recording`
@@ -113,23 +115,26 @@ same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 | Type | Name | Payload |
 |---|---|---|
 | `0x80` | `TRACKER_HEARTBEAT` | state u8: 0 idle (cameras off), 1 cameras starting, 2 tracking, 3 cameras failed (retried in 5 s); sent when nothing else went out for 0.5 s, and at once on a change |
-| `0x81` | `POSITION` | `<BH9f`, 39 bytes, below |
+| `0x81` | `POSITION` | `<B3f`, 13 bytes, below; while `track=position` |
 | `0x82` | `ACK` | `seq u16 · ok u8 · detail` |
 | `0x83` | `TRUNK_STATUS` | CSV, below |
 | `0x84` | `SNAPSHOT` | `u16 json_len · json · jpeg` (`trunk/snapshot_packet.py`) |
 | `0x85` | `CHUNK` | `msg_id u8 · index u8 · total u8 · part`, of a message too big for the transport |
 | `0x86` | `STORAGE_LIST` | JSON, below; after each STORAGE job |
+| `0x87` | `ROTATION` | `<B3f`, 13 bytes, below; while `track=rotation` |
 
-**POSITION**, one per frame with a solved pose (no marker in view → none; the
-heartbeat still shows the tracker is alive):
+**POSITION** / **ROTATION**, one per frame with a solved pose (no marker in
+view → none; the heartbeat still shows the tracker is alive, and the app reads
+"a pose arrived recently" as "the handle is in view"). Which one is the app's
+choice (`track=`); the rest of the pose stays on the tracker.
 
 | Offset | Field | |
 |---|---|---|
-| 0 | type `0x81` | |
-| 1 | ref_id u16 | reference tag / rigid-body id |
-| 3 | centroid f32 ×3 | tracked point, metres, camera frame |
-| 15 | rvec f32 ×3 | Rodrigues rotation of the reference tag / rigid body |
-| 27 | tvec f32 ×3 | its translation |
+| 0 | type `0x81` / `0x87` | |
+| 1 | f32 ×3 | POSITION: the tracked point (the device tip), metres, camera frame. ROTATION: Rodrigues rotation of the rigid body, camera frame |
+
+13 bytes fit one BLE link-layer packet even without Data Length Extension
+(27-byte payload); v3's 39-byte POSITION (ref_id, point, rvec, tvec) took two.
 
 **TRUNK_STATUS** fields, in order:
 `state, level, lvl_flex, lvl_lat, lvl_axi, flex, lat, axi, progress, has_neutral,

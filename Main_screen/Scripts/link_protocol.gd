@@ -3,7 +3,7 @@ extends RefCounted
 ## then the payload (docs/PROTOCOL.md). The Python side is pyscripts/protocol.py;
 ## change the two together. Used as `const LinkProtocol := preload(...)`.
 
-const VERSION := 3
+const VERSION := 4
 
 const NONE := 0x00
 
@@ -20,22 +20,23 @@ const RESTART := 0x08         # ACKed, then the tracker exits and systemd starts
 
 # Tracker -> app
 const TRACKER_HEARTBEAT := 0x80  # state u8 (TrackerState)
-const POSITION := 0x81        # <BH9f: ref_id, centroid, rvec, tvec
+const POSITION := 0x81        # <B3f: the tracked point, metres, camera frame
 const ACK := 0x82             # seq u16, ok u8, detail
 const TRUNK_STATUS := 0x83    # CSV
 const SNAPSHOT := 0x84        # u16 json_len, json, jpeg
 const CHUNK := 0x85           # msg_id u8, index u8, total u8, part of another message
 const STORAGE_LIST := 0x86    # JSON: the board's recordings and disk
+const ROTATION := 0x87        # <B3f: the rigid body's Rodrigues rvec, camera frame
 
-const POSITION_SIZE := 39
+const VEC3_SIZE := 13         # POSITION and ROTATION
 const ACK_SIZE := 4
 
 ## What the app's end of the link is doing, for the status indicator.
 enum LinkStatus { IDLE, SCANNING, CONNECTING, CONNECTED }
 
 ## What the tracker's cameras are doing (TRACKER_HEARTBEAT). Off until the app
-## asks for tracking (CONFIG track=on), a few seconds to come up, and off again
-## a little after it stops asking. UNKNOWN until the first heartbeat.
+## asks for tracking (CONFIG track=position|rotation), a few seconds to come up,
+## and off again a little after it stops asking (track=off). UNKNOWN until the first heartbeat.
 enum TrackerState { IDLE, STARTING, TRACKING, FAILED, UNKNOWN = -1 }
 
 
@@ -68,17 +69,7 @@ static func decode_ack(message: PackedByteArray) -> Dictionary:
 	}
 
 
-## A POSITION -> {ref_id, centroid, rvec, tvec}, or {} if short.
-static func decode_position(message: PackedByteArray) -> Dictionary:
-	if message.size() < POSITION_SIZE:
-		return {}
-	return {
-		"ref_id": message.decode_u16(1),
-		"centroid": _vec3(message, 3),
-		"rvec": _vec3(message, 15),
-		"tvec": _vec3(message, 27),
-	}
-
-
-static func _vec3(m: PackedByteArray, offset: int) -> Vector3:
-	return Vector3(m.decode_float(offset), m.decode_float(offset + 4), m.decode_float(offset + 8))
+## A POSITION or ROTATION -> its three floats. The caller checks the size
+## (VEC3_SIZE) first.
+static func decode_vec3(message: PackedByteArray) -> Vector3:
+	return Vector3(message.decode_float(1), message.decode_float(5), message.decode_float(9))

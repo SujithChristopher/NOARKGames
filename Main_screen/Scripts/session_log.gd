@@ -20,10 +20,13 @@ signal uploads_finished
 const DEVICE := "NOARK"
 
 # Movement each game trains; games not listed (Jumpify, Assessment) log a blank.
+# ROT (turning the handle) is not one of the dose's MOVEMENTS: it is logged and
+# scored, but counts towards no daily dose.
 const MOVEMENT := {
 	"FruitCatcher": "ML", "PingPong": "ML",
 	"FlyThrough": "AP",
 	"RandomReach": "MLAP", "FireflyReach": "MLAP",
+	"CannonDefense": "ROT",
 }
 const MOVEMENTS := ["ML", "AP", "MLAP"]
 # Mode for games whose name has no "3D" suffix but are 3D only.

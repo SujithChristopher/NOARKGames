@@ -7,7 +7,9 @@ extends Node
 ## * commands (SESSION, STOP, CONFIG, TRUNK) go one at a time and are re-sent
 ##   until their ACK arrives — one in flight also keeps Android from refusing
 ##   overlapping BLE writes;
-## * HEARTBEAT every 0.1 s; nothing from the tracker for 3 s = link lost;
+## * HEARTBEAT every 0.5 s (the tracker gives up after 3 s of silence; 0.5 s
+##   leaves room for a scene load that stalls _process); nothing from the
+##   tracker for 3 s = link lost;
 ## * CHUNKs reassembled into the message they carry.
 ##
 ## Owned by GlobalScript, which picks the transport.
@@ -22,7 +24,7 @@ signal connected_changed(connected: bool)
 ## The tracker's cameras: LinkProtocol.TrackerState, from its heartbeats.
 signal tracker_state_changed(state: int)
 
-const HEARTBEAT_S := 0.1
+const HEARTBEAT_S := 0.5
 const RETRY_S := 0.3
 const MAX_TRIES := 10          # 3 s; HELLO retries for as long as it takes
 const SILENCE_S := 3.0         # the tracker sends at least every 0.5 s

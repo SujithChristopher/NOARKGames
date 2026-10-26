@@ -35,21 +35,17 @@ var link_status: int:
 	get:
 		return link.status() if link else LinkProtocol.LinkStatus.IDLE
 
-# ── origin / local-coordinate state ──────────────────────────────────────────
-var _origin_set:       bool   = false
-var _origin_basis:     Basis  = Basis.IDENTITY
-var _origin_ref_point: Vector3 = Vector3.ZERO
-
-# last ref-marker data received (used by set_origin())
+# ── last pose received ───────────────────────────────────────────────────────
+# Only one of the two arrives at a time (CONFIG track=position|rotation, per
+# game: tracking_mode()); the other keeps its last value.
 var _last_rvec:     Vector3 = Vector3.ZERO
 var _last_centroid: Vector3 = Vector3.ZERO
-var _last_ref_id:   int     = -1
 
 # ── table frame ──────────────────────────────────────────────────────────────
 # Defined on the main screen ("Define Table"): the hand is put on the four table
 # corners, which fixes the zero, the axis directions and the px-per-metre scale
-# in one go, so set_origin() is not needed. While set, it replaces the origin
-# lock in _apply_position. Persisted in table.json next to settings.json.
+# in one go. Without it _apply_position uses the camera frame as it comes.
+# Persisted in table.json next to settings.json.
 var table_set:    bool        = false
 var table_k:      float       = 0.0            # screen px per real metre
 var table_r:      Vector2     = Vector2.ZERO   # hand, real metres from the table centre
@@ -73,8 +69,11 @@ signal tracker_state_changed(state: int)
 ## Tracking is asked of the tracker only while something needs it: a scene
 ## under res://Games/, or a node that called hold_tracking(). Everywhere else
 ## (main menu, Settings, dose, results) the tracker idles with its cameras off.
+## It sends the hand's position, or its rotation while a node that called
+## want_rotation() is in the tree — never both.
 var _tracking_holders: Array[Node] = []
-var _tracking_sent := -1   # the last track= sent: -1 none since connecting, 0 off, 1 on
+var _rotation_holders: Array[Node] = []
+var _tracking_sent := ""   # the last track= sent; "" none since connecting
 const TRACKER_SERVICE := "/etc/systemd/system/noark-tracker.service"
 
 # ── python launcher ───────────────────────────────────────────────────────────
@@ -179,7 +178,7 @@ func _start_link() -> void:
 	link.command_done.connect(link_command_done.emit)
 	link.connected_changed.connect(link_connected_changed.emit)
 	link.tracker_state_changed.connect(tracker_state_changed.emit)
-	_tracking_sent = -1
+	_tracking_sent = ""
 	_transport.start()
 
 
@@ -198,12 +197,16 @@ func restart_link() -> void:
 
 func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
 	match kind:
-		LinkProtocol.POSITION:
-			var pos := LinkProtocol.decode_position(msg)
-			if pos.is_empty():
-				push_error("[LINK] Short POSITION: %d bytes" % msg.size())
+		LinkProtocol.POSITION, LinkProtocol.ROTATION:
+			if msg.size() < LinkProtocol.VEC3_SIZE:
+				push_error("[LINK] Short pose message 0x%02x: %d bytes" % [kind, msg.size()])
 				return
-			_apply_position(pos)
+			_packet_count += 1
+			last_packet_ms = Time.get_ticks_msec()
+			if kind == LinkProtocol.POSITION:
+				_apply_position(LinkProtocol.decode_vec3(msg))
+			else:
+				_last_rvec = LinkProtocol.decode_vec3(msg)
 		LinkProtocol.TRUNK_STATUS:
 			TrunkMonitor.on_packet(LinkProtocol.payload_text(msg))
 		LinkProtocol.SNAPSHOT:
@@ -225,29 +228,23 @@ func _on_command_done(kind: int, ok: bool, detail: String) -> void:
 
 # ── shared position update (UDP + BLE) ───────────────────────────────────────
 
-func set_origin() -> void:
-	# The tracked point is taken straight from the packet rather than rebuilt
-	# from a marker-offset table on this side.
-	#
-	# That table had to be kept in step with Python's by hand, and it had
-	# already drifted (tag 4 differed by 9 cm) before the rigid body was
-	# calibrated at all. Since the pose now arrives in the reference tag's
-	# frame, rebuilding the point here would just recompute what Python already
-	# sent in floats 1-3 — and get it wrong for any marker the table predates.
-	if _last_ref_id < 0:
-		push_error("set_origin: no marker data received yet")
-		return
-	var angle := _last_rvec.length()
-	var axis  := _last_rvec.normalized() if angle > 0.0001 else Vector3.UP
-	_origin_basis     = Basis(axis, angle)
-	_origin_ref_point = _last_centroid
-	_origin_set       = true
-	GlobalSignals.origin_set.emit()
-
-
-# Hand position as the tracker reports it, before any origin or table (camera frame, m).
+# Hand position as the tracker reports it, before the table (camera frame, m).
 func hand_camera() -> Vector3:
 	return _last_centroid
+
+
+# The rigid body's orientation as the tracker reports it (camera frame), from the
+# ROTATION message's Rodrigues rvec; identity before any. Only arrives while
+# the scene asked for it (want_rotation()).
+func hand_rotation() -> Basis:
+	var angle := _last_rvec.length()
+	if angle < 1e-6:
+		return Basis.IDENTITY
+	return Basis(_last_rvec / angle, angle)
+
+
+func hand_rvec() -> Vector3:
+	return _last_rvec
 
 
 # corners: camera (x, z) of the hand at TL, BL, BR, TR of the table, in metres.
@@ -317,18 +314,7 @@ func load_table() -> void:
 	table_set = true
 
 
-func _apply_position(pos: Dictionary) -> void:
-	_packet_count += 1
-	last_packet_ms = Time.get_ticks_msec()
-
-	# Cache what set_origin() needs: the board orientation, and the id that
-	# says a packet has been seen at all. The board translation is not cached —
-	# the tracked point itself arrives as the centroid.
-	_last_rvec   = pos["rvec"]
-	_last_ref_id = pos["ref_id"]
-
-	# Compute local coordinates (rotation + translation relative to origin)
-	var centroid: Vector3 = pos["centroid"]
+func _apply_position(centroid: Vector3) -> void:
 	_last_centroid = centroid
 	var local: Vector3
 	if table_set:
@@ -338,8 +324,6 @@ func _apply_position(pos: Dictionary) -> void:
 		table_r = _table_basis * (Vector2(centroid.x, centroid.z) - _table_centre)
 		local = Vector3(table_r.x * table_k / PLAYER_POS_SCALER_X, centroid.y - _table_y0,
 			table_r.y * table_k / PLAYER_POS_SCALER_Z)
-	elif _origin_set:
-		local = _origin_basis.transposed() * (_origin_ref_point - centroid)
 	else:
 		local = centroid
 
@@ -385,29 +369,43 @@ func send_storage_command(arg: String) -> void:
 ## res://Games/ that shows the hand or the trunk: the trunk panel in the game
 ## menus, Trunk angles, Define Table).
 func hold_tracking(node: Node) -> void:
-	if node in _tracking_holders:
+	_hold(_tracking_holders, node)
+
+
+## Have the tracker send the handle's rotation (ROTATION) instead of its
+## position while `node` is in the tree: a game that aims by turning the handle
+## (Cannon Defense). Positions stop meanwhile.
+func want_rotation(node: Node) -> void:
+	_hold(_rotation_holders, node)
+
+
+func _hold(holders: Array[Node], node: Node) -> void:
+	if node in holders:
 		return
-	_tracking_holders.append(node)
-	node.tree_exiting.connect(func(): _tracking_holders.erase(node), CONNECT_ONE_SHOT)
+	holders.append(node)
+	node.tree_exiting.connect(func(): holders.erase(node), CONNECT_ONE_SHOT)
 
 
-func tracking_wanted() -> bool:
+## What the tracker should send now: "off", "position" or "rotation".
+func tracking_mode() -> String:
+	if not _rotation_holders.is_empty():
+		return "rotation"
 	var scene := get_tree().current_scene
 	if scene != null and scene.scene_file_path.begins_with("res://Games/"):
-		return true
-	return not _tracking_holders.is_empty()
+		return "position"
+	return "off" if _tracking_holders.is_empty() else "position"
 
 
-# CONFIG track=on|off whenever that changes, and once after every (re)connect:
-# a tracker starts each app idle.
+# CONFIG track=off|position|rotation whenever that changes, and once after
+# every (re)connect: a tracker starts each app idle.
 func _update_tracking() -> void:
 	if link == null or not link.connected:
-		_tracking_sent = -1
+		_tracking_sent = ""
 		return
-	var want := int(tracking_wanted())
-	if want != _tracking_sent:
-		_tracking_sent = want
-		link.send_command(LinkProtocol.CONFIG, "track=%s" % ("on" if want else "off"))
+	var mode := tracking_mode()
+	if mode != _tracking_sent:
+		_tracking_sent = mode
+		link.send_command(LinkProtocol.CONFIG, "track=" + mode)
 
 
 ## Restart the tracker service. Over the link when the tracker answers (it

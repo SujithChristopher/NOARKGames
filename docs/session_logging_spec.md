@@ -28,7 +28,7 @@ SessionNumber,DateTime,TrialNumberDay,TrialNumberSession,TrialStartTime,TrialSto
 | TrialNumberDay / TrialNumberSession | nth trial of this GameName+Mode today / this session. |
 | TrialStartTime / TrialStopTime | Trial wall-clock bounds. |
 | TrialRawDataFile | Patient id (as MARS). |
-| Movement | FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach, FireflyReach = MLAP · Jumpify = blank (Assessment writes no trial log) |
+| Movement | FruitCatcher, PingPong = ML · FlyThrough = AP · RandomReach, FireflyReach = MLAP · CannonDefense = ROT (handle rotation; not a dose movement) · Jumpify = blank (Assessment writes no trial log) |
 | GameName / Mode | Base name (`FlyThrough`) / `2D` or `3D`. |
 | GameDuration | Configured trial length, s. |
 | MoveTime | Active play time excl. pauses, s. Feeds dose progress. |

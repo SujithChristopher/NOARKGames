@@ -499,7 +499,7 @@ class TrackerClass:
 
         # ── Transport + cameras ───────────────────────────────────────────────
         # The cameras are off until the app asks for tracking (CONFIG
-        # track=on, while a game runs) and go off again a little after it stops
+        # track=position|rotation, while a game runs) and go off again a little after it stops
         # asking: tracking nobody costs most of two cores and heats the board.
         # They come up on their own thread (_manage_cameras), so the link keeps
         # answering through the seconds that takes.
@@ -510,7 +510,8 @@ class TrackerClass:
         self._cam_thread: Optional[threading.Thread] = None
         self._cam_result = None            # the thread's StereoCapture, or its exception
         self._cam_retry_at = 0.0
-        self._want_tracking = False        # CONFIG track=on|off
+        self._want_tracking = False        # CONFIG track=position|rotation (not off)
+        self._send_rotation = False        # track=rotation: ROTATION, not POSITION
         self._tracking = False             # wanted, and the cameras are up
         self._unwanted_since: Optional[float] = None
         # Seconds the cameras stay up after tracking stops: from a game back
@@ -897,8 +898,9 @@ class TrackerClass:
                 self._trunk_settings = {**self._trunk_settings, "trunk_reference": value}
                 if self.trunk is not None:
                     self.trunk.set_reference(value)
-        elif key == "track" and value in ("on", "off"):
-            self._want_tracking = value == "on"
+        elif key == "track" and value in protocol.TRACK_CHOICES:
+            self._want_tracking = value != "off"
+            self._send_rotation = value == "rotation"
         elif key == "recording" and value in ("on", "off"):
             self.record_session = value == "on"
         elif key == "recording_fps" and float(value) > 0:
@@ -937,11 +939,15 @@ class TrackerClass:
             *(f"{a:.2f}" for a in st.angles), *(f"{c:.2f}" for c in st.cam_rot),
             f"{st.q_frac:.2f}", st.people, *marker, int(self.flip_frames), st.reference])
 
-    def _send_position(self, centroid, ref_rvec, ref_tvec, ref_id: int) -> None:
+    def _send_pose(self, centroid, ref_rvec, ref_tvec, ref_id: int) -> None:
+        """The one message the app asked for (track=): the tracked point or the
+        rigid body's rotation. The rest of the pose stays here."""
         if self._trunk_csv is not None:
             self._marker = (time.time(), int(ref_id), np.ravel(ref_rvec), np.ravel(ref_tvec))
-        self.link.send(protocol.encode_position(
-            ref_id, np.ravel(centroid), np.ravel(ref_rvec), np.ravel(ref_tvec)))
+        if self._send_rotation:
+            self.link.send(protocol.encode_vec3(protocol.ROTATION, np.ravel(ref_rvec)))
+        else:
+            self.link.send(protocol.encode_vec3(protocol.POSITION, np.ravel(centroid)))
         self._send_count += 1
 
     # ── Pose estimation ───────────────────────────────────────────────────────
@@ -1279,9 +1285,6 @@ class TrackerClass:
         if have_pose:
             if self.rig is not None:
                 centroid = self.filter.update(self.rig.tip(board_rvec, board_tvec))
-                # The pose is already in the reference tag's frame, so Godot's
-                # set_origin() applies that one tag's tip offset and lands on
-                # exactly this centroid.
                 ref_id   = self.rig.reference_id
                 ref_rvec = board_rvec
                 ref_tvec = board_tvec
@@ -1292,7 +1295,7 @@ class TrackerClass:
                 ref_tvec = tvecs[0]
 
             if self.link.connected:
-                self._send_position(centroid, ref_rvec, ref_tvec, ref_id)
+                self._send_pose(centroid, ref_rvec, ref_tvec, ref_id)
 
                 if self.record and self.csv_writer:
                     self.csv_writer.writerow(

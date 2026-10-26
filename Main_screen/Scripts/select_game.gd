@@ -10,6 +10,7 @@ const FLAPPY = "res://Games/flappy_bird/Scenes/flappy_main.tscn"
 const PINGPONG = "res://Games/ping_pong/Scenes/PingPong.tscn"
 const FRUIT_CATCHER = "res://Games/fruit_catcher/Scenes/Game/Game.tscn"
 const FIREFLY_REACH = "res://Games/firefly_reach/firefly_main.tscn"
+const CANNON_DEFENSE = "res://Games/cannon_defense/cannon_defense.tscn"
 const RESULTS = "res://Results/scenes/user_progress.tscn"
 const AssessmentGate = preload("res://Main_screen/Scripts/assessment_gate.gd")
 var endgame : bool
@@ -17,7 +18,7 @@ var endgame : bool
 
 
 func _ready() -> void:
-    AssessmentGate.warm([RANDOM_REACH, FLAPPY, PINGPONG, FRUIT_CATCHER, FIREFLY_REACH, RESULTS])
+    AssessmentGate.warm([RANDOM_REACH, FLAPPY, PINGPONG, FRUIT_CATCHER, FIREFLY_REACH, CANNON_DEFENSE, RESULTS])
     logged_in_as.text = "Patient: " + PatientDB.current_patient_id
     add_child(preload("res://Main_screen/Scripts/dose_progress.gd").new())
     add_child(preload("res://Main_screen/Scripts/trunk_panel.gd").new())
@@ -99,3 +100,6 @@ func _on_switch_3d_toggled(toggled_on: bool) -> void:
 func _on_firefly_reach_pressed() -> void:
     AssessmentGate.play(get_tree(), AssessmentGate.scene(FIREFLY_REACH))
 
+func _on_cannon_defense_pressed() -> void:
+    MusicManager.play_music("rr_bgm")
+    AssessmentGate.play(get_tree(), AssessmentGate.scene(CANNON_DEFENSE))
