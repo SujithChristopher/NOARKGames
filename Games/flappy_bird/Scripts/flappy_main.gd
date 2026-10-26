@@ -16,6 +16,7 @@ signal game_started
 
 # Preloaded resources
 @onready var pipe_scene = preload("res://Games/flappy_bird/Scenes/pipe.tscn")
+const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
 
 # Node references - organized by functionality
 @onready var _timer_nodes = {
@@ -87,6 +88,7 @@ var pilot_node: CharacterBody2D
 var game_name: String = "FlyThrough"  # Dynamic game name that changes with mode
 
 func _ready() -> void:
+	add_child(preload("res://Games/flappy_bird/Scripts/sky_scenery.gd").new())
 	_initialize_game_state()
 	_setup_screen_and_ground()
 	_setup_timers()
@@ -138,6 +140,11 @@ func _setup_ui() -> void:
 	_ui_nodes.game_over_label.hide()
 	_ui_nodes.countdown_display.visible = false
 	_ui_nodes.missed_label.text = "Missed 0"  # Initialize missed label
+	GameFx.outline(_ui_nodes.missed_label)
+	GameFx.outline(_ui_nodes.score_label, 5)
+	plus_one.label_settings = GameFx.text_style(34, GameFx.GOLD)
+	GameFx.dim_behind(_ui_nodes.Paused_screen)
+	GameFx.dim_behind(_ui_nodes.game_over_label)
 	_update_top_score_display()
 
 func _connect_signals() -> void:
@@ -302,6 +309,11 @@ func _update_scroll_and_pipes() -> void:
 	for pipe in pipes:
 		pipe.position.x -= SCROLL_SPEED
 
+	# Pipes well past the plane are done with
+	for pipe in pipes.filter(func(p): return p.position.x < -200):
+		pipes.erase(pipe)
+		pipe.queue_free()
+
 func _update_position_tracking() -> void:
 	pos_x = GlobalScript.raw_x
 	pos_y = GlobalScript.raw_y
@@ -344,8 +356,8 @@ func _setup_pipe_position(pipe: Node) -> void:
 		target_z = (pipe.position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
 
 func _setup_pipe_signals(pipe: Node) -> void:
-	pipe.hit.connect(pipe_hit)
-	pipe.scored.connect(scored)
+	pipe.hit.connect(pipe_hit.bind(pipe))
+	pipe.scored.connect(scored.bind(pipe))
 
 func restart_game() -> void:
 	game_running = true
@@ -379,7 +391,7 @@ func _update_health_display() -> void:
 				_health_nodes.heart_array[i].animation = "Dead"
 				_health_nodes.heart_array[i].visible = true
 
-func pipe_hit() -> void:
+func pipe_hit(pipe: Node = null) -> void:
 	if not can_score:
 		return  
 	can_score = false  
@@ -387,6 +399,9 @@ func pipe_hit() -> void:
 	missed_count += 1
 	SessionLog.miss()
 	_ui_nodes.missed_label.text = "Missed " + str(missed_count)
+	GameFx.pop(_ui_nodes.missed_label)
+	if is_instance_valid(pipe):
+		pipe.missed()
 	flash_animation.emit()
 	await get_tree().create_timer(0.5).timeout
 	can_score = true
@@ -400,18 +415,20 @@ func _handle_game_over() -> void:
 	stop_game()
 	
 	
-func scored() -> void:
+func scored(pipe: Node = null) -> void:
 	if not can_score:
 		return  
 	can_score = false  
 	MusicManager.play_sound_effect("scored")
 	score += 1
 	SessionLog.hit()
+	if is_instance_valid(pipe):
+		pipe.celebrate()
 
-	# Show +1 animation properly
+	# Show +1 animation just above the plane
 	plus_one.visible = true
 	plus_one.modulate.a = 1.0  # Reset alpha
-	plus_one.position = Vector2(100, 100)  # Adjust position to visible area
+	plus_one.position = pilot_node.position + Vector2(-plus_one.size.x / 2, -80)
 	var tween = create_tween()
 	tween.tween_property(plus_one, "position:y", plus_one.position.y - 50, 0.5)
 	tween.parallel().tween_property(plus_one, "modulate:a", 0.0, 0.5)
@@ -423,6 +440,7 @@ func scored() -> void:
 	_update_top_score_display()
 	status = "reached"
 	_ui_nodes.score_label.text = str(score)
+	GameFx.pop(_ui_nodes.score_label.get_parent())
 	await get_tree().create_timer(0.5).timeout
 	can_score = true
 

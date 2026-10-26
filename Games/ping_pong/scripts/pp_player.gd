@@ -5,6 +5,7 @@ const LOG_INTERVAL: float = 0.02
 const POSITION_LERP_SPEED: float = 0.8
 const PLAYER_Y_POSITION: float = 610.0
 const GAME_NAME: String = "PingPong"
+const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
 
 # Movement and positioning
 var network_position: Vector2 = Vector2.ZERO
@@ -67,6 +68,7 @@ var game_log_file
 }
 
 func _ready() -> void:
+    get_parent().add_child.call_deferred(preload("res://Games/ping_pong/scripts/table_court.gd").new())
     _setup_timers()
     _setup_ui()
     _connect_signals()
@@ -93,6 +95,8 @@ func _setup_ui() -> void:
     game_over_label.visible = false
     game_over_label.hide()
     countdown_display.visible = false
+    GameFx.dim_behind(paused_screen)
+    GameFx.dim_behind(game_over_label)
 
 func _connect_signals() -> void:
     # Game control buttons

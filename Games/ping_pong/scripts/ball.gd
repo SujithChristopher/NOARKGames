@@ -1,5 +1,8 @@
 extends CharacterBody2D
 class_name Ball
+
+const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
+const SPARK := [Color.WHITE, Color(1.0, 0.75, 0.4)]
 # Get the gravity from the project settings to be synced with RigidBody nodes.
 var gravity = ProjectSettings.get_setting("physics/2d/default_gravity")
 var game_started: bool = false
@@ -48,6 +51,7 @@ func _physics_process(delta):
                 status = "ground"
                 GlobalSignals.hit_ground = collision_point
                 print("Hit bottom at:", collision_point)
+                get_tree().call_group("pp_court", "flash_goal", false)
                 # Show Computer +1 first, then starting
                 show_score_display("Computer +1")
                 reset_ball_after_score()
@@ -60,6 +64,9 @@ func _physics_process(delta):
                 status = "top"
                 GlobalSignals.hit_top = collision_point
                 print("Hit top at:", collision_point)
+                get_tree().call_group("pp_court", "flash_goal", true)
+                GameFx.burst(get_parent(), collision_point, [GameFx.GOLD, Color.WHITE], 24, 260.0)
+                GameFx.pop(player_score_label.get_parent())
                 # Show Player +1 first, then starting
                 show_score_display("Player +1")
                 reset_ball_after_score()
@@ -69,6 +76,7 @@ func _physics_process(delta):
                 status = "left"
                 GlobalSignals.hit_left = collision_point
                 print("Hit left at:", collision_point)
+                GameFx.burst(get_parent(), collision_point, SPARK, 6, 140.0, 0.3, 0.0)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "right":
@@ -76,6 +84,7 @@ func _physics_process(delta):
                 status = "right"
                 GlobalSignals.hit_right = collision_point
                 print("Hit right at:", collision_point)
+                GameFx.burst(get_parent(), collision_point, SPARK, 6, 140.0, 0.3, 0.0)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "player":
@@ -85,6 +94,7 @@ func _physics_process(delta):
                 status = "player"
                 GlobalSignals.hit_player = collision_point
                 print("Hit player at:", collision_point)
+                _bat_hit(collision)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "computer":
@@ -93,6 +103,7 @@ func _physics_process(delta):
                 status = "computer"
                 GlobalSignals.hit_computer = collision_point
                 print("Hit computer at:", collision_point)
+                _bat_hit(collision)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
         
         # Update score labels
@@ -129,6 +140,8 @@ func _on_ready():
     # Hide score display initially
     if score_display_label:
         score_display_label.visible = false
+        score_display_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    GameFx.outline(computer_score_label)
     
     # Setup trajectory line
     _setup_trajectory_line()
@@ -139,7 +152,10 @@ func show_score_display(text: String):
     """Show the score display (+1 text) first"""
     if score_display_label:
         score_display_label.text = text
+        var colour := GameFx.GOLD if text.begins_with("Player") else Color(1.0, 0.55, 0.5)
+        score_display_label.label_settings = GameFx.text_style(40, colour)
         score_display_label.visible = true
+        GameFx.pop(score_display_label, 1.3)
         show_starting_next = true
         score_display_timer.start()
 
@@ -147,6 +163,7 @@ func _on_score_display_timeout():
     """After showing score, show starting text"""
     if show_starting_next and score_display_label:
         score_display_label.text = "Starting..."
+        score_display_label.label_settings = GameFx.text_style(32, Color.WHITE)
         starting_timer.start()
         show_starting_next = false
 
@@ -176,6 +193,8 @@ func reset_ball_after_score():
     # Restart ball with new random direction
     start_ball()
     game_started = true
+    if trajectory_line:
+        trajectory_line.visible = show_trajectory
 
 func _handle_side_wall_hit(side: String) -> void:
     """Handle side wall hits and check if ball is stuck bouncing back and forth between walls"""
@@ -216,6 +235,8 @@ func _reset_ball_position() -> void:
     # Restart ball with new random direction
     start_ball()
     game_started = true
+    if trajectory_line:
+        trajectory_line.visible = show_trajectory
 
 func start_ball():
     randomize()
@@ -302,23 +323,37 @@ func _update_trajectory() -> void:
     
     # Set the trajectory points
     trajectory_line.points = points
-    
-    # Debug output
-    if points.size() > 0:
-        print("Trajectory updated with ", points.size(), " points")
 
 func _setup_trajectory_line() -> void:
     """Setup the trajectory line appearance"""
-    # Create the Line2D node if it doesn't exist
+    # Create the Line2D node if it doesn't exist. Deferred: the parent is still
+    # setting up its children when the ball is ready, and adding one then fails.
     if not trajectory_line:
         trajectory_line = Line2D.new()
-        get_parent().add_child(trajectory_line)
         trajectory_line.name = "TrajectoryLine"
+        _place_trajectory_line.call_deferred()
     
-    # Configure the line appearance
-    trajectory_line.width = 3.0  # Make it thicker for better visibility
-    trajectory_line.default_color = Color(1.0, 1.0, 0.0, 0.8)  # Brighter yellow with more opacity
+    # Configure the line appearance: white, fading out along the path
+    trajectory_line.width = 4.0
+    var fade := Gradient.new()
+    fade.offsets = PackedFloat32Array([0.0, 1.0])
+    fade.colors = PackedColorArray([Color(1, 1, 1, 0.55), Color(1, 1, 1, 0.0)])
+    trajectory_line.gradient = fade
+    trajectory_line.joint_mode = Line2D.LINE_JOINT_ROUND
+    trajectory_line.begin_cap_mode = Line2D.LINE_CAP_ROUND
     trajectory_line.antialiased = true
     trajectory_line.visible = show_trajectory
     
     print("Trajectory line created and configured. Visible: ", trajectory_line.visible)
+
+func _place_trajectory_line() -> void:
+    """Add the line just under the ball: over the table, under bats, ball and HUD"""
+    get_parent().add_child(trajectory_line)
+    get_parent().move_child(trajectory_line, get_index())
+
+func _bat_hit(collision: KinematicCollision2D) -> void:
+    """Sparks where the ball meets a bat, and the bat gives a little"""
+    GameFx.burst(get_parent(), collision.get_position(), SPARK, 12, 200.0, 0.35, 0.0)
+    var skin = collision.get_collider().get_node_or_null("Skin")
+    if skin:
+        skin.bump()

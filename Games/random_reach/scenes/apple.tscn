@@ -1,9 +1,8 @@
-[gd_scene load_steps=14 format=3 uid="uid://syhjbs7alt5a"]
+[gd_scene load_steps=12 format=3 uid="uid://syhjbs7alt5a"]
 
 [ext_resource type="Script" uid="uid://dlsvy52bgm6en" path="res://Games/random_reach/Scripts/apple.gd" id="1_47khk"]
 [ext_resource type="Texture2D" uid="uid://dkry1rm40uqso" path="res://Games/random_reach/Sprites/Collected.png" id="2_ydglg"]
 [ext_resource type="Texture2D" uid="uid://cpnm87t4uc6dt" path="res://Assets/Background/Unlock fun learning - Discover colorful fruit and vegetable flashcards today!.png" id="4_cak2t"]
-[ext_resource type="Shader" uid="uid://bthi1cjrt6sjr" path="res://Games/random_reach/scenes/apple.gdshader" id="5_cwodp"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_84dii"]
 atlas = ExtResource("2_ydglg")
@@ -71,10 +70,6 @@ animations = [{
 [sub_resource type="CircleShape2D" id="CircleShape2D_2d0uy"]
 radius = 26.0
 
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_buuis"]
-shader = ExtResource("5_cwodp")
-shader_parameter/progress = 0.0
-
 [node name="Area2D" type="Area2D"]
 script = ExtResource("1_47khk")
 
@@ -92,14 +87,6 @@ shape = SubResource("CircleShape2D_2d0uy")
 [node name="Timer" type="Timer" parent="."]
 wait_time = 5.0
 one_shot = true
-
-[node name="TimerCircle" type="ColorRect" parent="."]
-material = SubResource("ShaderMaterial_buuis")
-offset_left = -29.0
-offset_top = -29.0
-offset_right = 30.0
-offset_bottom = 30.0
-color = Color(0, 0.78303975, 0.783078, 0.08627451)
 
 [connection signal="body_entered" from="." to="." method="_on_body_entered"]
 [connection signal="body_exited" from="." to="." method="_on_body_exited"]

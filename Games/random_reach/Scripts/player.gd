@@ -82,6 +82,7 @@ var rom_y_bot: int
 
 # Preloaded resources
 var apple = preload("res://Games/random_reach/scenes/apple.tscn")
+const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
 var _flock: Node2D
 
 # Trunk compensation (TrunkMonitor): play pauses while the trunk is past the
@@ -114,6 +115,12 @@ func _ready() -> void:
 	_flock = preload("res://Games/random_reach/Scripts/sheep_flock.gd").new()
 	_flock.player = self
 	get_parent().add_child.call_deferred(_flock)
+	var meadow = preload("res://Games/random_reach/Scripts/meadow.gd").new()
+	meadow.is_3d = is_3d_mode
+	get_parent().add_child.call_deferred(meadow)
+	var fx = preload("res://Games/random_reach/Scripts/player_fx.gd").new()
+	fx.player = self
+	add_child(fx)
 	_setup_global_timer()
 	_trunk_feedback = preload("res://Main_screen/Scripts/trunk_feedback.gd").new()
 	get_parent().add_child.call_deferred(_trunk_feedback)
@@ -160,6 +167,7 @@ func _setup_ui() -> void:
 	_ui_nodes.game_over_label.hide()
 	_ui_nodes.color_rect.hide()
 	_ui_nodes.countdown_display.visible = false
+	GameFx.dim_behind(_ui_nodes.Paused)
 	# Note: _update_top_score_display() is now called after _auto_select_mode() in _ready()
 
 func _connect_signals() -> void:
@@ -480,6 +488,7 @@ func _on_apple_eaten() -> void:
 	if score < max_score:
 		score += 1
 		_ui_nodes.score_board.text = str(score)
+		GameFx.pop(_ui_nodes.score_board.get_parent())
 		if _audio_nodes.apple_sound:
 			_audio_nodes.apple_sound.play()
 
