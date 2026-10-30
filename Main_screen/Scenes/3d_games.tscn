@@ -1,177 +1,285 @@
-[gd_scene load_steps=9 format=3 uid="uid://dsn76tjtm17k5"]
+[gd_scene load_steps=3 format=3 uid="uid://dsn76tjtm17k5"]
 
-[ext_resource type="Script" uid="uid://b7uvb34c56wtj" path="res://Main_screen/Scripts/3d_games.gd" id="1_mxx4x"]
-[ext_resource type="Theme" uid="uid://87b78edsvd4i" path="res://Assets/Background/button_icon.tres" id="2_jcsql"]
-[ext_resource type="Texture2D" uid="uid://co0rmt1l8yn34" path="res://Assets/Background/image.png" id="2_qkk0p"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_t5h8i"]
-[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="5_sl8hk"]
-[ext_resource type="Texture2D" uid="uid://bwyex75l5pbty" path="res://Assets/Background/Panda with blank sign cartoon Vector Image on VectorStock.png" id="6_r8isq"]
-[ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="7_5enis"]
-[ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="8_670mt"]
+[ext_resource type="Script" uid="uid://dhivisvjw7k6u" path="res://Main_screen/Scripts/3d_games.gd" id="1_menu"]
+[ext_resource type="Texture2D" uid="uid://dppvb2e67wfqs" path="res://Assets/Background/image.png" id="2_bg"]
 
-[node name="3dGames" type="Node2D"]
-script = ExtResource("1_mxx4x")
+[node name="3dGames" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_menu")
 
-[node name="TextureRect" type="TextureRect" parent="."]
-offset_right = 1148.0
-offset_bottom = 657.0
-texture = ExtResource("2_qkk0p")
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_bg")
 expand_mode = 1
+stretch_mode = 6
 
-[node name="RandomReach3D" type="Button" parent="."]
-offset_left = 188.0
-offset_top = 181.0
-offset_right = 396.0
-offset_bottom = 255.0
-theme = ExtResource("2_jcsql")
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "RandomReach3D"
+[node name="Layout" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 58
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 22
 
-[node name="Exit" type="Button" parent="."]
-offset_left = 967.0
-offset_top = 542.0
-offset_right = 1131.0
-offset_bottom = 621.0
-theme = ExtResource("5_sl8hk")
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 20
+[node name="VBox" type="VBoxContainer" parent="Layout"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 18
+
+[node name="Header" type="HBoxContainer" parent="Layout/VBox"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="PatientChip" type="PanelContainer" parent="Layout/VBox/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 48)
+layout_mode = 2
+
+[node name="LoggedInAs" type="Label" parent="Layout/VBox/Header/PatientChip"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Patient:"
+horizontal_alignment = 1
+vertical_alignment = 1
+text_overrun_behavior = 3
+
+[node name="LeftSpacer" type="Control" parent="Layout/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="ModeSwitch" type="HBoxContainer" parent="Layout/VBox/Header"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Mode2D" type="Button" parent="Layout/VBox/Header/ModeSwitch" groups=["GameButtons"]]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 52)
+layout_mode = 2
+text = "2D games"
+
+[node name="Mode3D" type="Button" parent="Layout/VBox/Header/ModeSwitch" groups=["GameButtons"]]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 52)
+layout_mode = 2
+text = "3D games"
+
+[node name="RightSpacer" type="Control" parent="Layout/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="HandChip" type="PanelContainer" parent="Layout/VBox/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 48)
+layout_mode = 2
+
+[node name="TrainingLabel" type="Label" parent="Layout/VBox/Header/HandChip"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+text_overrun_behavior = 3
+
+[node name="Body" type="HBoxContainer" parent="Layout/VBox"]
+custom_minimum_size = Vector2(0, 360)
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 20
+
+[node name="GamesCard" type="PanelContainer" parent="Layout/VBox/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VBox" type="VBoxContainer" parent="Layout/VBox/Body/GamesCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="GamesTitle" type="Label" parent="Layout/VBox/Body/GamesCard/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Games"
+
+[node name="Grid" type="GridContainer" parent="Layout/VBox/Body/GamesCard/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 16
+columns = 3
+
+[node name="RandomReach3D" type="Button" parent="Layout/VBox/Body/GamesCard/VBox/Grid" groups=["GameButtons"]]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Random Reach"
+autowrap_mode = 3
+
+[node name="FlyThrough3D" type="Button" parent="Layout/VBox/Body/GamesCard/VBox/Grid" groups=["GameButtons"]]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Fly Through"
+autowrap_mode = 3
+
+[node name="Jumpify" type="Button" parent="Layout/VBox/Body/GamesCard/VBox/Grid" groups=["GameButtons"]]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Jumpify"
+autowrap_mode = 3
+
+[node name="ProgressCard" type="PanelContainer" parent="Layout/VBox/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(285, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Layout/VBox/Body/ProgressCard"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="ProgressTitle" type="Label" parent="Layout/VBox/Body/ProgressCard/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Progress"
+
+[node name="ProgressButtons" type="VBoxContainer" parent="Layout/VBox/Body/ProgressCard/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="Assessment" type="Button" parent="Layout/VBox/Body/ProgressCard/VBox/ProgressButtons" groups=["GameButtons"]]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Assessment"
+autowrap_mode = 3
+
+[node name="Results" type="Button" parent="Layout/VBox/Body/ProgressCard/VBox/ProgressButtons" groups=["GameButtons"]]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Results"
+autowrap_mode = 3
+
+[node name="Filler" type="Control" parent="Layout/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Footer" type="HBoxContainer" parent="Layout/VBox"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Logout" type="Button" parent="Layout/VBox/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(190, 60)
+layout_mode = 2
+text = "Log out"
+
+[node name="FooterSpacer" type="Control" parent="Layout/VBox/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Exit" type="Button" parent="Layout/VBox/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 60)
+layout_mode = 2
 text = "Exit"
 
-[node name="Jumpify" type="Button" parent="."]
-offset_left = 729.0
-offset_top = 178.0
-offset_right = 930.0
-offset_bottom = 250.0
-theme = ExtResource("2_jcsql")
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "Jumpify"
+[node name="HandLayer" type="CanvasLayer" parent="."]
+layer = 5
 
-[node name="FlyThrough3D" type="Button" parent="."]
-offset_left = 460.0
-offset_top = 181.0
-offset_right = 660.0
-offset_bottom = 255.0
-theme = ExtResource("2_jcsql")
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "FlyThrough3D"
-
-[node name="Logout" type="Button" parent="."]
-offset_left = 6.0
-offset_top = 543.0
-offset_right = 181.0
-offset_bottom = 623.0
-theme = ExtResource("5_sl8hk")
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 20
-text = "   ⬅️ Log-out    "
-
-[node name="Assessment" type="Button" parent="."]
-offset_left = 337.0
-offset_top = 291.0
-offset_right = 528.0
-offset_bottom = 370.0
-theme = ExtResource("2_jcsql")
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "Assessment"
-
-[node name="Results" type="Button" parent="."]
-offset_left = 586.0
-offset_top = 291.0
-offset_right = 773.0
-offset_bottom = 368.0
-theme = ExtResource("2_jcsql")
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "Results"
-
-[node name="TrainingLabel" type="Label" parent="."]
-offset_left = 387.0
-offset_top = 88.0
-offset_right = 741.0
-offset_bottom = 125.0
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 22
-
-[node name="2D_mode" type="CheckButton" parent="."]
-offset_left = 421.0
-offset_top = 126.0
-offset_right = 680.0
-offset_bottom = 161.0
-theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 20
-text = "Switch to 2D mode"
-
-[node name="Logo" type="TextureRect" parent="."]
-offset_left = 415.0
-offset_top = 1.0
-offset_right = 673.0
-offset_bottom = 68.0
-texture = ExtResource("6_r8isq")
-expand_mode = 1
-
-[node name="LoggedInAs" type="Label" parent="Logo"]
-layout_mode = 0
-offset_left = 31.0
-offset_top = 27.0
-offset_right = 218.0
-offset_bottom = 57.0
-theme_override_colors/font_color = Color(0.24313726, 0.24313726, 0.24313726, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 22
-text = "Patient name :"
-
-[node name="HandSelectionPopup" type="TextureRect" parent="."]
+[node name="HandSelectionPopup" type="Control" parent="HandLayer"]
+unique_name_in_owner = true
 visible = false
-offset_left = 350.0
-offset_top = 199.0
-offset_right = 771.0
-offset_bottom = 412.0
-texture = ExtResource("7_5enis")
-expand_mode = 1
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 
-[node name="Label" type="Label" parent="HandSelectionPopup"]
-layout_mode = 0
-offset_left = 30.0
-offset_top = 73.0
-offset_right = 391.0
-offset_bottom = 99.0
-theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 18
+[node name="Dim" type="ColorRect" parent="HandLayer/HandSelectionPopup"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.55)
+
+[node name="Center" type="CenterContainer" parent="HandLayer/HandSelectionPopup"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="HandCard" type="PanelContainer" parent="HandLayer/HandSelectionPopup/Center"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="HandLayer/HandSelectionPopup/Center/HandCard"]
+layout_mode = 2
+theme_override_constants/separation = 24
+
+[node name="HandQuestion" type="Label" parent="HandLayer/HandSelectionPopup/Center/HandCard/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
 text = "Which hand do you want to train?"
+horizontal_alignment = 1
 
-[node name="HBoxContainer" type="HBoxContainer" parent="HandSelectionPopup"]
-layout_mode = 0
-offset_left = 84.0
-offset_top = 114.0
-offset_right = 344.0
-offset_bottom = 154.0
-theme = ExtResource("8_670mt")
-theme_override_constants/separation = 25
-
-[node name="LeftButton" type="Button" parent="HandSelectionPopup/HBoxContainer"]
+[node name="Buttons" type="HBoxContainer" parent="HandLayer/HandSelectionPopup/Center/HandCard/VBox"]
 layout_mode = 2
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "  Left hand  "
+theme_override_constants/separation = 20
+alignment = 1
 
-[node name="RightButton" type="Button" parent="HandSelectionPopup/HBoxContainer"]
+[node name="LeftButton" type="Button" parent="HandLayer/HandSelectionPopup/Center/HandCard/VBox/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(210, 76)
 layout_mode = 2
-theme_override_fonts/font = ExtResource("2_t5h8i")
-text = "  Right hand  "
+text = "Left hand"
 
-[connection signal="pressed" from="RandomReach3D" to="." method="_on_random_reach_3d_pressed"]
-[connection signal="pressed" from="Exit" to="." method="_on_exit_pressed"]
-[connection signal="pressed" from="Jumpify" to="." method="_on_jumpify_pressed"]
-[connection signal="pressed" from="FlyThrough3D" to="." method="_on_fly_through_3d_pressed"]
-[connection signal="pressed" from="Logout" to="." method="_on_logout_pressed"]
-[connection signal="pressed" from="Assessment" to="." method="_on_assessment_pressed"]
-[connection signal="pressed" from="Results" to="." method="_on_results_pressed"]
-[connection signal="toggled" from="2D_mode" to="." method="_on_2d_mode_toggled"]
-[connection signal="pressed" from="HandSelectionPopup/HBoxContainer/LeftButton" to="." method="_on_left_button_pressed"]
-[connection signal="pressed" from="HandSelectionPopup/HBoxContainer/RightButton" to="." method="_on_right_button_pressed"]
+[node name="RightButton" type="Button" parent="HandLayer/HandSelectionPopup/Center/HandCard/VBox/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(210, 76)
+layout_mode = 2
+text = "Right hand"
+
+[connection signal="pressed" from="Layout/VBox/Header/ModeSwitch/Mode2D" to="." method="_on_mode_2d_pressed"]
+[connection signal="pressed" from="Layout/VBox/Header/ModeSwitch/Mode3D" to="." method="_on_mode_3d_pressed"]
+[connection signal="pressed" from="Layout/VBox/Body/GamesCard/VBox/Grid/RandomReach3D" to="." method="_on_random_reach_3d_pressed"]
+[connection signal="pressed" from="Layout/VBox/Body/GamesCard/VBox/Grid/FlyThrough3D" to="." method="_on_fly_through_3d_pressed"]
+[connection signal="pressed" from="Layout/VBox/Body/GamesCard/VBox/Grid/Jumpify" to="." method="_on_jumpify_pressed"]
+[connection signal="pressed" from="Layout/VBox/Body/ProgressCard/VBox/ProgressButtons/Assessment" to="." method="_on_assessment_pressed"]
+[connection signal="pressed" from="Layout/VBox/Body/ProgressCard/VBox/ProgressButtons/Results" to="." method="_on_results_pressed"]
+[connection signal="pressed" from="Layout/VBox/Footer/Logout" to="." method="_on_logout_pressed"]
+[connection signal="pressed" from="Layout/VBox/Footer/Exit" to="." method="_on_exit_pressed"]
+[connection signal="pressed" from="HandLayer/HandSelectionPopup/Center/HandCard/VBox/Buttons/LeftButton" to="." method="_on_left_button_pressed"]
+[connection signal="pressed" from="HandLayer/HandSelectionPopup/Center/HandCard/VBox/Buttons/RightButton" to="." method="_on_right_button_pressed"]

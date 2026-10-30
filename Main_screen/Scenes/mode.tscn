@@ -1,78 +1,82 @@
-[gd_scene load_steps=7 format=3 uid="uid://qun5skrf4fwq"]
+[gd_scene load_steps=3 format=3 uid="uid://qun5skrf4fwq"]
 
-[ext_resource type="Script" uid="uid://djkm422xonvir" path="res://Main_screen/Scripts/mode.gd" id="1_pnk74"]
-[ext_resource type="Texture2D" uid="uid://b3vybovnn7ifm" path="res://Assets/Background/modebg-2.png" id="2_sarbq"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_ymswy"]
-[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="4_ymswy"]
-[ext_resource type="Texture2D" uid="uid://bryy1sgjoxil5" path="res://Assets/Background/ .png" id="5_c4lh5"]
-[ext_resource type="Theme" uid="uid://87b78edsvd4i" path="res://Assets/Background/button_icon.tres" id="6_xel0p"]
+[ext_resource type="Script" uid="uid://cw11c6bsn3lna" path="res://Main_screen/Scripts/mode.gd" id="1_pnk74"]
+[ext_resource type="Texture2D" uid="uid://dmr2dtuyollw4" path="res://Assets/Background/modebg-2.png" id="2_sarbq"]
 
-[node name="Mode" type="Node2D"]
+[node name="Mode" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_pnk74")
 
-[node name="TextureRect" type="TextureRect" parent="."]
-offset_right = 1155.0
-offset_bottom = 649.0
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
 texture = ExtResource("2_sarbq")
 expand_mode = 1
+stretch_mode = 6
 
-[node name="3D Games" type="Button" parent="."]
-offset_left = 600.0
-offset_top = 237.0
-offset_right = 873.0
-offset_bottom = 365.0
-theme = ExtResource("4_ymswy")
-theme_override_fonts/font = ExtResource("3_ymswy")
-theme_override_font_sizes/font_size = 35
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="VBox" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+theme_override_constants/separation = 36
+
+[node name="Heading" type="VBoxContainer" parent="Center/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="Center/VBox/Heading"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Choose game mode"
+horizontal_alignment = 1
+
+[node name="Patient" type="Label" parent="Center/VBox/Heading"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.8)
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="Modes" type="HBoxContainer" parent="Center/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 36
+alignment = 1
+
+[node name="Games2D" type="Button" parent="Center/VBox/Modes"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(320, 200)
+layout_mode = 2
+text = "2D Games"
+
+[node name="Games3D" type="Button" parent="Center/VBox/Modes"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(320, 200)
+layout_mode = 2
 text = "3D Games"
 
-[node name="2D Games" type="Button" parent="."]
-offset_left = 293.0
-offset_top = 237.0
-offset_right = 568.0
-offset_bottom = 363.0
-theme = ExtResource("4_ymswy")
-theme_override_fonts/font = ExtResource("3_ymswy")
-theme_override_font_sizes/font_size = 35
-keep_pressed_outside = true
-text = "2D Games
-"
+[node name="MainMenu" type="Button" parent="Center/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 62)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Main menu"
 
-[node name="Window" type="Window" parent="."]
-initial_position = 1
-size = Vector2i(275, 150)
-visible = false
-theme_override_fonts/title_font = ExtResource("3_ymswy")
-
-[node name="Logo" type="TextureRect" parent="."]
-offset_left = 266.0
-offset_top = 9.0
-offset_right = 882.0
-offset_bottom = 247.0
-texture = ExtResource("5_c4lh5")
-expand_mode = 1
-
-[node name="Label" type="Label" parent="Logo"]
-layout_mode = 0
-offset_left = 94.0
-offset_top = 79.0
-offset_right = 534.0
-offset_bottom = 145.0
-theme_override_colors/font_color = Color(0.19793725, 0.19793722, 0.19793722, 1)
-theme_override_fonts/font = ExtResource("3_ymswy")
-theme_override_font_sizes/font_size = 40
-text = "Select game mode !"
-
-[node name="Main_menu" type="Button" parent="."]
-offset_left = 450.0
-offset_top = 417.0
-offset_right = 727.0
-offset_bottom = 515.0
-theme = ExtResource("6_xel0p")
-theme_override_fonts/font = ExtResource("3_ymswy")
-theme_override_font_sizes/font_size = 25
-text = "MAIN MENU"
-
-[connection signal="pressed" from="3D Games" to="." method="_on_3d_games_pressed"]
-[connection signal="pressed" from="2D Games" to="." method="_on_2d_games_pressed"]
-[connection signal="pressed" from="Main_menu" to="." method="_on_main_menu_pressed"]
+[connection signal="pressed" from="Center/VBox/Modes/Games2D" to="." method="_on_2d_games_pressed"]
+[connection signal="pressed" from="Center/VBox/Modes/Games3D" to="." method="_on_3d_games_pressed"]
+[connection signal="pressed" from="Center/VBox/MainMenu" to="." method="_on_main_menu_pressed"]

@@ -5,6 +5,7 @@ extends CanvasLayer
 ## the app restarts.
 
 const FONT_SIZE := 20
+const GameButton := preload("res://Main_screen/Scripts/game_button.gd")
 
 var _status: Label
 var _result: Label
@@ -29,30 +30,30 @@ func _ready() -> void:
 
 	_status = _label()
 	box.add_child(_status)
-	_button = Button.new()
-	_button.text = "Capture neutral posture"
-	_button.add_theme_font_size_override("font_size", FONT_SIZE)
-	_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_button.pressed.connect(_on_capture_pressed)
-	box.add_child(_button)
-	_clear_zero = Button.new()
-	_clear_zero.text = "Clear zero"
-	_clear_zero.add_theme_font_size_override("font_size", FONT_SIZE)
-	_clear_zero.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_clear_zero.pressed.connect(TrunkMonitor.clear_zero)
-	box.add_child(_clear_zero)
-	_pick_button = Button.new()
-	_pick_button.text = "Select person"
-	_pick_button.add_theme_font_size_override("font_size", FONT_SIZE)
-	_pick_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_pick_button.pressed.connect(_open_picker)
-	box.add_child(_pick_button)
+	# One row, so the panel fits between Log out and Exit under the menu's cards.
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	box.add_child(row)
+	_button = _row_button(row, "Capture neutral posture", _on_capture_pressed)
+	_clear_zero = _row_button(row, "Clear zero", TrunkMonitor.clear_zero)
+	_pick_button = _row_button(row, "Select person", _open_picker)
 	_result = _label()
 	box.add_child(_result)
 
 	TrunkMonitor.updated.connect(_refresh)
 	TrunkMonitor.enabled_changed.connect(func(_on): _refresh())
 	_refresh()
+
+
+func _row_button(row: HBoxContainer, text: String, on_pressed: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size.y = 50
+	b.pressed.connect(on_pressed)
+	row.add_child(b)
+	GameButton.apply(b, GameButton.TEAL, 15)
+	return b
 
 
 func _label() -> Label:

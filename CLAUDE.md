@@ -145,7 +145,7 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 ## Critical Implementation Details
 
 ### Adding a New Game
-0. Launch it from the menu with `AssessmentGate.play(get_tree(), scene)`, never `change_scene_*` directly
+0. Launch it from the menu with `AssessmentGate.play(get_tree(), scene)`, never `change_scene_*` directly; give it a tile in the menu's .tscn and a row in its `_game_tiles()` (colour + picture)
 1. Call `Manager.create_game_log_file(game_name, patient_id)` when play starts and store the returned handle (session/trial numbering and the debug `vvv` id are handled by `SessionLog`)
 2. Log rows via the handle at ~0.02s intervals using a Timer node
 3. Call `SessionLog.hit()` / `SessionLog.miss()` per target, and `SessionLog.end_trial()` at game over
@@ -298,6 +298,12 @@ for big messages, heartbeats both ways.
   `/etc/sudoers.d/noark-tracker` (`radxa ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block restart noark-tracker`).
   Main-menu buttons are styled in code by `Main_screen/Scripts/game_button.gd`
   (`GameButton.apply(button, colour, size)`), layout stays in the .tscn.
+  The 2D/3D game menus (`select_game.tscn`, `3d_games.tscn`) both extend `game_menu.gd`:
+  header (patient, 2D/3D switch, training hand), a Games card kept apart from the
+  Progress card (Assessment, Results, Trunk Angles), Log out / Exit, the hand question.
+  Each menu's `_game_tiles()` gives `[button, colour, picture]`; pictures come from
+  `menu_icons.gd` — `MenuIcons.art()` shrinks a game's own sprite, `MenuIcons.svg()`
+  rasterises an SVG kept there (the games drawn in code, and the tools), no import step.
   `stream_type` in settings.json picks `ble` (the default; Godot on a tablet)
   or `udp` (Godot on the board), also in the Settings screen; the tracker and Godot each read it, in one place each.
 - Python: `protocol.py` (wire format), `link.py` (acks, chunks, heartbeat,

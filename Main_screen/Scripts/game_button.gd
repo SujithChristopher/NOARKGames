@@ -18,6 +18,8 @@ const ORANGE := Color("f0941c")
 const PURPLE := Color("8a5bd6")
 const RED := Color("e0464a")
 const TEAL := Color("1c9e93")
+const PINK := Color("e0559a")
+const SLATE := Color("5a6e94")   # tools and navigation, so games stand out
 
 
 static func apply(button: Button, color: Color, font_size: int = 24) -> void:
@@ -80,7 +82,7 @@ static func _add_shine(button: Button) -> void:
 		var sink := LIP - PRESSED_LIP if button.button_pressed or _held(button) else 0
 		var face_h := button.size.y - LIP
 		shine.position = Vector2(10, 4 + sink)
-		shine.size = Vector2(max(0.0, button.size.x - 20), face_h * 0.38)
+		shine.size = Vector2(max(0.0, button.size.x - 20), min(face_h * 0.38, 40.0))
 	button.resized.connect(place)
 	button.button_down.connect(func(): button.set_meta("held", true); place.call())
 	button.button_up.connect(func(): button.set_meta("held", false); place.call())
@@ -126,3 +128,50 @@ static func style_line_edit(edit: LineEdit, font_size: int = 22) -> void:
 	edit.add_theme_color_override("font_color", Color.WHITE)
 	edit.add_theme_color_override("font_placeholder_color", Color(1, 1, 1, 0.5))
 	edit.add_theme_color_override("caret_color", Color("ffd54a"))
+
+
+## The cards a menu is laid out on: rounded dark glass, so the background shows
+## through without fighting the buttons on it. Small radius and pad make a chip.
+static func style_card(panel: PanelContainer, radius: int = 24, pad: int = 20,
+		opacity: float = 0.55) -> void:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.05, 0.07, 0.12, opacity)
+	sb.set_border_width_all(2)
+	sb.border_color = Color(1, 1, 1, 0.18)
+	sb.set_corner_radius_all(radius)
+	sb.corner_detail = 10
+	sb.set_content_margin_all(pad)
+	sb.shadow_color = Color(0, 0, 0, 0.25)
+	sb.shadow_size = 8
+	sb.shadow_offset = Vector2(0, 4)
+	sb.anti_aliasing = true
+	panel.add_theme_stylebox_override("panel", sb)
+
+
+## A picture on the button: above the text on a tile, before it on a wide
+## button. It scales with the button, up to max_width.
+static func set_icon(button: Button, icon: Texture2D, above_text: bool, max_width: int = 0) -> void:
+	button.icon = icon
+	button.expand_icon = true
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	if above_text:
+		button.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		# The gloss would wash out the top of the picture.
+		var shine := button.get_node_or_null("Shine")
+		if shine:
+			shine.modulate.a = 0.45
+	else:
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.add_theme_constant_override("h_separation", 12)
+	if max_width > 0:
+		button.add_theme_constant_override("icon_max_width", max_width)
+
+
+## Titles and chips in the buttons' font, white on a dark outline.
+static func style_label(label: Label, font_size: int = 22) -> void:
+	label.add_theme_font_override("font", FONT)
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", Color.WHITE)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	label.add_theme_constant_override("outline_size", max(4, font_size / 4))
