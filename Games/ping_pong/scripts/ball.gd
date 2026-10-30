@@ -13,7 +13,7 @@ var status = ""
 @export var speed_multiplier = 1
 @onready var player_score_label = $"../Ball_Image/PlayerScore"
 @onready var computer_score_label: Label = $"../ComputerScore"
-@onready var top_score_label = $"../CanvasLayer/TextureRect/TopScoreLabel"
+@onready var player = $"../player"
 
 # Add these variables for score display
 @onready var score_display_label: Label = $"../CanvasLayer/ScoreDisplayLabel"
@@ -58,9 +58,7 @@ func _physics_process(delta):
                 
             "top":
                 player_score += 1
-                ScoreManager.update_top_score(GlobalSignals.current_patient_id, "PingPong", player_score)
-                var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, "PingPong")
-                top_score_label.text = str(top_score)
+                player.update_top_score_display()   # saved by its GameSession when the trial ends
                 status = "top"
                 GlobalSignals.hit_top = collision_point
                 print("Hit top at:", collision_point)
@@ -189,12 +187,7 @@ func reset_ball_after_score():
     
     # Wait 2 seconds for text display (1s score + 1s starting)
     await get_tree().create_timer(2.0).timeout
-    
-    # Restart ball with new random direction
-    start_ball()
-    game_started = true
-    if trajectory_line:
-        trajectory_line.visible = show_trajectory
+    _restart()
 
 func _handle_side_wall_hit(side: String) -> void:
     """Handle side wall hits and check if ball is stuck bouncing back and forth between walls"""
@@ -231,12 +224,22 @@ func _reset_ball_position() -> void:
     
     # Wait a brief moment then restart
     await get_tree().create_timer(0.5).timeout
-    
-    # Restart ball with new random direction
+    _restart()
+
+## After a reset: a new random direction, and back in play unless the game was
+## paused or ended meanwhile (resuming sets game_started again).
+func _restart() -> void:
     start_ball()
-    game_started = true
+    game_started = player.session.playing and not player.session.paused
     if trajectory_line:
         trajectory_line.visible = show_trajectory
+
+## A new trial: both scores and their labels back to 0.
+func reset_scores() -> void:
+    player_score = 0
+    computer_score = 0
+    player_score_label.text = "0"
+    computer_score_label.text = "Computer 0"
 
 func start_ball():
     randomize()

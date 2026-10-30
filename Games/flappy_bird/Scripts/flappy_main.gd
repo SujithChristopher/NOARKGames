@@ -5,7 +5,6 @@ const SCROLL_SPEED: float = 7.0
 const PIPE_DELAY: int = 50
 const PIPE_RANGE: int = 200
 const TIMER_DELAY: int = 2
-const LOG_INTERVAL: float = 0.02
 const INITIAL_HEALTH: int = 3
 
 # Signals
@@ -17,11 +16,16 @@ signal game_started
 # Preloaded resources
 @onready var pipe_scene = preload("res://Games/flappy_bird/Scenes/pipe.tscn")
 const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
+const GameSession := preload("res://Main_screen/Scripts/game_session.gd")
+const COLUMNS := [
+	'score', 'missed_count', 'status', 'error_status', 'packets',
+	'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
+	'player_x', 'player_y', 'player_z', 'pause_state',
+]
 
 # Node references - organized by functionality
 @onready var _timer_nodes = {
 	"pipe_timer": $PipeTimer,
-	"log_timer": Timer.new()
 }
 
 @onready var _player_nodes = {
@@ -54,7 +58,6 @@ var can_score: bool = true
 var game_running: bool = false
 var game_over: bool = false
 var scroll: float = 0.0
-var score: int = 0
 var missed_count: int = 0  # New missed counter variable
 var screen_size: Vector2i
 var ground_height: int
@@ -62,9 +65,7 @@ var pipes: Array = []
 var health: int = INITIAL_HEALTH
 @onready var plus_one = $"+1"
 
-# Timer and countdown variables
-var countdown_time: int = 0
-var countdown_active: bool = false
+var session: GameSession
 var is_3d_mode := false
 var pause_state: int = 1
 
@@ -83,7 +84,6 @@ var game_z: float
 var status: String = "idle"
 var error_status: String = "null"
 var packets: String = "null"
-var game_log_file
 var pilot_node: CharacterBody2D
 var game_name: String = "FlyThrough"  # Dynamic game name that changes with mode
 
@@ -94,23 +94,16 @@ func _ready() -> void:
 	_setup_timers()
 	_setup_ui()
 	_connect_signals()
-	_setup_logging()
-	_auto_select_mode()  # Must be called BEFORE _initialize_scoring() to set correct game_name
-	_initialize_scoring()
-	_setup_global_timer()
-
-func _setup_global_timer() -> void:
-	# Add the global timer selector to this game
-	GlobalTimerManager.add_timer_selector_to_game(self)
-
-	# Connect to global timer signals
-	GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
-	GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
+	_auto_select_mode()  # sets game_name, which the session logs and scores under
+	session = GameSession.new(game_name, COLUMNS, _log_row, _ui_nodes.countdown_display)
+	session.started.connect(_start_game)
+	session.time_up.connect(show_game_over)
+	add_child(session)
+	_update_top_score_display()
 
 func _initialize_game_state() -> void:
 	game_running = false
 	game_over = false
-	score = 0
 	missed_count = 0  # Initialize missed counter
 	scroll = 0.0
 	health = INITIAL_HEALTH
@@ -131,21 +124,16 @@ func _setup_screen_and_ground() -> void:
 
 func _setup_timers() -> void:
 	_timer_nodes.pipe_timer.wait_time = TIMER_DELAY / 0.5
-	_timer_nodes.log_timer.wait_time = LOG_INTERVAL
-	_timer_nodes.log_timer.autostart = true
-	add_child(_timer_nodes.log_timer)
 
 func _setup_ui() -> void:
 	_ui_nodes.game_over_label.visible = false
 	_ui_nodes.game_over_label.hide()
-	_ui_nodes.countdown_display.visible = false
 	_ui_nodes.missed_label.text = "Missed 0"  # Initialize missed label
 	GameFx.outline(_ui_nodes.missed_label)
 	GameFx.outline(_ui_nodes.score_label, 5)
 	plus_one.label_settings = GameFx.text_style(34, GameFx.GOLD)
 	GameFx.dim_behind(_ui_nodes.Paused_screen)
 	GameFx.dim_behind(_ui_nodes.game_over_label)
-	_update_top_score_display()
 
 func _connect_signals() -> void:
    
@@ -157,104 +145,46 @@ func _connect_signals() -> void:
 	# Game connections
 	_panel_nodes.game_over_scene.restart_games.connect(restart_game)
 
-func _setup_logging() -> void:
-	pass   # the trial log opens at game start (_setup_game_logging)
-
-func _initialize_scoring() -> void:
-	_update_top_score_display()
-
 func _update_top_score_display() -> void:
-	var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, game_name)
-	_ui_nodes.top_score_label.text = str(top_score)
+	_ui_nodes.top_score_label.text = str(maxi(session.best_score(), session.score))
 
 func _update_game_name() -> void:
 	"""Update game name based on current mode for proper file saving"""
 	game_name = "FlyThrough3D" if is_3d_mode else "FlyThrough"
 
-# Global Timer Callbacks
-func _on_global_timer_play_pressed(time: int) -> void:
-	GlobalTimer.start_timer()
+func _start_game() -> void:
 	game_running = true
-	countdown_time = time
-	_start_game_with_timer(time)
-	_setup_game_logging()
-
-func _on_global_timer_close_pressed() -> void:
-	game_running = true
-	_ui_nodes.countdown_display.hide()
-	_start_game_without_timer()
-	_setup_game_logging()
-	
-	
-func _start_game_with_timer(time: int) -> void:
-	countdown_active = true
-	countdown_time = time
-	_ui_nodes.countdown_display.visible = true
-	_ui_nodes.countdown_display.set_time(time)  
-	GlobalTimerManager.start_countdown_with_time(time)
-	GlobalTimerManager.start_countdown_with_time(time)
+	pause_state = 1
 	_timer_nodes.pipe_timer.start()
-
-func _start_game_without_timer() -> void:
-	countdown_active = false
-	GlobalTimer.start_timer()
-	GlobalTimerManager.start_game_without_timer()
-	_timer_nodes.pipe_timer.start()
-
-func _on_global_countdown_finished() -> void:
-	show_game_over()
-
-func _on_global_countdown_updated(time_left: int) -> void:
-	countdown_time = time_left
-	_ui_nodes.countdown_display.update_time(time_left)
-
-func _setup_game_logging() -> void:
-	_timer_nodes.log_timer.timeout.connect(_on_log_timer_timeout)
-	# Use the dynamic game_name that changes with mode
-	game_log_file = Manager.create_game_log_file(game_name, GlobalSignals.current_patient_id)
-	game_log_file.store_csv_line(PackedStringArray([
-		'epochtime', 'score', 'missed_count', 'status', 'error_status', 'packets',
-		'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
-		'player_x', 'player_y', 'player_z', 'pause_state'
-	]))
 
 func _on_PauseButton_pressed() -> void:
 	_ui_nodes.Paused_screen.show()
 	_pause_game()
 
 func _pause_game() -> void:
-	GlobalTimer.pause_timer()
-	GlobalTimerManager.pause_countdown()
+	session.pause()
 	game_running = false
 	pause_state = 0
 
 func _resume_game() -> void:
-	GlobalTimer.resume_timer()
-	GlobalTimerManager.resume_countdown()
+	session.resume()
 	game_running = true
 	pause_state = 1
 
 func show_game_over() -> void:
-	MusicManager.play_sound_effect("game_over")
-	_ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
-	var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, game_name)
-	_ui_nodes.high_score.text = str(top_score)
-	print("Game Over!")
 	game_running = false
-	SessionLog.end_trial()
-	save_final_score_to_log(score)
-	GlobalTimer.stop_timer()
+	var best := session.finish(["Total Missed: " + str(missed_count)])
+	_ui_nodes.current_score.text = "CURRENT SCORE - " + str(session.score)
+	_ui_nodes.high_score.text = str(best)
 	_ui_nodes.game_over_label.visible = true
 
 func _on_logout_button_pressed() -> void:
-	GlobalTimerManager.remove_timer_selector_from_game()
-	get_tree().paused = false
-	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+	session.to_menu()
 
 func _on_retry_button_pressed() -> void:
 	get_tree().paused = false
 	_ui_nodes.game_over_label.hide()
-	score = 0
+	session.retry()
 	missed_count = 0  # Reset missed counter
 	_ui_nodes.score_label.text = "0"
 	_ui_nodes.missed_label.text = "Missed 0"  # Reset missed label
@@ -266,12 +196,8 @@ func _on_retry_button_pressed() -> void:
 		pipe.queue_free()
 	pipes.clear()
 
-	# Reset game state
 	game_running = false
-	countdown_active = false
-
-	# Show timer selector for retry
-	GlobalTimerManager.show_timer_selector_for_retry()
+	_update_top_score_display()
 
 func _process(delta: float) -> void:
 	if not game_running:
@@ -362,13 +288,13 @@ func _setup_pipe_signals(pipe: Node) -> void:
 func restart_game() -> void:
 	game_running = true
 	game_over = false
-	score = 0
+	session.score = 0
 	missed_count = 0  # Reset missed counter
 	health = INITIAL_HEALTH
 	_reset_health_display()
 	_timer_nodes.pipe_timer.start()
 	game_started.emit()
-	_ui_nodes.score_label.text = str(score)
+	_ui_nodes.score_label.text = str(session.score)
 	_ui_nodes.missed_label.text = "Missed 0"  # Reset missed label
 
 func _reset_health_display() -> void:
@@ -420,7 +346,7 @@ func scored(pipe: Node = null) -> void:
 		return  
 	can_score = false  
 	MusicManager.play_sound_effect("scored")
-	score += 1
+	session.score += 1
 	SessionLog.hit()
 	if is_instance_valid(pipe):
 		pipe.celebrate()
@@ -436,42 +362,24 @@ func scored(pipe: Node = null) -> void:
 		plus_one.visible = false
 	)
 
-	ScoreManager.update_top_score(GlobalSignals.current_patient_id, game_name, score)
 	_update_top_score_display()
 	status = "reached"
-	_ui_nodes.score_label.text = str(score)
+	_ui_nodes.score_label.text = str(session.score)
 	GameFx.pop(_ui_nodes.score_label.get_parent())
 	await get_tree().create_timer(0.5).timeout
 	can_score = true
 
 func _on_logout_pressed() -> void:
 	MusicManager.play_music("main")
-	GlobalTimer.stop_timer()
-	GlobalTimerManager.remove_timer_selector_from_game()
-	if not is_3d_mode:
-		get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
-	else:
-		get_tree().change_scene_to_file("res://Main_screen/Scenes/3d_games.tscn")
+	session.to_menu()
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		if game_log_file:
-			game_log_file.close()
-		GlobalTimerManager.remove_timer_selector_from_game()
-
-func save_final_score_to_log(score: int) -> void:
-	if game_log_file:
-		game_log_file.store_line("Final Score: " + str(score))
-		game_log_file.store_line("Total Missed: " + str(missed_count))
-		game_log_file.flush()
-
-func _on_log_timer_timeout() -> void:
-	if game_log_file:
-		game_log_file.store_csv_line(PackedStringArray([
-			Time.get_unix_time_from_system(), score, missed_count, status, error_status, packets,
-			str(pos_x), str(pos_y), str(pos_z), str(target_x), str(target_y), str(target_z),
-			str(game_x), str(game_y), str(game_z), str(pause_state)
-		]))
+## One raw CSV row, in COLUMNS order (GameSession adds epochtime).
+func _log_row() -> Array:
+	return [
+		session.score, missed_count, status, error_status, packets,
+		pos_x, pos_y, pos_z, target_x, target_y, target_z,
+		game_x, game_y, game_z, pause_state,
+	]
 
 func _auto_select_mode() -> void:
 	# Automatically set mode based on GlobalSignals
@@ -492,7 +400,7 @@ func _set_3d_mode() -> void:
 	print("3D mode selected - game_name:", game_name)
 
 func _on_home_pressed() -> void:
-	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+	session.to_menu()
 
 
 func _on_resume_pressed() -> void:

@@ -1,11 +1,16 @@
 extends CharacterBody2D
 
 # Constants
-const LOG_INTERVAL: float = 0.02
 const POSITION_LERP_SPEED: float = 0.8
 const PLAYER_Y_POSITION: float = 610.0
 const GAME_NAME: String = "PingPong"
 const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
+const GameSession := preload("res://Main_screen/Scripts/game_session.gd")
+const COLUMNS := [
+    'score', 'status', 'error_status', 'packets',
+    'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
+    'player_x', 'player_y', 'player_z', 'ball_x', 'ball_y', 'ball_z', 'pause_state',
+]
 
 # Movement and positioning
 var network_position: Vector2 = Vector2.ZERO
@@ -14,14 +19,9 @@ var centre: Vector2 = Vector2.ZERO
 var use_origin_offset: bool = true
 
 # Game state
+var session: GameSession
 var game_started: bool = false
 var pause_state: int = 1
-var score: int = 0
-
-# Timer and countdown
-var countdown_time: int = 0
-var countdown_active: bool = false
-var current_time: int = 0
 
 # Position tracking
 var pos_x: float
@@ -41,13 +41,9 @@ var ball_z: float
 var status: String = ""
 var error_status: String = ""
 var packets: String = ""
-var game_log_file
 
 # Settings
 @onready var debug_mode = Settings.is_debug()
-
-# Timers
-@onready var log_timer: Timer = Timer.new()
 
 # Game objects
 @onready var ball: Node = $"../Ball"
@@ -69,32 +65,16 @@ var game_log_file
 
 func _ready() -> void:
     get_parent().add_child.call_deferred(preload("res://Games/ping_pong/scripts/table_court.gd").new())
-    _setup_timers()
     _setup_ui()
     _connect_signals()
-    _initialize_game_state()
-    _setup_logging()
-    _update_top_score_display()
-    _setup_global_timer()
-
-func _setup_global_timer() -> void:
-    # Add the global timer selector to this game
-    GlobalTimerManager.add_timer_selector_to_game(self)
-    
-    # Connect to global timer signals
-    GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
-    GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
-
-func _setup_timers() -> void:
-    log_timer.wait_time = LOG_INTERVAL
-    log_timer.autostart = true
-    log_timer.timeout.connect(_on_log_timer_timeout)
-    add_child(log_timer)
+    session = GameSession.new(GAME_NAME, COLUMNS, _log_row, countdown_display)
+    session.started.connect(_start_game)
+    session.time_up.connect(show_game_over)
+    add_child(session)
+    update_top_score_display()
 
 func _setup_ui() -> void:
-    game_over_label.visible = false
     game_over_label.hide()
-    countdown_display.visible = false
     GameFx.dim_behind(paused_screen)
     GameFx.dim_behind(game_over_label)
 
@@ -103,58 +83,19 @@ func _connect_signals() -> void:
     _game_buttons.pause.pressed.connect(_on_pause_button_pressed)
     GlobalSignals.origin_set.connect(_on_origin_set)
 
-func _initialize_game_state() -> void:
-    game_started = false  # Changed to false - wait for timer selection
+## The best so far, this game's score included (ball.gd calls it on a point).
+func update_top_score_display() -> void:
+    top_score_label.text = str(maxi(session.best_score(), ball.player_score))
+
+func _start_game() -> void:
+    game_started = true
     pause_state = 1
-
-func _setup_logging() -> void:
-    pass   # the trial log opens at game start (_setup_game_logging)
-
-func _update_top_score_display() -> void:
-    var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, GAME_NAME)
-    top_score_label.text = str(top_score)
-
-# Global Timer Callbacks
-func _on_global_timer_play_pressed(time: int) -> void:
-    GlobalTimer.start_timer()
-    game_started = true
-    countdown_time = time
-    _start_game_with_timer(time)
-    _setup_game_logging()
-
-func _on_global_timer_close_pressed() -> void:
-    game_started = true
-    countdown_display.hide()
-    _start_game_without_timer()
-    _setup_game_logging()
-
-    
-func _start_game_with_timer(time: int) -> void:
-    countdown_active = true
-    countdown_time = time
-    countdown_display.visible = true
-    countdown_display.set_time(time)  
-    GlobalTimerManager.start_countdown_with_time(time)
     ball.game_started = true
-    GlobalTimerManager.start_countdown_with_time(time)
-    
-func _start_game_without_timer() -> void:
-    countdown_active = false
-    ball.game_started = true
-    GlobalTimer.start_timer()
-    GlobalTimerManager.start_game_without_timer()
-
-func _on_global_countdown_finished() -> void:
-    show_game_over()
-
-func _on_global_countdown_updated(time_left: int) -> void:
-    countdown_time = time_left
-    countdown_display.update_time(time_left)
 
 func _physics_process(delta: float) -> void:
     if not game_started:
         return
-    
+
     _update_network_position()
     _update_player_position()
     _update_game_data()
@@ -179,25 +120,25 @@ func _update_player_position() -> void:
 func _update_game_data() -> void:
     if not ball.game_started:
         return
-    
+
     # Update position data
     pos_x = GlobalScript.raw_x
     pos_y = GlobalScript.raw_y
     pos_z = GlobalScript.raw_z
-    
+
     # Update target data
     target_x = (GlobalSignals.ball_position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
     target_y = (GlobalSignals.ball_position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
     ball_x = target_x
     ball_y = target_y
     ball_z = target_z
-    
+
     # Update game state
     status = ball.status
-    score = ball.player_score
+    session.score = ball.player_score
     error_status = "null"
     packets = "null"
-    
+
     # Update player position data
     _calculate_player_game_position()
 
@@ -210,80 +151,48 @@ func _on_pause_button_pressed() -> void:
     _pause_game()
 
 func _pause_game() -> void:
-    GlobalTimer.pause_timer()
-    GlobalTimerManager.pause_countdown()
+    session.pause()
     ball.game_started = false
     pause_state = 0
 
 func _resume_game() -> void:
-    GlobalTimer.resume_timer()
-    GlobalTimerManager.resume_countdown()
+    session.resume()
     ball.game_started = true
     pause_state = 1
 
 func show_game_over() -> void:
-    MusicManager.play_sound_effect("game_over")
-    current_score.text = "CURRENT SCORE - " + str(score)
-    var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, GAME_NAME)
-    high_score.text = str(top_score)
     ball.game_started = false
-    SessionLog.end_trial()
-    save_final_score_to_log(GlobalScript.current_score)
-    GlobalTimer.stop_timer()
+    session.score = ball.player_score
+    var best := session.finish()
+    current_score.text = "CURRENT SCORE - " + str(session.score)
+    high_score.text = str(best)
     game_over_label.visible = true
 
+## One raw CSV row, in COLUMNS order (GameSession adds epochtime).
+func _log_row() -> Array:
+    return [
+        session.score, status, error_status, packets,
+        pos_x, pos_y, pos_z, target_x, target_y, target_z,
+        game_x, game_y, game_z, ball_x, ball_y, ball_z, pause_state,
+    ]
+
 func _on_logout_button_pressed() -> void:
-    GlobalTimerManager.remove_timer_selector_from_game()
-    get_tree().paused = false
-    get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+    session.to_menu()
 
 func _on_retry_button_pressed() -> void:
     get_tree().paused = false
     game_over_label.hide()
-    
-    # Reset game state
     game_started = false
-    countdown_active = false
-    
-    # Show timer selector for retry
-    GlobalTimerManager.show_timer_selector_for_retry()
-
-func save_final_score_to_log(player_score: int) -> void:
-    if game_log_file:
-        game_log_file.store_line("Final Score: " + str(player_score))
-        game_log_file.flush()
-
-func _setup_game_logging() -> void:
-    game_log_file = Manager.create_game_log_file(GAME_NAME, GlobalSignals.current_patient_id)
-    game_log_file.store_csv_line(PackedStringArray([
-        'epochtime', 'score', 'status', 'error_status', 'packets',
-        'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
-        'player_x', 'player_y', 'player_z', 'ball_x', 'ball_y', 'ball_z', 'pause_state'
-    ]))
-
-func _on_log_timer_timeout() -> void:
-    if game_log_file:
-        game_log_file.store_csv_line(PackedStringArray([
-            Time.get_unix_time_from_system(), str(score), status, error_status, packets,
-            str(pos_x), str(pos_y), str(pos_z), str(target_x), str(target_y), str(target_z),
-            str(game_x), str(game_y), str(game_z), str(ball_x), str(ball_y), str(ball_z), str(pause_state)
-        ]))
-
-func _notification(what: int) -> void:
-    if what == NOTIFICATION_WM_CLOSE_REQUEST:
-        print('closed')
-        if game_log_file:
-            game_log_file.close()
-        GlobalTimerManager.remove_timer_selector_from_game()
+    ball.reset_scores()   # the next trial starts from 0, not from this one's score
+    session.retry()
+    update_top_score_display()
 
 func _on_logout_pressed() -> void:
     MusicManager.play_music("main")
-    GlobalTimer.stop_timer()
-    GlobalTimerManager.remove_timer_selector_from_game()
-    get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+    session.to_menu()
 
 func _on_home_pressed() -> void:
-    get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+    session.to_menu()
 
 func _on_resume_pressed() -> void:
     paused_screen.hide()

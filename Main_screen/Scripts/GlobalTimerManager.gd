@@ -24,16 +24,19 @@ func _setup_countdown_timer() -> void:
 	countdown_timer.timeout.connect(_on_countdown_timer_timeout)
 	add_child(countdown_timer)
 
-func add_timer_selector_to_game(game_node: Node) -> void:
-	current_game_node = game_node
-	
-	# Create timer selector instance if it doesn't exist
-	if timer_selector_instance == null:
+## Shows the selector on game_node. Its Play and close go to handler (a
+## GameSession), or to game_node itself without one.
+func add_timer_selector_to_game(game_node: Node, handler: Node = null) -> void:
+	current_game_node = handler if handler else game_node
+
+	# A game that leaves without remove_timer_selector_from_game frees it with its scene.
+	if not is_instance_valid(timer_selector_instance):
 		timer_selector_instance = timer_selector_scene.instantiate()
 		timer_selector_instance.play_pressed.connect(_on_timer_selector_play_pressed)
 		timer_selector_instance.close_pressed.connect(_on_timer_selector_close_pressed)
-	
-	# Add to game node
+	elif timer_selector_instance.get_parent():
+		timer_selector_instance.get_parent().remove_child(timer_selector_instance)
+
 	game_node.add_child(timer_selector_instance)
 	timer_selector_instance.show_panel()
 		

@@ -1,28 +1,28 @@
 extends Node2D
 
 # Constants
-const LOG_INTERVAL: float = 0.02
 const GAME_NAME: String = "FruitCatcher"
 const GEM = preload("res://Games/fruit_catcher/Scenes/Fruits/fruit.tscn")
 const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
+const GameSession := preload("res://Main_screen/Scripts/game_session.gd")
 const MARGIN: float = 70.0
+const COLUMNS := [
+	'score', 'status', 'pause_state',
+	'device_x', 'device_y', 'device_z',
+	'paddle_x', 'paddle_y', 'gem_x', 'gem_y',
+	'countdown_time', 'gems_caught', 'gems_missed',
+]
 
 # Screen boundaries
 var START_OF_SCREEN_X: float
 var END_OF_SCREEN_X: float
 
 # Game state
-var _score: int = 0
-var current_gem: Gem = null  
+var session: GameSession
+var current_gem: Gem = null
 var game_active: bool = false
-var game_started: bool = false
-var is_paused: bool = false
 var pause_state: int = 1
 var missed_gems := 0
-
-# Timer and countdown
-var countdown_time: int = 0
-var countdown_active: bool = false
 
 # Position tracking for logging
 var paddle_x: float = 0.0
@@ -32,11 +32,7 @@ var gem_y: float = 0.0
 var device_x: float = 0.0
 var device_y: float = 0.0
 var device_z: float = 0.0
-
-# Game logging
 var status: String = "waiting"
-var game_log_file
-var log_timer: Timer
 
 var scenery: Node2D
 
@@ -58,111 +54,41 @@ var scenery: Node2D
 	"pause_button": $PauseButton,
 }
 
-func _init() -> void:
-	print("Game:: _init")
-	
-func _enter_tree() -> void:
-	print("Game:: _enter_tree")
-
 func _ready() -> void:
 	scenery = preload("res://Games/fruit_catcher/Scenes/Game/forest_scenery.gd").new()
 	add_child(scenery)
 	setup_screen_boundaries()
-	setup_timers()
+	spawn_timer.stop()
 	setup_ui()
-	initialize_game_state()
+	session = GameSession.new(GAME_NAME, COLUMNS, _log_row, countdown_display)
+	session.started.connect(start_game)
+	session.time_up.connect(end_game)
+	add_child(session)
 	update_top_score_display()
-	setup_global_timer()
-	
-func setup_global_timer() -> void:
-	# Add the global timer selector to this game
-	GlobalTimerManager.add_timer_selector_to_game(self)
-	
-	# Connect to global timer signals
-	GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
-	GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
 
 func setup_screen_boundaries() -> void:
 	START_OF_SCREEN_X = get_viewport_rect().position.x
 	END_OF_SCREEN_X = get_viewport_rect().end.x
 
-func setup_timers() -> void:
-	# Setup log timer
-	log_timer = Timer.new()
-	log_timer.wait_time = LOG_INTERVAL
-	log_timer.autostart = false
-	log_timer.timeout.connect(_on_log_timer_timeout)
-	add_child(log_timer)
-	
-	# Stop spawn timer initially
-	spawn_timer.stop()
-
 func setup_ui() -> void:
 	game_over_label.visible = false
-	countdown_display.visible = false
 	button_nodes.pause_button.hide()
 	score_label.text = "0"
 	GameFx.dim_behind(pause_screen)
 	GameFx.dim_behind(game_over_label)
 
-func initialize_game_state() -> void:
-	game_active = false
-	game_started = false
-	is_paused = false
-	pause_state = 1
-	status = "waiting"
-
 func update_top_score_display() -> void:
-	var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
-	var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
-	top_score_label.text = str(top_score)
-	print("Top score for patient ", patient_id, " in ", GAME_NAME, ": ", top_score)
+	top_score_label.text = str(maxi(session.best_score(), session.score))
 
-# Global Timer Callbacks
-func _on_global_timer_play_pressed(time: int) -> void:
-	GlobalTimer.start_timer()
-	game_started = true
-	countdown_time = time
-	start_game_with_timer(time)
-
-func _on_global_timer_close_pressed() -> void:
-	game_started = true
-	countdown_display.hide()
-	start_game_without_timer()
-
-	  
-func start_game_with_timer(time: int) -> void:
-	countdown_active = true
-	countdown_time = time
-	countdown_display.visible = true
-	countdown_display.set_time(time)  
-	GlobalTimerManager.start_countdown_with_time(time)
-	start_game()
-	
-func start_game_without_timer() -> void:
-	countdown_active = false
-	GlobalTimer.start_timer()
-	GlobalTimerManager.start_game_without_timer()
-	start_game()
-
-func _on_global_countdown_finished() -> void:
-	end_game()
-
-func _on_global_countdown_updated(time_left: int) -> void:
-	countdown_time = time_left
-	countdown_display.update_time(time_left)
-
-func _process(delta: float) -> void:
-	if not game_started:
-		return
-	if game_started and game_active:
+func _process(_delta: float) -> void:
+	if game_active:
 		update_tracking_data()
 
 func update_tracking_data() -> void:
 	# Update paddle position
 	paddle_x = paddle.position.x
 	paddle_y = paddle.position.y
-	
+
 	# Update gem position
 	if current_gem and is_instance_valid(current_gem):
 		gem_x = current_gem.position.x
@@ -170,7 +96,7 @@ func update_tracking_data() -> void:
 	else:
 		gem_x = 0.0
 		gem_y = 0.0
-	
+
 	# Update device position
 	device_x = GlobalScript.raw_x
 	device_y = GlobalScript.raw_y
@@ -178,27 +104,16 @@ func update_tracking_data() -> void:
 
 func start_game() -> void:
 	game_active = true
-	game_started = true
+	pause_state = 1
 	status = "playing"
-	setup_game_logging()
-	log_timer.start()
 	button_nodes.pause_button.show()
 	spawn_gem()
-
-func setup_game_logging() -> void:
-	game_log_file = Manager.create_game_log_file(GAME_NAME, GlobalSignals.current_patient_id)
-	game_log_file.store_csv_line(PackedStringArray([
-		'epochtime', 'score', 'status', 'pause_state',
-		'device_x', 'device_y', 'device_z',
-		'paddle_x', 'paddle_y', 'gem_x', 'gem_y',
-		'countdown_time', 'gems_caught', 'gems_missed'
-	]))
 
 # Game Logic Functions
 func spawn_gem() -> void:
 	if current_gem != null or not game_active:
 		return
-		
+
 	var new_gem: Gem = GEM.instantiate()
 	var x_pos: float = randf_range(
 		START_OF_SCREEN_X + MARGIN,
@@ -206,7 +121,7 @@ func spawn_gem() -> void:
 	)
 	new_gem.position = Vector2(x_pos, -MARGIN)
 	new_gem.gem_off_screen.connect(_on_gem_off_screen)
-	
+
 	current_gem = new_gem
 	add_child(new_gem)
 	status = "gem_spawned"
@@ -219,13 +134,12 @@ func _on_gem_off_screen() -> void:
 		var c: Color = current_gem.colour
 		GameFx.burst(self, Vector2(current_gem.position.x, get_viewport_rect().end.y - 10),
 			[c, c.darkened(0.25)], 10, 150.0, 0.4, 320.0)
-	MusicManager.play_sound_effect("fruit_missed")  
-	print("Game:: _on_gem_off_screen - Gem missed")
+	MusicManager.play_sound_effect("fruit_missed")
 	current_gem = null
 	status = "gem_missed"
 	missed_gems += 1
 	SessionLog.miss()
-	
+
 	await get_tree().create_timer(0.5).timeout
 	if game_active:
 		spawn_gem()
@@ -235,21 +149,18 @@ func _on_paddle_area_entered(area: Area2D) -> void:
 		GameFx.float_text(self, area.global_position + Vector2(0, -50), "+1")
 		scenery.bounce_basket()
 
-		_score += 1
+		session.score += 1
 		SessionLog.hit()
-		score_label.text = str(_score)
+		score_label.text = str(session.score)
 		GameFx.pop(score_label.get_parent())
-		print("Gem caught! Score: ", _score)
 		status = "gem_caught"
-		
-		ScoreManager.update_top_score(GlobalSignals.current_patient_id, GAME_NAME, _score)
 		update_top_score_display()
 		if not score_sound.playing:
 			score_sound.position = area.position
 			score_sound.play()
-		
+
 		current_gem = null
-		
+
 		await get_tree().create_timer(0.5).timeout
 		if game_active:
 			spawn_gem()
@@ -259,171 +170,88 @@ func _on_pause_button_pressed() -> void:
 	pause_game()
 
 func pause_game() -> void:
-	GlobalTimer.pause_timer()
-	GlobalTimerManager.pause_countdown()
-	
+	session.pause()
 	game_active = false
 	paddle.set_process(false)
-	
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.set_process(false)
-	
-	
 	pause_state = 0
 	status = "paused"
 
 func resume_game() -> void:
-	GlobalTimer.resume_timer()
-	GlobalTimerManager.resume_countdown()
-	
+	session.resume()
 	game_active = true
 	paddle.set_process(true)
-	
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.set_process(true)
-	
-
 	pause_state = 1
 	status = "playing"
 
 func end_game() -> void:
-	MusicManager.play_sound_effect("game_over")
-	print("Game Over! Final Score: ", _score)
 	game_active = false
-	game_started = false
 	status = "game_over"
-	
+
 	# Stop all game elements
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.set_process(false)
-	
 	paddle.set_process(false)
-	log_timer.stop()
-	SessionLog.end_trial()
-	
-	# Save final score
-	save_final_score()
-	
-	# Play end sound
+
+	var best := session.finish()
 	sound.play()
-	
+
 	# Show game over UI
-	GlobalTimer.stop_timer()
 	game_over_label.visible = true
-	current_score.text = "CURRENT SCORE - " + str(_score)
-	var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
-	var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
-	high_score.text = str(top_score)
-
-func save_final_score() -> void:
-	print("Saving final score: ", _score)
-	
-	if game_log_file:
-		game_log_file.store_line("Final Score: " + str(_score))
-		game_log_file.flush()
-	
-	# Use update_top_score method
-	var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
-	print("Updating top score for patient: ", patient_id, " Game: ", GAME_NAME, " Score: ", _score)
-	
-	ScoreManager.update_top_score(patient_id, GAME_NAME, _score)
-	
-	# Update top score display immediately
-	update_top_score_display()
-	
-	# Debug: Print current scores
-	print("Current top score after saving: ", ScoreManager.get_top_score(patient_id, GAME_NAME))
-
-func _on_retry_button_pressed() -> void:
-	reset_game()
-	# Show timer selector for retry
-	GlobalTimerManager.show_timer_selector_for_retry()
-
-func _on_logout_button_pressed() -> void:
-	MusicManager.play_music("main")
-	GlobalTimerManager.remove_timer_selector_from_game()
-	get_tree().paused = false
-	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+	current_score.text = "CURRENT SCORE - " + str(session.score)
+	high_score.text = str(best)
 
 func reset_game() -> void:
 	# Clean up current gem
 	if current_gem and is_instance_valid(current_gem):
 		current_gem.queue_free()
 	current_gem = null
-	
+
 	# Reset game state
-	_score = 0
-	score_label.text = "0"
-	countdown_time = 0
-	countdown_active = false
 	game_active = false
-	game_started = false
-	is_paused = false
 	pause_state = 1
 	status = "waiting"
 	missed_gems = 0
-	
+	session.retry()
+	score_label.text = "0"
+
 	# Reset UI
 	game_over_label.visible = false
-	countdown_display.visible = false
 	button_nodes.pause_button.hide()
-	
-	# Close log file
-	if game_log_file:
-		game_log_file.close()
-		game_log_file = null
-	
-	log_timer.stop()
-	
-	# Reset paddle
 	paddle.set_process(true)
-	
-	# Update top score display
 	update_top_score_display()
 
-# Logging Function
-func _on_log_timer_timeout() -> void:
-	if game_log_file and game_started:
-		game_log_file.store_csv_line(PackedStringArray([
-			str(Time.get_unix_time_from_system()),
-			str(_score),
-			status,
-			str(pause_state),
-			str(device_x),
-			str(device_y),
-			str(device_z),
-			str(paddle_x),
-			str(paddle_y),
-			str(gem_x),
-			str(gem_y),
-			str(countdown_time),
-			str(_score),  # gems_caught (same as score)
-			str(missed_gems)
-		]))
+## One raw CSV row, in COLUMNS order (GameSession adds epochtime).
+func _log_row() -> Array:
+	return [
+		session.score, status, pause_state,
+		device_x, device_y, device_z,
+		paddle_x, paddle_y, gem_x, gem_y,
+		session.time_left,
+		session.score,  # gems_caught (same as score)
+		missed_gems,
+	]
 
-# Assessment Functions
+func _on_retry_button_pressed() -> void:
+	reset_game()
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		if game_log_file:
-			game_log_file.close()
-		GlobalTimerManager.remove_timer_selector_from_game()
+func _on_logout_button_pressed() -> void:
+	MusicManager.play_music("main")
+	session.to_menu()
 
 func _on_gameover_logout_pressed() -> void:
-	GlobalTimerManager.remove_timer_selector_from_game()
-	get_tree().paused = false
-	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
-
+	session.to_menu()
 
 func _on_home_pressed() -> void:
-	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
-
+	session.to_menu()
 
 func _on_resume_pressed() -> void:
 	pause_screen.hide()
 	resume_game()
 
-
 func _on_restart_pressed() -> void:
 	pause_screen.hide()
-	_on_retry_button_pressed()
+	reset_game()

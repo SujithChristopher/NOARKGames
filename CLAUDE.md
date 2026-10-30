@@ -145,13 +145,19 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 
 ### Adding a New Game
 0. Launch it from the menu with `AssessmentGate.play(get_tree(), scene)`, never `change_scene_*` directly; give it a tile in the menu's .tscn and a row in its `_game_tiles()` (colour + picture)
-1. Call `Manager.create_game_log_file(game_name, patient_id)` when play starts and store the returned handle (session/trial numbering and the debug `vvv` id are handled by `SessionLog`)
-2. Log rows via the handle at ~0.02s intervals using a Timer node
-3. Call `SessionLog.hit()` / `SessionLog.miss()` per target, and `SessionLog.end_trial()` at game over
-4. Pause through `GlobalTimer.pause_timer()` / `resume_timer()` so MoveTime leaves pauses out
-5. Close the file handle on game end
-6. For 2D/3D support: set `game_name` dynamically via an `is_3d_mode` flag (`"…3D"` suffix → Mode 3D)
-7. Add the game to `SessionLog.MOVEMENT` (and `MOVEMENT` in `pyscripts/rebuild_sessions.py`)
+1. Add a `GameSession` (`Main_screen/Scripts/game_session.gd`) last in `_ready`:
+   `GameSession.new(game_name, COLUMNS, _log_row, $CircularTimer)`, connect `started` (begin play) and
+   `time_up` (game over). It shows the timer selector, runs the countdown, writes the raw CSV at 50 Hz
+   (`epochtime` + your columns, a `Final Score:` line at the end), and ends the trial however the scene
+   is left. The game adds to `session.score` and calls `pause()` / `resume()` (MoveTime and the
+   countdown together), `finish()` at game over (returns the best score), `retry()` and `to_menu()`.
+   FruitCatcher, PingPong and FlyThrough use it; Random Reach, Jumpify and Cannon Defense still carry
+   their own copy of this.
+2. Call `SessionLog.hit()` / `SessionLog.miss()` per target
+3. For 2D/3D support: set `game_name` dynamically via an `is_3d_mode` flag (`"…3D"` suffix → Mode 3D)
+4. Add the game to `SessionLog.MOVEMENT` (and `MOVEMENT` in `pyscripts/rebuild_sessions.py`)
+5. Add its scene to `SCENES` in `tests/smoke_test.gd`; a scene with a `GameSession` also gets a short
+   trial run through it (raw header, row widths, Final Score, sessions.csv row, retry)
 
 ### Marker Geometry (Rigid Body)
 
