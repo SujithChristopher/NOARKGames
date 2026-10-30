@@ -9,6 +9,7 @@ const GOLD := Color(1.0, 0.84, 0.3)
 const FX_Z := 20
 
 static var _dot: Texture2D
+static var _shrunk := {}
 
 
 ## A soft round dot, white in the middle fading to clear: the particle sprite.
@@ -26,6 +27,26 @@ static func soft_dot() -> Texture2D:
 		t.height = 32
 		_dot = t
 	return _dot
+
+
+## A big sprite cut to what is drawn and shrunk so its long side is `longest`
+## px, with mipmaps (draw it with TEXTURE_FILTER_LINEAR_WITH_MIPMAPS). Sprites
+## imported without mipmaps shimmer when drawn small and moving. Built once per
+## texture and size, then kept.
+static func shrink(texture: Texture2D, longest: int) -> Texture2D:
+	var key := "%s@%d" % [texture.resource_path, longest]
+	if not _shrunk.has(key):
+		var img := texture.get_image()
+		if img.is_compressed():
+			img.decompress()
+		img.convert(Image.FORMAT_RGBA8)
+		img = img.get_region(img.get_used_rect())
+		var scale := float(longest) / maxi(img.get_width(), img.get_height())
+		img.resize(maxi(1, roundi(img.get_width() * scale)),
+				maxi(1, roundi(img.get_height() * scale)), Image.INTERPOLATE_LANCZOS)
+		img.generate_mipmaps()
+		_shrunk[key] = ImageTexture.create_from_image(img)
+	return _shrunk[key]
 
 
 ## One-shot burst at a global position, under `parent` (usually the scene root),

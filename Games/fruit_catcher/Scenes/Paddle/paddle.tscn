@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3 uid="uid://dqhaj3fx1ah8r"]
 
-[ext_resource type="Script" uid="uid://ceu6ihokr2e30" path="res://Games/fruit_catcher/Scenes/Paddle/paddle.gd" id="1_iwrur"]
-[ext_resource type="Texture2D" uid="uid://by684v86lj0uh" path="res://Games/fruit_catcher/assets/fruit_basket.png" id="2_ohi2e"]
+[ext_resource type="Script" uid="uid://dxah2xxvk8asb" path="res://Games/fruit_catcher/Scenes/Paddle/paddle.gd" id="1_iwrur"]
+[ext_resource type="Texture2D" uid="uid://bgcm84t3t1tn2" path="res://Games/fruit_catcher/assets/fruit_basket.png" id="2_ohi2e"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_iwrur"]
 radius = 18.0

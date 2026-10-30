@@ -1,22 +1,22 @@
 [gd_scene load_steps=18 format=3 uid="uid://dv4g57qgdfg33"]
 
-[ext_resource type="Script" uid="uid://chlk3v2pashqe" path="res://Games/fruit_catcher/Scenes/Game/game.gd" id="1_ln2h6"]
+[ext_resource type="Script" uid="uid://cga87om535g8b" path="res://Games/fruit_catcher/Scenes/Game/game.gd" id="1_ln2h6"]
 [ext_resource type="PackedScene" uid="uid://dqhaj3fx1ah8r" path="res://Games/fruit_catcher/Scenes/Paddle/paddle.tscn" id="2_gwu2e"]
-[ext_resource type="Texture2D" uid="uid://d04q4wfpcqudk" path="res://Games/fruit_catcher/assets/vecteezy_deep-forest-scene-with-trees-cartoon-background-vector_9577135-1.jpg" id="2_y3kpf"]
+[ext_resource type="Texture2D" uid="uid://q1def7fxvd4q" path="res://Games/fruit_catcher/assets/vecteezy_deep-forest-scene-with-trees-cartoon-background-vector_9577135-1.jpg" id="2_y3kpf"]
 [ext_resource type="Theme" uid="uid://bf6gf87lm0nvu" path="res://Assets/Background/pause.tres" id="5_jldhi"]
-[ext_resource type="AudioStream" uid="uid://nunov43qa4b0" path="res://Games/fruit_catcher/assets/spell1_0.wav" id="5_y3kpf"]
+[ext_resource type="AudioStream" uid="uid://bymgg0xd87vo5" path="res://Games/fruit_catcher/assets/spell1_0.wav" id="5_y3kpf"]
 [ext_resource type="Theme" uid="uid://ddok1g1ht0h30" path="res://Assets/Background/home.tres" id="7_d32l4"]
-[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="8_5dybn"]
-[ext_resource type="Script" uid="uid://cfo038yr17bco" path="res://Games/fruit_catcher/Scenes/Game/circular_timer.gd" id="8_d32l4"]
-[ext_resource type="Texture2D" uid="uid://cjst4wuxx2vdc" path="res://Assets/Background/fruit_score-2.png" id="9_d32l4"]
-[ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="10_ldqwr"]
-[ext_resource type="FontFile" uid="uid://bjokva26isnj4" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="11_e8avm"]
+[ext_resource type="FontFile" uid="uid://c2a7g24hbnnww" path="res://Assets/Fonts/Bungee-Regular.ttf" id="8_5dybn"]
+[ext_resource type="Script" uid="uid://dxnckbylqvvpv" path="res://Games/fruit_catcher/Scenes/Game/circular_timer.gd" id="8_d32l4"]
+[ext_resource type="Texture2D" uid="uid://df6h8civ0vtlc" path="res://Assets/Background/fruit_score-2.png" id="9_d32l4"]
+[ext_resource type="Texture2D" uid="uid://c1n8bed6dnn5g" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="10_ldqwr"]
+[ext_resource type="FontFile" uid="uid://ba5w5ho3cxymo" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="11_e8avm"]
 [ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="12_wj1oy"]
-[ext_resource type="Texture2D" uid="uid://cu0rlyq4vp23l" path="res://Assets/Background/png-clipart-trophy-computer-icons-prize-gold-medal-prize-game-medal.png" id="13_e8avm"]
-[ext_resource type="Texture2D" uid="uid://dh0bv7ifofiw3" path="res://Assets/Background/ui pause.png" id="14_q4xww"]
+[ext_resource type="Texture2D" uid="uid://btwwyr2agrx8v" path="res://Assets/Background/png-clipart-trophy-computer-icons-prize-gold-medal-prize-game-medal.png" id="13_e8avm"]
+[ext_resource type="Texture2D" uid="uid://cow8dnkjg6gks" path="res://Assets/Background/ui pause.png" id="14_q4xww"]
 [ext_resource type="Theme" uid="uid://c0tjwkhuqbs60" path="res://Assets/Background/resume.tres" id="15_xnuwd"]
 [ext_resource type="Theme" uid="uid://bhefon1yrfgw7" path="res://Assets/Background/retry.tres" id="16_8h3co"]
-[ext_resource type="Texture2D" uid="uid://cff41ggt33x23" path="res://Assets/Background/gameover-2.png" id="17_xnuwd"]
+[ext_resource type="Texture2D" uid="uid://d33mpkirmuuki" path="res://Assets/Background/gameover-2.png" id="17_xnuwd"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_ln2h6")
@@ -87,10 +87,10 @@ expand_mode = 1
 
 [node name="ScoreLabel" type="Label" parent="Fruit_Score"]
 layout_mode = 0
-offset_left = 96.0
-offset_top = 39.0
-offset_right = 127.0
-offset_bottom = 73.0
+offset_left = 72.0
+offset_top = 26.0
+offset_right = 146.0
+offset_bottom = 64.0
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
@@ -98,6 +98,9 @@ theme_override_constants/outline_size = 5
 theme_override_constants/shadow_outline_size = 3
 theme_override_fonts/font = ExtResource("8_5dybn")
 theme_override_font_sizes/font_size = 25
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="Highscore_" type="TextureRect" parent="."]
 offset_left = 127.0

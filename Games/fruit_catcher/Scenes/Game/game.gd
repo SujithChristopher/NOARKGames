@@ -4,6 +4,7 @@ extends Node2D
 const LOG_INTERVAL: float = 0.02
 const GAME_NAME: String = "FruitCatcher"
 const GEM = preload("res://Games/fruit_catcher/Scenes/Fruits/fruit.tscn")
+const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
 const MARGIN: float = 70.0
 
 # Screen boundaries
@@ -37,6 +38,8 @@ var status: String = "waiting"
 var game_log_file
 var log_timer: Timer
 
+var scenery: Node2D
+
 # Node references
 @onready var spawn_timer: Timer = $SpawnTimer
 @onready var paddle: Area2D = $Paddle
@@ -53,7 +56,6 @@ var log_timer: Timer
 # Button nodes (cleaned up)
 @onready var button_nodes = {
 	"pause_button": $PauseButton,
-	"retry_button": $ColorRect/GameOverLabel/RetryButton,
 }
 
 func _init() -> void:
@@ -63,6 +65,8 @@ func _enter_tree() -> void:
 	print("Game:: _enter_tree")
 
 func _ready() -> void:
+	scenery = preload("res://Games/fruit_catcher/Scenes/Game/forest_scenery.gd").new()
+	add_child(scenery)
 	setup_screen_boundaries()
 	setup_timers()
 	setup_ui()
@@ -97,6 +101,9 @@ func setup_ui() -> void:
 	game_over_label.visible = false
 	countdown_display.visible = false
 	button_nodes.pause_button.hide()
+	score_label.text = "0"
+	GameFx.dim_behind(pause_screen)
+	GameFx.dim_behind(game_over_label)
 
 func initialize_game_state() -> void:
 	game_active = false
@@ -207,6 +214,11 @@ func spawn_gem() -> void:
 func _on_gem_off_screen() -> void:
 	if not game_active:
 		return
+	# A small splash of juice where it fell
+	if current_gem:
+		var c: Color = current_gem.colour
+		GameFx.burst(self, Vector2(current_gem.position.x, get_viewport_rect().end.y - 10),
+			[c, c.darkened(0.25)], 10, 150.0, 0.4, 320.0)
 	MusicManager.play_sound_effect("fruit_missed")  
 	print("Game:: _on_gem_off_screen - Gem missed")
 	current_gem = null
@@ -220,12 +232,13 @@ func _on_gem_off_screen() -> void:
 
 func _on_paddle_area_entered(area: Area2D) -> void:
 	if area == current_gem and game_active:
-		# Show +1 label at gem position
-		show_score_popup(area.position)
-		
+		GameFx.float_text(self, area.global_position + Vector2(0, -50), "+1")
+		scenery.bounce_basket()
+
 		_score += 1
 		SessionLog.hit()
 		score_label.text = str(_score)
+		GameFx.pop(score_label.get_parent())
 		print("Gem caught! Score: ", _score)
 		status = "gem_caught"
 		
@@ -240,26 +253,6 @@ func _on_paddle_area_entered(area: Area2D) -> void:
 		await get_tree().create_timer(0.5).timeout
 		if game_active:
 			spawn_gem()
-
-func show_score_popup(gem_position: Vector2) -> void:
-	var popup_label = Label.new()
-	popup_label.text = "+1"
-	popup_label.add_theme_font_size_override("font_size", 35)
-	
-	# Add custom font if available
-	var font = load("res://Assets/Fonts/Bungee-Regular.ttf")
-	if font:
-		popup_label.add_theme_font_override("font", font)
-	
-	popup_label.modulate = Color(1, 1, 1, 1)
-	popup_label.position = gem_position + Vector2(-20, -50)
-	add_child(popup_label)
-	
-	# Animate the label
-	var tween = create_tween()
-	tween.tween_property(popup_label, "position:y", popup_label.position.y - 50, 0.5)
-	tween.parallel().tween_property(popup_label, "modulate:a", 0.0, 0.5)
-	tween.tween_callback(popup_label.queue_free)
 
 func _on_pause_button_pressed() -> void:
 	pause_screen.show()
@@ -360,7 +353,7 @@ func reset_game() -> void:
 	
 	# Reset game state
 	_score = 0
-	score_label.text = "SCORE: 0"
+	score_label.text = "0"
 	countdown_time = 0
 	countdown_active = false
 	game_active = false
