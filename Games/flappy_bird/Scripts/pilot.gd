@@ -6,7 +6,7 @@ var zero_offset = Vector2.ZERO
 
 @onready var flash: AnimationPlayer = $AnimatedSprite2D/Flash
 @onready var animated_sprite_2d: AnimatedSprite2D = $AnimatedSprite2D
-@onready var debug_mode = DebugSettings.debug_mode
+@onready var debug_mode = Settings.is_debug()
 
 const PLAYER_RADIUS = 70
 const MIN_BOUNDS = Vector2(PLAYER_RADIUS, PLAYER_RADIUS)

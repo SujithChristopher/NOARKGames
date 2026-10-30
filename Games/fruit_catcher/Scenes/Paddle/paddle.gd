@@ -15,7 +15,7 @@ var MIN_X_VALUE: float
 var MAX_X_VALUE: float
 
 # Settings
-@onready var debug_mode = DebugSettings.debug_mode
+@onready var debug_mode = Settings.is_debug()
 @onready var game: Node2D = $".."
 
 

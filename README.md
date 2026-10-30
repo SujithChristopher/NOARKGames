@@ -33,7 +33,7 @@ A rehabilitation gaming platform designed for stroke patients, built with Godot 
 3. Register a patient or use debug mode for testing
 
 ### Debug Mode
-Edit `debug.json` to enable debug mode:
+Set `debug` in `{DOCUMENTS}/NOARK_demo/settings.json` (patient `vvv`, nothing uploaded):
 ```json
 {"debug": true}
 ```

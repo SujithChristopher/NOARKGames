@@ -88,7 +88,7 @@ func _ready() -> void:
 	_prev_aspect = root.content_scale_aspect
 	root.content_scale_size = Vector2i(1920, 1080)
 	root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
-	_patient_id = "vvv" if Manager.debug else PatientDB.current_patient_id
+	_patient_id = SessionLog.current_patient()
 	# Aim is the handle's rotation: the tracker sends ROTATION, not POSITION.
 	GlobalScript.want_rotation(self)
 

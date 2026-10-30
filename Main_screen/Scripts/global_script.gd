@@ -114,11 +114,8 @@ var smooth_workspace: Vector2          = Vector2.ZERO
 var smooth_scaled_network_position: Vector2   = Vector2.ZERO
 var smooth_scaled_network_position3D: Vector2 = Vector2.ZERO
 
-@onready var debug: bool
-
 
 func _ready() -> void:
-	debug           = Settings.get_value("debug", false)
 	_pin_to_cpus(Settings.get_value("game_cpus", ""))
 
 	load_table()
@@ -169,7 +166,7 @@ func _start_link() -> void:
 		var other:
 			if other != "ble":
 				push_error("Unknown stream_type '%s' — using BLE" % other)
-			_transport = BleTransport.new(Settings.get_value("ble_device_name", "NOARK_Tracker"), debug)
+			_transport = BleTransport.new(Settings.get_value("ble_device_name", "NOARK_Tracker"), Settings.is_debug())
 	add_child(_transport)
 	link = TrackerLink.new(_transport)
 	add_child(link)

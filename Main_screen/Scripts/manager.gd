@@ -1,13 +1,6 @@
 extends Node
 
 
-var json = JSON.new()
-var debug:bool
-
-
-func _ready():
-    debug = Settings.get_value("debug", false)
-
 # Opens a trial's raw data file. SessionLog picks the name
 # (GameData/raw-sessNN-trialNNN-{Game}-{Mode}.csv) and logs the trial's row in
 # sessions.csv when it ends.

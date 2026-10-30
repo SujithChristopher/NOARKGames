@@ -77,7 +77,12 @@ func _notification(what: int) -> void:
 # ── paths ─────────────────────────────────────────────────────────────────────
 
 func effective_id(pid: String) -> String:
-	return "vvv" if Settings.get_value("debug", false) else pid
+	return "vvv" if Settings.is_debug() else pid
+
+
+## The patient a game logs and scores under: the one logged in, or vvv in debug.
+func current_patient() -> String:
+	return effective_id(PatientDB.current_patient_id)
 
 
 func patient_dir(pid: String) -> String:
@@ -203,7 +208,7 @@ func end_trial() -> void:
 ## Sends pid's sessions.csv and configdata.csv to the server in the background.
 ## The debug patient (vvv) is not a real patient, so it stays local.
 func upload(pid: String) -> void:
-	if pid == "" or Settings.get_value("debug", false):
+	if pid == "" or Settings.is_debug():
 		return
 	if _upload_pid == 0:
 		_start_upload(pid)

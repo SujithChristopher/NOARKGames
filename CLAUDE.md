@@ -24,11 +24,11 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Settings** live at `{DOCUMENTS}/NOARK_demo/settings.json` (this `demo` branch uses `NOARK_demo` — `Settings.APP_DIR` — so the real `{DOCUMENTS}/NOARK` data is never touched), not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it skips authentication). `location` (the site written to sessions.csv and raw logs) is set from the login dose dialog. The tracker reads the same file on the board (default path; `--settings` overrides).
+**Settings** live at `{DOCUMENTS}/NOARK_demo/settings.json` (this `demo` branch uses `NOARK_demo` — `Settings.APP_DIR` — so the real `{DOCUMENTS}/NOARK` data is never touched), not in the repo — `res://` is read-only in an export. The `Settings` autoload (first in the list) loads/saves it and seeds it from defaults on first run; the main scene has a Settings panel for everything except `debug`, which is file-only (it logs as patient vvv and uploads nothing). `location` (the site written to sessions.csv and raw logs) is set from the login dose dialog. The tracker reads the same file on the board (default path; `--settings` overrides).
 
-**Debug mode** — edit that file (a `debug.json` also exists but nothing reads it):
+**Debug mode** — edit that file. Every script asks `Settings.is_debug()` at the time (no autoload keeps a copy), and a game gets its patient from `SessionLog.current_patient()` (vvv in debug):
 ```json
-{"debug": true}   // patient ID = 'vvv', skips authentication
+{"debug": true}   // patient ID = 'vvv', no upload, mouse instead of the tracker; Random Reach logs nothing
 {"debug": false}  // production mode
 ```
 
@@ -69,14 +69,13 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | 7 | SoundFx | `Main_screen/Scenes/SoundFx.tscn` | Audio management |
 | 8 | GlobalTimer | `Main_screen/Scripts/global_timer.gd` | Session-wide timer |
 | 9 | ScoreManager | `Main_screen/Scripts/score_db.gd` | High score persistence |
-| 10 | DebugSettings | `Main_screen/Scripts/debug_settings.gd` | Debug config |
-| 11 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
-| 12 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
-| 13 | GlobalTimerManager | `Main_screen/Scripts/GlobalTimerManager.gd` | Countdown timer with signals |
-| 14 | MusicManager | `Main_screen/Scripts/music_manager.gd` | Background music |
-| 15 | ButtonSoundManager | `Main_screen/Scripts/button_sound_manager.gd` | Button SFX |
-| 16 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
-| 17 | TrunkMonitor | `Main_screen/Scripts/trunk_monitor.gd` | Trunk posture from the tracker (TRUNK_STATUS messages) |
+| 10 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
+| 11 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
+| 12 | GlobalTimerManager | `Main_screen/Scripts/GlobalTimerManager.gd` | Countdown timer with signals |
+| 13 | MusicManager | `Main_screen/Scripts/MusicManager.gd` | Background music |
+| 14 | ButtonSoundManager | `Main_screen/Scripts/btn_sound_manager.gd` | Button SFX |
+| 15 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
+| 16 | TrunkMonitor | `Main_screen/Scripts/trunk_monitor.gd` | Trunk posture from the tracker (TRUNK_STATUS messages) |
 
 ### Data Flow
 
@@ -341,7 +340,7 @@ for big messages, heartbeats both ways.
 
 ### Modifying Autoloads
 - Order in `project.godot` matters — `PatientDB`, `Manager`, `GlobalSignals` must initialize before any game scene
-- Debug mode is read from `settings.json` in `_ready()` of both `Manager` and `GlobalScript`
+- Debug mode is `Settings.is_debug()`, read when needed; do not cache it in another autoload
 
 ### Patient Data Access
 ```gdscript
@@ -375,6 +374,17 @@ ScoreManager.get_all_scores_for_patient(patient_id)
 - **BLE permissions**: Android 12+ requires runtime permission requests before BLE operations — see `_init_ble()` in `global_script.gd`
 - **extension_list.cfg**: If duplicate `.gdextension` files exist (e.g., from submodules), Godot may register both — use `.gdignore` in submodule dirs
 
-## No Test Infrastructure
+## Tests
 
-There are no automated tests in this project.
+```bash
+python tests/smoke.py                     # every game scene headless (~1 min); GODOT=<path> if not on PATH
+python pyscripts/tests/test_parity.py     # constants GDScript and Python both keep
+```
+
+- `tests/smoke_test.tscn` opens each game (both modes where it has two), the menus, Trunk angles and
+  Results for 120 frames; `smoke.py` fails on any `ERROR` / `SCRIPT ERROR` Godot prints and names the
+  scene. It runs in debug in memory only, with the data folder in Godot's user dir — never patient
+  data, never an upload. A new game scene goes in its `SCENES` list.
+- `test_parity.py` checks the protocol `VERSION`, `MOVEMENT` and the app folder (`Settings.APP_DIR`)
+  agree between the GDScript and Python copies.
+- `pyscripts/tests/` also holds the tracker's synthetic tests; each runs as `python <file>`.

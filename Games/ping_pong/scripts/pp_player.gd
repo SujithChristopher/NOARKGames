@@ -44,7 +44,7 @@ var packets: String = ""
 var game_log_file
 
 # Settings
-@onready var debug_mode = DebugSettings.debug_mode
+@onready var debug_mode = Settings.is_debug()
 
 # Timers
 @onready var log_timer: Timer = Timer.new()

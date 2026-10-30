@@ -9,7 +9,7 @@ const SCAN := "res://Games/firefly_reach/reach_assessment.tscn"
 
 
 static func patient_id() -> String:
-	return "vvv" if Manager.debug else PatientDB.current_patient_id
+	return SessionLog.current_patient()
 
 
 ## Starts loading the menu's games on background threads, so the menu itself

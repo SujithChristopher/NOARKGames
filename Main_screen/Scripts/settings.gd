@@ -4,8 +4,8 @@ extends Node
 ## survive an update. Must be the FIRST autoload: Manager and GlobalScript read
 ## it in their own _ready().
 ##
-## `debug` is deliberately file-only: it skips patient authentication, so no
-## in-app screen exposes it. Edit the file to change it.
+## `debug` is deliberately file-only: it logs as patient vvv and uploads nothing,
+## so no in-app screen exposes it. Edit the file to change it.
 ##
 ## First run: if the file is missing it is seeded from a legacy
 ## res://settings.json when one exists, otherwise from DEFAULTS.
@@ -69,6 +69,12 @@ func get_value(key: String, default: Variant = null) -> Variant:
 	if data.has(key):
 		return data[key]
 	return DEFAULTS.get(key, default)
+
+
+## Debug: patient vvv, nothing uploaded, the mouse instead of the tracker. Every
+## script asks here, at the time, so no autoload holds a copy that can go stale.
+func is_debug() -> bool:
+	return get_value("debug", false) == true
 
 
 func set_value(key: String, value: Variant) -> void:

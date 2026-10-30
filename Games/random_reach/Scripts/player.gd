@@ -2,7 +2,8 @@ extends CharacterBody2D
 
 # Exported variables
 @export var max_score = 500
-@onready var debug_mode = DebugSettings.debug_mode
+## Debug: mouse instead of the tracker, and no therapy session logged.
+@onready var debug_mode = Settings.is_debug()
 
 # Constants
 const SPEED = 100.0
@@ -69,7 +70,7 @@ var game_z: float
 var status := "idle"
 var error_status = "null"
 var packets = "null"
-var patient_id = GlobalSignals.current_patient_id
+var patient_id = SessionLog.current_patient()
 var game_name = "RandomReach"
 var game_log_file
 var log_timer := Timer.new()
@@ -94,17 +95,9 @@ var trunk_paused := false
 var _trunk_ok_ms := -1
 var _trunk_feedback: CanvasLayer
 
-# Debug and config
-var json = JSON.new()
-var path = "res://debug.json"
-var debug
-
 func _ready() -> void:
 	z_index = 2
 	get_parent().add_child.call_deferred(preload("res://Games/random_reach/Scripts/tuning_panel.gd").new())
-	_load_debug_config()
-	if debug:
-		patient_id = "vvv"
 	_setup_training_hand()
 	_setup_timers()
 	_setup_ui()
@@ -139,17 +132,6 @@ func _auto_select_mode() -> void:
 		_set_3d_mode()
 	else:
 		_set_2d_mode()
-
-func _load_debug_config() -> void:
-	# Older installations use debug.json; newer ones use the saved Settings file.
-	# Use the same effective flag for mouse input, spawning and session logging.
-	var legacy_config = JSON.parse_string(FileAccess.get_file_as_string(path)) \
-		if FileAccess.file_exists(path) else null
-	var legacy_debug := false
-	if legacy_config is Dictionary:
-		legacy_debug = legacy_config.get("debug", false) == true
-	debug_mode = DebugSettings.debug_mode or legacy_debug
-	debug = debug_mode
 
 func _setup_training_hand() -> void:
 	var training_hand = GlobalSignals.selected_training_hand
@@ -429,7 +411,7 @@ func save_final_score_to_log(score: int) -> void:
 
 func _setup_game_logging() -> void:
 	# Mouse testing must not create or upload a patient therapy session.
-	if debug:
+	if debug_mode:
 		return
 	if not log_timer.timeout.is_connected(_on_log_timer_timeout):
 		log_timer.timeout.connect(_on_log_timer_timeout)
@@ -447,7 +429,7 @@ func _setup_game_logging() -> void:
 	]))
 
 func _on_log_timer_timeout() -> void:
-	if game_log_file and not debug:
+	if game_log_file and not debug_mode:
 		game_log_file.store_csv_line(PackedStringArray([
 			Time.get_unix_time_from_system(), score, status, error_status, packets,
 			str(pos_x), str(pos_y), str(pos_z), str(target_x), str(target_y), str(target_z),

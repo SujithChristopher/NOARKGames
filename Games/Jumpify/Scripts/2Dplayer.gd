@@ -2,7 +2,7 @@ extends CharacterBody2D
 
 # Movement configuration
 @export var movement_smoothing: float = 1.0
-@export var debug_mode = DebugSettings.debug_mode
+var debug_mode = Settings.is_debug()   # mouse instead of the tracker, no raw rows
 @export var use_scaled_position: bool = false
 @export var ground_level: float = 577
 @export var max_score: int = 500
@@ -75,13 +75,7 @@ var log_timer := Timer.new()
 @onready var player_sprite = $AnimatedSprite2D  
 @onready var particle_trails = $ParticleTrails
 
-# Debug and config
-var json = JSON.new()
-var path = "res://debug.json"
-var debug
-
 func _ready() -> void:
-    load_debug_config()
     setup_timers()
     setup_ui()
     connect_signals()
@@ -97,9 +91,6 @@ func setup_global_timer() -> void:
     # Connect to global timer signals
     GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
     GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
-
-func load_debug_config() -> void:
-    debug = JSON.parse_string(FileAccess.get_file_as_string(path))['debug']
 
 func setup_timers() -> void:
     log_timer.wait_time = LOG_INTERVAL
@@ -360,7 +351,7 @@ func save_final_score_to_log(final_score: int) -> void:
         game_log_file.flush()
 
 func _on_log_timer_timeout() -> void:
-    if game_log_file and not debug:
+    if game_log_file and not debug_mode:
         # Using actual coin position as target
         var target_x = coin_target_x
         var target_y = 0.0  # Jumpify is 2D, so target_y is always 0

@@ -24,7 +24,7 @@ godot --path . --main-scene res://Main_screen/Scenes/main.tscn
 - **Linux ARM64**: SSH remote deploy to Raspberry Pi, OpenGL compatibility renderer
 - **Android**: Mobile platform
 
-**Debug mode** — edit `debug.json`:
+**Debug mode** — set `debug` in `{DOCUMENTS}/NOARK_demo/settings.json` (`Settings.is_debug()`):
 ```json
 {"debug": true}   // patient ID = 'vvv', skips authentication
 {"debug": false}  // production mode
@@ -63,7 +63,6 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | 5 | SoundFx | `Main_screen/Scenes/SoundFx.tscn` | Audio management |
 | 6 | GlobalTimer | `Main_screen/Scripts/global_timer.gd` | Session-wide timer |
 | 7 | ScoreManager | `Main_screen/Scripts/score_db.gd` | High score persistence |
-| 8 | DebugSettings | `Main_screen/Scripts/debug_settings.gd` | Debug config |
 | 9 | AudioManager | `Games/Jumpify/…/AudioManager.gd` | Jumpify audio |
 | 10 | SceneTransition | `Games/Jumpify/…/SceneTransition.gd` | Jumpify transitions |
 | 11 | GlobalTimerManager | `Main_screen/Scripts/global_timer_manager.gd` | Countdown timer with signals |
@@ -136,7 +135,7 @@ Complex games (e.g., Random Reach) group `@onready` nodes into typed dictionarie
 
 ### Modifying Autoloads
 - Order in `project.godot` matters — `PatientDB`, `Manager`, `GlobalSignals` must initialize before any game scene
-- Debug mode is read from `debug.json` in `_ready()` of both `Manager` and `GlobalScript`
+- Debug mode is `Settings.is_debug()`, read when needed; do not cache it in another autoload
 
 ### Patient Data Access
 ```gdscript
