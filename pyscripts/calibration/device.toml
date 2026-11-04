@@ -57,6 +57,10 @@ offset_m = [0.00, 0.01, -0.069]
 # It has flipped on this rig: until 2026-09 the reverse (cam1, cam0) measured
 # 3.1 mm against 140.9 mm; on 2026-10-08 this mapping measured 2.1 mm and the
 # reverse 137.5 mm (cameras unplugged/swapped at the connectors in between?).
+# On 2026-10-14 it was back the other way: (cam0, cam1) 136.4 mm, the reverse
+# 2.7 mm, measured offline on a session recording (stereo noise 26 mm against
+# 0.6-0.7 mm per camera alone).
+# On 2026-10-29 it had flipped again: (cam0, cam1) 5.4 mm, the reverse 145.5 mm.
 stream0 = "cam0"
 stream1 = "cam1"
 
@@ -74,8 +78,8 @@ stream1 = "cam1"
 # period (16.6 ms at the free-running rate), so a dark room may need both.
 #
 # The calibration prints the image level it is actually getting, with a verdict.
-exposure_us = 10000
-gain = 2.8
+exposure_us = 1000
+gain = 0.0
 
 # Raspberry Pi-style image processing, ported in rcam.isp: black level, digital
 # gain and the ov9281_mono gamma curve, folded into the Y10P unpack.
