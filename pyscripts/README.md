@@ -182,6 +182,15 @@ frame — the same shape the hand-measured `MARKER_OFFSETS` had.
 > so without a calibration the tracker supplies stale offsets for those two tags
 > and nothing for the rest. It says so loudly at startup. Calibrate before use.
 
+### From the app
+
+**Settings > Calibration** does the same without a terminal, for when a tag has been
+moved, swapped or added: Start a take, turn the device for up to 60 s while the list shows
+which tags are joined, wait about 2 minutes, read where each tag went, then Save. Tag 1
+must stay where it is, because the tip is measured from it; everything else can change, and
+new ids are accepted. Nothing changes before Save, and "Put the previous one back" undoes
+it. Takes, replaced calibrations and the last solve's log are in `calibration/takes/`.
+
 ### Camera settings
 
 All three live in `calibration/device.toml` under `[cameras]`, shared by the

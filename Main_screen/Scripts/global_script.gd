@@ -159,6 +159,9 @@ signal storage_listed(info: Dictionary)
 ## per-camera ones [left picture, right picture]; and the JPEG of both cameras.
 signal camera_status(info: Dictionary)
 signal camera_preview(jpeg: PackedByteArray)
+## Measuring the device's tags (Settings > Calibration; body_take.py):
+## {state, anchor, current, capture | elapsed | result | reason}.
+signal body_status(info: Dictionary)
 
 
 # The tracker runs on its own (the noark-tracker service on the board); the app
@@ -227,6 +230,12 @@ func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
 				push_error("[LINK] Unreadable CAMERA_STATUS")
 		LinkProtocol.PREVIEW:
 			camera_preview.emit(msg.slice(1))
+		LinkProtocol.BODY_STATUS:
+			var info = JSON.parse_string(LinkProtocol.payload_text(msg))
+			if info is Dictionary:
+				body_status.emit(info)
+			else:
+				push_error("[LINK] Unreadable BODY_STATUS")
 		_:
 			push_warning("[LINK] Unexpected message type 0x%02x" % kind)
 
@@ -375,9 +384,14 @@ func send_storage_command(arg: String) -> void:
 	link.send_command(LinkProtocol.STORAGE, arg)
 
 
+# Settings > Calibration: "status", "start", "finish", "cancel", "save", "restore".
+func send_body_command(arg: String) -> void:
+	link.send_command(LinkProtocol.BODY, arg)
+
+
 ## Keep the tracker tracking while `node` is in the tree (a screen outside
 ## res://Games/ that shows the hand or the trunk: the trunk panel in the game
-## menus, Trunk angles, Define Table, Settings > Camera).
+## menus, Trunk angles, Define Table, Settings > Camera and > Calibration).
 func hold_tracking(node: Node) -> void:
 	_hold(_tracking_holders, node)
 

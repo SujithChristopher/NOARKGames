@@ -138,6 +138,95 @@ def stereo_extrinsic(path: Path, order=("cam0", "cam1")):
     return R, T
 
 
+# ── A take ────────────────────────────────────────────────────────────────────
+
+class CornerCollector:
+    """Detected corners per frame per camera — never the frames themselves."""
+
+    def __init__(self, camera_names=("cam0", "cam1")):
+        self.camera_names = camera_names
+        self.frames = {name: [] for name in camera_names}
+        # Whether each frame index holds a genuinely simultaneous pair. The
+        # rigid body itself is solved from same-camera pairings and does not
+        # care, but anything cross-camera — refitting the stereo extrinsic —
+        # must use only the frames where this is true.
+        self.paired: list = []
+
+    def add(self, name: str, detections: dict) -> None:
+        self.frames[name].append(detections)
+
+    def add_pair(self, det0: dict, det1: dict, paired: bool) -> None:
+        self.frames[self.camera_names[0]].append(det0)
+        self.frames[self.camera_names[1]].append(det1)
+        self.paired.append(bool(paired))
+
+    def keep_only(self, allowed) -> None:
+        """Drop every detection outside `allowed`, in place."""
+        allowed = set(allowed)
+        for name, frames in self.frames.items():
+            self.frames[name] = [
+                {mid: c for mid, c in frame.items() if mid in allowed}
+                for frame in frames
+            ]
+
+    def counts(self) -> dict:
+        counts: dict[int, int] = {}
+        for frames in self.frames.values():
+            for frame in frames:
+                for mid in frame:
+                    counts[mid] = counts.get(mid, 0) + 1
+        return dict(sorted(counts.items()))
+
+    def save(self, path: Path) -> None:
+        """Flatten to an .npz so a take can be re-solved without recapturing.
+
+        Stored as one row per observation — camera, frame, marker, 8 corner
+        coordinates — because the per-frame dicts are ragged and npz wants
+        rectangles. msgpack would be the obvious alternative but is not
+        installed in this project's venv.
+        """
+        rows, corners = [], []
+        for cam_index, name in enumerate(self.camera_names):
+            for frame_index, frame in enumerate(self.frames[name]):
+                for mid, c in frame.items():
+                    rows.append((cam_index, frame_index, mid))
+                    corners.append(np.asarray(c, dtype=np.float64).reshape(8))
+        np.savez_compressed(
+            path,
+            index=np.asarray(rows, dtype=np.int64),
+            corners=np.asarray(corners, dtype=np.float64),
+            camera_names=np.asarray(self.camera_names),
+            frame_counts=np.asarray(
+                [len(self.frames[n]) for n in self.camera_names], dtype=np.int64
+            ),
+            paired=np.asarray(self.paired, dtype=bool),
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> "CornerCollector":
+        data = np.load(path, allow_pickle=False)
+        names = tuple(str(n) for n in data["camera_names"])
+        collector = cls(names)
+        for name, count in zip(names, data["frame_counts"]):
+            collector.frames[name] = [{} for _ in range(int(count))]
+        for (cam_index, frame_index, mid), corner in zip(
+            data["index"], data["corners"]
+        ):
+            collector.frames[names[cam_index]][frame_index][int(mid)] = corner.reshape(
+                4, 2
+            )
+        if "paired" in data:
+            collector.paired = [bool(x) for x in data["paired"]]
+        else:
+            # Takes recorded before the capture was synchronised: the frames
+            # were paired by index with no check, and measured on this board
+            # that put them nearly three frame periods apart.
+            collector.paired = [False] * max(
+                len(collector.frames[n]) for n in names
+            )
+        return collector
+
+
 class RigidBody:
     """Every tag's corners in the reference tag's frame, as one point cloud."""
 

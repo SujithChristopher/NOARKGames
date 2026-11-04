@@ -192,6 +192,21 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
   `pyscripts/bench_cameras.py` scores both mappings on one take;
   `pyscripts/bench_solvers.py` does the same for the two solvers.
 
+**From the app (Settings > Calibration, `calibration_tab.gd`):** after a tag is moved, swapped or
+added, no terminal needed. **Tag 1 stays fixed** (`[tip] tag` in device.toml): the tracked point's
+69 mm offset is measured from it and is kept, and "moved" means relative to it. The tracker takes the
+take from its own frames while tracking continues (`pyscripts/body_take.py`: corners only, 10 pairs a
+second, 60 s, same exposure, ISP and refine as tracking; no pose is solved meanwhile), runs the solve as
+its own niced process (`body_solve.py`, about 2 minutes; the cameras go off meanwhile), and the app shows
+each tag as same place / moved / new / gone / left out. Nothing changes until Save, which backs up
+`rigidbody.toml` under `calibration/takes/` (git-ignored, with the take and the log) and swaps the body
+in with no restart; "Put the previous one back" undoes it. Any tag id is accepted, unlike
+`rigidbody_calib.py`, which filters by `tag_ids`; Save adds new ids to that list. A tag that does not move
+with the device (`_moves_together`: over 20 mm or 10° of spread) is left out before the slow stage: one
+fixed in the room took the solve past 8 minutes. A take is refused if the device barely turned (under 15°,
+`MIN_TURN_DEG`), which otherwise passes every other check. If every other tag moved it warns that tag 1
+itself may have. Not handled: a different printed tag size (device.toml).
+
 See `pyscripts/README.md` for the calibration workflow.
 
 ### Trunk Tracking
@@ -290,7 +305,7 @@ for big messages, heartbeats both ways.
   until Godot sends CONFIG `track=position`. `GlobalScript._update_tracking` sends it while
   the current scene is under `res://Games/` or a node called
   `GlobalScript.hold_tracking(self)` (trunk panel in the game menus when trunk is on,
-  Trunk angles, Define Table, Settings > Camera); `track=rotation` while a node that called
+  Trunk angles, Define Table, Settings > Camera and > Calibration); `track=rotation` while a node that called
   `GlobalScript.want_rotation(self)` is in the tree (Cannon Defense) — the tracker then
   sends ROTATION (the rvec) instead of POSITION, never both; everywhere else `track=off`. The cameras take 2–5 s to
   come up (own thread; the link keeps answering) and go off `camera_idle_off_s` (20 s)
@@ -317,7 +332,7 @@ for big messages, heartbeats both ways.
   `link_protocol.gd`, `tracker_link.gd`, `udp_transport.gd` / `ble_transport.gd`;
   `GlobalScript.link` is the link, `link_status` drives the status dot.
 - The main menu's **Settings** button opens its own scene (`Main_screen/Scenes/settings_screen.tscn`,
-  `settings_screen.gd`): a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live), a Camera tab (`camera_tab.gd`) and a Storage tab (`storage_tab.gd`) that lists and deletes
+  `settings_screen.gd`): a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live), a Camera tab (`camera_tab.gd`), a Calibration tab (`calibration_tab.gd`, under Marker Geometry) and a Storage tab (`storage_tab.gd`) that lists and deletes
   the board's camera recordings through the tracker (STORAGE command,
   `pyscripts/storage.py`), so it works from a tablet too. Only recordings —
   never game data, sessions.csv or position CSVs — and never the one in progress.
@@ -416,4 +431,6 @@ python pyscripts/tests/test_parity.py     # constants GDScript and Python both k
 - `test_parity.py` checks the protocol `VERSION`, `MOVEMENT` and the app folder (`Settings.APP_DIR`)
   agree between the GDScript and Python copies.
 - `pyscripts/tests/` also holds the tracker's synthetic tests; each runs as `python <file>`.
-  `test_camera_live.py` needs the board: a client against the running tracker and real cameras.
+  `test_camera_live.py` and `test_body_live.py` need the board: a client against the running tracker
+  and real cameras. `test_body_take.py` needs the board's venv: takes with a known answer through the
+  real solve, no cameras.

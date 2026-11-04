@@ -51,6 +51,7 @@ func _ready() -> void:
 	for entry in SCENES:
 		await _run(entry[0], entry[1])
 	await _camera_tab()
+	await _calibration_tab()
 	print("SMOKE DONE %d scenes" % SCENES.size())
 	get_tree().quit()
 
@@ -260,6 +261,206 @@ func _camera_tab_over_ble(tab) -> void:
 	tab._wifi_plugin = null
 
 
+## Settings > Calibration, with the tracker's BODY_STATUS fed in as the link would hand
+## it over. No frame passes while connected, so the link does not act on what is queued.
+func _calibration_tab() -> void:
+	print("SMOKE calibration tab")
+	Settings.data["stream_type"] = "udp"
+	var scene := (load(SETTINGS_SCREEN) as PackedScene).instantiate()
+	get_tree().root.add_child(scene)
+	get_tree().current_scene = scene
+	await get_tree().process_frame
+	var tab = scene._calibration
+	var camera = scene._camera
+	var current := {"tags": [1, 2, 3, 4, 5], "created": "2026-10-29T09:08:46", "agreement_mm": 1.6, "can_restore": true}
+
+	# Opening it: asks where things stand, holds the cameras, asks for the picture.
+	scene._tabs.current_tab = tab.get_index()
+	await get_tree().process_frame
+	_check(_body_commands()[-1] == "status", "opening should ask where things stand")
+	_check(_configs()[-1] == "preview=on", "opening should ask for the picture")
+	_check(GlobalScript.tracking_mode() == "position", "opening should hold the cameras")
+
+	# Idle: what is in use, and what can be done.
+	_feed_body({"state": "idle", "anchor": 1, "current": current})
+	_check("1, 2, 3, 4, 5" in tab._state.text and "1.6" in tab._state.text, "what is in use not shown: %s" % tab._state.text)
+	_check("2026-10-29" in tab._state.text, "when it was measured not shown")
+	_check("Tag 1" in tab._message.text, "it should say which tag stays fixed: %s" % tab._message.text)
+	_check(tab._start.visible and tab._restore.visible, "idle should offer start and restore")
+	_check(not tab._save.visible and not tab._finish.visible, "idle offers nothing else")
+	tab._start.pressed.emit()
+	_check(_body_commands()[-1] == "start", "start not sent")
+
+	# Capturing: what the take still needs.
+	_feed_body({"state": "capturing", "anchor": 1, "current": current, "capture": {
+		"left": null, "frames": 0, "level": null, "tag_px": null, "tags": []}})
+	_check("cameras" in tab._state.text, "the clock waits for the cameras: %s" % tab._state.text)
+	_feed_body({"state": "capturing", "anchor": 1, "current": current, "capture": {
+		"left": 41.5, "frames": 185, "level": 20, "tag_px": 30, "tags": [
+			{"id": 1, "seen": 180, "joined": true}, {"id": 2, "seen": 90, "joined": true},
+			{"id": 3, "seen": 12, "joined": false}, {"id": 5, "seen": 0, "joined": false}]}})
+	_check("42" in tab._state.text, "time left not shown: %s" % tab._state.text)
+	_check(tab._finish.visible and tab._cancel.visible and not tab._start.visible, "capturing offers finish and cancel")
+	var rows := _row_text(tab)
+	_check("Tag 2 | joined | seen 90" in rows, "a joined tag not shown: %s" % rows)
+	_check("Tag 3 | show it beside another tag | seen 12" in rows, "a tag without a neighbour not shown: %s" % rows)
+	_check("Tag 5 | not seen" in rows, "an unseen tag not shown: %s" % rows)
+	_check("dark" in tab._message.text, "a dark image should be said: %s" % tab._message.text)
+	_feed_body({"state": "capturing", "anchor": 1, "current": current, "capture": {
+		"left": 30.0, "frames": 300, "level": 100, "tag_px": 30, "tags": [{"id": 1, "seen": 180, "joined": true}]}})
+	_check("closer" in tab._message.text, "small tags should be said: %s" % tab._message.text)
+	_feed_body({"state": "capturing", "anchor": 1, "current": current, "capture": {
+		"left": 29.0, "frames": 310, "level": 100, "tag_px": 60, "tags": [{"id": 1, "seen": 180, "joined": true}]}})
+	_check("joined" in tab._message.text, "all joined should be said: %s" % tab._message.text)
+	var picture := Image.create(640, 200, false, Image.FORMAT_RGB8)
+	_feed(LinkProtocol.PREVIEW, picture.save_jpg_to_buffer())
+	_check(tab._picture.texture != null and tab._picture.visible, "the preview should become the picture")
+	tab._finish.pressed.emit()
+	_check(_body_commands()[-1] == "finish", "finish not sent")
+
+	# Solving: the cameras are let go, and the wait is said.
+	var previews := _configs().count("preview=off")
+	_feed_body({"state": "solving", "anchor": 1, "current": current, "elapsed": 40})
+	await get_tree().process_frame
+	_check("40" in tab._state.text, "the wait not shown: %s" % tab._state.text)
+	_check(tab._cancel.visible and not tab._finish.visible, "solving offers cancel only")
+	_check(GlobalScript.tracking_mode() == "off", "solving should let the cameras go")
+	_check(_configs().count("preview=off") == previews + 1, "solving should end the preview")
+	_check(not tab._picture.visible, "no picture while solving")
+
+	# Review: where each tag went, and Save.
+	var good := {"ok": true, "problems": [], "warnings": ["Tag 1 may have moved: every other tag shifted."],
+		"tags": [{"id": 1, "state": "same", "moved_mm": 0.0, "seen": 300, "spread_mm": 0.0},
+			{"id": 2, "state": "moved", "moved_mm": 31.2, "seen": 200, "spread_mm": 1.2},
+			{"id": 3, "state": "same", "moved_mm": 1.1, "seen": 200, "spread_mm": 1.1},
+			{"id": 9, "state": "new", "moved_mm": null, "seen": 100, "spread_mm": 1.4}],
+		"gone": [5], "dropped": [7], "agreement_mm": [0.9, 2.6], "reprojection_px": [0.3, 0.4],
+		"turned_deg": 34.0, "solve_s": 98}
+	_feed_body({"state": "review", "anchor": 1, "current": current, "result": good})
+	rows = _row_text(tab)
+	_check("0.9" in tab._state.text, "the agreement not shown: %s" % tab._state.text)
+	_check("Tag 2 | moved 31 mm" in rows, "a moved tag not shown: %s" % rows)
+	_check("Tag 3 | same place" in rows, "a tag that stayed not shown: %s" % rows)
+	_check("Tag 9 | new" in rows, "a new tag not shown: %s" % rows)
+	_check("Tag 5 | gone" in rows, "a tag no longer found not shown: %s" % rows)
+	_check("Tag 7 | left out" in rows, "a tag left out not shown: %s" % rows)
+	_check("Tag 1 may have moved" in tab._message.text, "a warning should be shown: %s" % tab._message.text)
+	_check(tab._message.get_theme_color("font_color") == tab.WARN, "a warning should stand out")
+	_check(tab._save.visible and tab._cancel.visible and not tab._start.visible, "review offers save and discard")
+	tab._save.pressed.emit()
+	_check(_body_commands()[-1] == "save", "save not sent")
+	GlobalScript.link_command_done.emit(LinkProtocol.BODY, true, "saved")
+	_feed_body({"state": "idle", "anchor": 1, "current": current})
+	_check("in use" in tab._message.text.to_lower() or "using" in tab._message.text, "saving should be confirmed: %s" % tab._message.text)
+	await get_tree().process_frame
+	_check(GlobalScript.tracking_mode() == "position", "back to idle should hold the cameras again")
+
+	# A refused take: no Save, and why.
+	_feed_body({"state": "review", "anchor": 1, "current": current, "result": {
+		"ok": false, "problems": ["the device hardly turned (0 degrees, needs 15)"], "warnings": [],
+		"tags": [], "gone": [4], "dropped": []}})
+	rows = _row_text(tab)
+	_check("Tag 4 | not found in this take" in rows, "a refused take changes nothing: %s" % rows)
+	_check(not tab._save.visible, "a refused take cannot be saved")
+	_check(tab._start.visible, "a refused take should offer another go")
+	_check("The device hardly turned" in tab._message.text, "the reason should be shown: %s" % tab._message.text)
+
+	# Back to plain text once there is nothing to warn about.
+	_feed_body({"state": "idle", "anchor": 1, "current": current})
+	_check(tab._message.get_theme_color("font_color") == tab.MUTED, "the hint is not a warning")
+
+	# A failure: why, and another go.
+	_feed_body({"state": "failed", "anchor": 1, "current": current, "reason": "Tag 1 was never seen."})
+	_check("Tag 1 was never seen." in tab._message.text, "the failure not shown: %s" % tab._message.text)
+	_check(tab._start.visible and not tab._save.visible, "a failure should offer another go")
+
+	# A refusal is shown.
+	GlobalScript.link.connected = true
+	GlobalScript.link_command_done.emit(LinkProtocol.BODY, false, "already solving")
+	GlobalScript.link.connected = false
+	_check("already solving" in tab._message.text, "a refusal should be shown: %s" % tab._message.text)
+
+	# The link giving up on a command is not the tracker refusing it.
+	GlobalScript.link.connected = true
+	GlobalScript.link_command_done.emit(LinkProtocol.BODY, false, "link lost")
+	_check(not "refused" in tab._message.text and not "link lost" in tab._message.text,
+		"a lost link is not a refusal: %s" % tab._message.text)
+	GlobalScript.link_command_done.emit(LinkProtocol.BODY, false, "no answer")
+	_check("did not answer" in tab._message.text and not "refused" in tab._message.text,
+		"no answer is not a refusal: %s" % tab._message.text)
+	GlobalScript.link.connected = false
+
+	# The link: gone, then back; a tracker forgets the preview at every HELLO.
+	GlobalScript.link_connected_changed.emit(false)
+	_check("tracker" in tab._state.text and not tab._start.visible, "no link: nothing to offer")
+	var asked := _body_commands().size()
+	var asked_preview := _configs().count("preview=on")
+	GlobalScript.link_connected_changed.emit(true)
+	_check(_body_commands().size() == asked + 1, "a reconnect should ask where things stand")
+	await get_tree().process_frame
+	_check(_configs().count("preview=on") == asked_preview + 1, "a reconnect should ask for the picture again")
+
+	# To the Camera tab and back: the tab coming into view has the last word on the
+	# preview. Leaving a take ends it; a solve goes on.
+	_feed_body({"state": "capturing", "anchor": 1, "current": current, "capture": {
+		"left": 20.0, "frames": 10, "level": 100, "tag_px": 60, "tags": []}})
+	scene._tabs.current_tab = camera.get_index()
+	await get_tree().process_frame
+	_check(_body_commands()[-1] == "cancel", "leaving should end a take")
+	_check(_configs()[-1] == "preview=on", "the Camera tab should have the preview, got %s" % _configs()[-1])
+	_check(GlobalScript.tracking_mode() == "position", "the Camera tab should hold the cameras")
+	scene._tabs.current_tab = tab.get_index()
+	await get_tree().process_frame
+	_check(_configs()[-1] == "preview=on", "this tab should have the preview, got %s" % _configs()[-1])
+	_feed_body({"state": "solving", "anchor": 1, "current": current, "elapsed": 1})
+	var commands := _body_commands().size()
+	scene._tabs.current_tab = 0
+	await get_tree().process_frame
+	_check(_body_commands().size() == commands, "leaving should not end a solve")
+	_check(GlobalScript.tracking_mode() == "off", "leaving should let the cameras go")
+
+	# Over BLE no picture is asked for here: the hotspot belongs to the Camera tab.
+	Settings.data["stream_type"] = "ble"
+	var configs_before := _configs().size()
+	scene._tabs.current_tab = tab.get_index()
+	await get_tree().process_frame
+	_check(_configs().size() == configs_before, "over BLE this tab should not ask for the picture")
+	_feed_body({"state": "idle", "anchor": 1, "current": current})
+	_check(not tab._picture.visible and "BLE" in tab._message.text, "over BLE it should say why there is no picture")
+	scene._tabs.current_tab = 0
+	await get_tree().process_frame
+	Settings.data["stream_type"] = "udp"
+	scene.queue_free()
+	await get_tree().process_frame
+	print("SMOKE calibration tab done")
+
+
+func _feed_body(info: Dictionary) -> void:
+	GlobalScript.link.connected = true
+	_feed(LinkProtocol.BODY_STATUS, JSON.stringify(info).to_utf8_buffer())
+	GlobalScript.link.connected = false
+
+
+## Each row of the tab's list, as "cell | cell | cell", one to a line.
+func _row_text(tab) -> String:
+	var cells: Array[String] = []
+	for label in tab._rows.get_children():
+		cells.append(label.text)
+	var lines := PackedStringArray()
+	for i in range(0, cells.size(), tab._rows.columns):
+		lines.append(" | ".join(cells.slice(i, i + tab._rows.columns)))
+	return "\n".join(lines)
+
+
+## The BODY commands waiting to go out.
+func _body_commands() -> PackedStringArray:
+	var out := PackedStringArray()
+	for command in GlobalScript.link._queue:
+		if command["kind"] == LinkProtocol.BODY:
+			out.append(command["body"].get_string_from_utf8())
+	return out
+
+
 func _restart_queued(link) -> bool:
 	for command in link._queue:
 		if command["kind"] == LinkProtocol.RESTART:
@@ -305,7 +506,7 @@ func _configs() -> PackedStringArray:
 
 func _check(ok: bool, what: String) -> void:
 	if not ok:
-		push_error("SMOKE camera tab: %s" % what)
+		push_error("SMOKE settings: %s" % what)
 
 
 func _run(path: String, mode: String) -> void:

@@ -11,7 +11,8 @@ name = "NOARK hand rig"
 
 # Tag ids on the bracket. Anything else the detector reports during a
 # calibration take is discarded, so a tag from another rig in the room, or the
-# occasional false positive, never reaches the solve.
+# occasional false positive, never reaches the solve. The app's Settings > Calibration
+# takes any id, leaves out what does not move with the device, and adds new ones here.
 tag_ids = [1, 2, 3, 4, 5, 6, 7, 8]
 
 tag_size_m = 0.05
@@ -30,7 +31,8 @@ reference_id = 1
 #   Z  out of the printed face  (so the tip is normally NEGATIVE)
 #
 # Keeping the tag explicit means the measurement stays valid if the body is
-# ever re-solved against a different reference_id.
+# ever re-solved against a different reference_id. The app's Settings > Calibration keeps
+# this tag fixed and these numbers as they are: move every other tag, not this one.
 #
 # All zeros means "the centre of `tag`" — a real, usable point, and what the
 # tracker reports until the hand position has actually been measured. Replace

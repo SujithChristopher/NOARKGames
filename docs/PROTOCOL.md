@@ -89,6 +89,7 @@ again and is not applied twice.
 | `0x06` | `TRUNK` | `neutral` (model frame: set zero) \| `zero_clear` \| `snapshot` \| `select=<n>` | the command, or why refused |
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
 | `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
+| `0x0A` | `BODY` | `status` \| `start` \| `finish` \| `cancel` \| `save` \| `restore` | below, or why refused |
 
 STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
 board's camera recordings: `<patient>/<session>/Video/rec_*` and
@@ -134,6 +135,7 @@ file, and exposure and gain belong to the board's room. Over UDP the app writes 
 | `0x87` | `ROTATION` | `<B3f`, 13 bytes, below; while `track=rotation` |
 | `0x88` | `CAMERA_STATUS` | JSON, below; every 0.5 s while `preview=on` and tracking |
 | `0x89` | `PREVIEW` | JPEG, below; every 0.2 s while `preview=on` and tracking. Over UDP on the link, over BLE on the hotspot |
+| `0x8A` | `BODY_STATUS` | JSON, below; after `status` or a change, and every 0.5 s during a take or a solve |
 
 **POSITION** / **ROTATION**, one per frame with a solved pose (no marker in
 view → none; the heartbeat still shows the tracker is alive, and the app reads
@@ -203,8 +205,42 @@ reaches the board and nothing behind it. Measured on the board with a tablet: 5 
 the normal Wi-Fi, 5.3 ms, no loss at 40 kB five times a second. Without the hotspot
 (`setup/setup_board.sh` not run, or a failure) the tab still works on the numbers.
 
+**Measuring the device's tags** (Settings > Calibration; `calibration_tab.gd`,
+`pyscripts/body_take.py`, `pyscripts/body_solve.py`), after one was moved, swapped or added:
+
+| `BODY` | When | ACK detail |
+|---|---|---|
+| `status` | any time | empty; a `BODY_STATUS` follows |
+| `start` | not during a take or a solve | `started`. Needs `track=position` to get frames: the 60 s run from the first one |
+| `finish` | during a take; it also ends by itself | `solving`, or `failed` if the fixed tag was never seen |
+| `cancel` | any time | `cancelled`: ends a take or a solve, drops a result |
+| `save` | a result with `ok` | `saved`: the tracker uses it from the next frame, with no restart |
+| `restore` | idle or failed | `restored`: the newest calibration replaced goes back in use |
+
+`BODY_STATUS` always has `state` (`idle`, `capturing`, `solving`, `review`, `failed`),
+`anchor` (the fixed tag: `[tip] tag` in device.toml) and
+`current` (`{"tags", "created", "agreement_mm", "can_restore"}`: what is in use). Then:
+
+- `capturing`: `capture`, `{"left": s or null before the first frame, "frames", "level", "tag_px",
+  "tags": [{"id", "seen", "joined"}]}`. `joined` means it reaches the fixed tag through
+  tags seen beside it, often enough for the solve to use.
+- `solving`: `elapsed`, seconds.
+- `review`: `result`, `{"ok", "problems", "warnings", "tags": [{"id", "state", "moved_mm", "seen",
+  "spread_mm"}], "gone", "dropped", "agreement_mm": [median, p95], "reprojection_px": [median, p95],
+  "turned_deg", "solve_s"}`. A tag's `state` is `same`, `moved` (over 5 mm from the
+  calibration in use, relative to the fixed tag) or `new`. `gone` was in use and is not in
+  this one; `dropped` was seen but left out. Only `problems` stop a save. A refused
+  take may have fewer fields: `ok`, `problems`, `warnings`, `tags`, `gone`, `dropped`.
+- `failed`: `reason`.
+
+A link lost or a new `HELLO` ends a take; a solve goes on and `status` finds its result.
+Additive like the others: `VERSION` did not change.
+
 ## 6. Tools
 
+- `uv run pyscripts/tests/test_body_live.py` — the same against `BODY`: a take on real
+  frames beside the link and the picture, then a solve started and cancelled, or the
+  refusal without tag 1. Saves nothing. About 30 s.
 - `uv run pyscripts/tests/test_camera_live.py` — a client against the running
   tracker on the board's cameras: exposure and gain reach the sensor, the image
   follows, a cap shows, the preview stops. Close the app first; about a minute.

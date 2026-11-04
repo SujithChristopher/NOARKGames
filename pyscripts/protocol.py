@@ -20,7 +20,8 @@ CONFIG = 0x05         # "key=value"
 TRUNK = 0x06          # "neutral" | "snapshot" | "select=<n>"
 STORAGE = 0x07        # "list" | "delete=<path>"; answered later by STORAGE_LIST
 RESTART = 0x08        # ACKed, then the tracker exits and systemd starts it again
-RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE, RESTART})
+BODY = 0x0A           # "status" | "start" | "finish" | "cancel" | "save" | "restore"; state in BODY_STATUS
+RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE, RESTART, BODY})
 # Not on the link: alone in a datagram to the picture port, over the hotspot.
 PICTURE_HELLO = 0x09
 
@@ -35,6 +36,7 @@ STORAGE_LIST = 0x86   # JSON: the board's recordings and disk (storage.py)
 ROTATION = 0x87       # <B3f: the rigid body's Rodrigues rvec, camera frame
 CAMERA_STATUS = 0x88  # JSON: what the sensors hold and see (camera_view.py); preview on
 PREVIEW = 0x89        # JPEG: both cameras side by side; preview on, over UDP or the hotspot
+BODY_STATUS = 0x8A    # JSON: measuring the device's tags (body_take.py)
 
 # What CONFIG track= asks for: one pose message per solved frame, POSITION or
 # ROTATION — a game uses one or the other, never both.

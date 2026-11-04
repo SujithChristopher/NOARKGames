@@ -47,7 +47,7 @@ def test_protocol_version():
 
 def test_camera_message_types():
     # A mismatch only shows as a Camera tab that stays empty.
-    for name in ("CAMERA_STATUS", "PREVIEW", "PICTURE_HELLO"):
+    for name in ("CAMERA_STATUS", "PREVIEW", "PICTURE_HELLO", "BODY", "BODY_STATUS"):
         gd = gd_const("Main_screen/Scripts/link_protocol.gd", name)
         py = py_const("pyscripts/protocol.py", name)
         assert gd == py, f"link_protocol.gd {name} {gd:#x} != protocol.py {name} {py:#x}"

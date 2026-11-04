@@ -18,6 +18,7 @@ const TRUNK := 0x06           # "neutral" | "snapshot" | "select=<n>"
 const STORAGE := 0x07         # "list" | "delete=<path>"; answered later by STORAGE_LIST
 const RESTART := 0x08         # ACKed, then the tracker exits and systemd starts it again
 const PICTURE_HELLO := 0x09   # not on the link: alone in a datagram to the picture port, over the hotspot
+const BODY := 0x0A            # "status" | "start" | "finish" | "cancel" | "save" | "restore"; state in BODY_STATUS
 
 # Tracker -> app
 const TRACKER_HEARTBEAT := 0x80  # state u8 (TrackerState)
@@ -30,6 +31,7 @@ const STORAGE_LIST := 0x86    # JSON: the board's recordings and disk
 const ROTATION := 0x87        # <B3f: the rigid body's Rodrigues rvec, camera frame
 const CAMERA_STATUS := 0x88   # JSON: what the sensors hold and see; preview on
 const PREVIEW := 0x89         # JPEG: both cameras side by side; preview on, over UDP or the hotspot
+const BODY_STATUS := 0x8A     # JSON: measuring the device's tags
 
 const VEC3_SIZE := 13         # POSITION and ROTATION
 const ACK_SIZE := 4

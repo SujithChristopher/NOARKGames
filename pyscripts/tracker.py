@@ -22,6 +22,7 @@ import toml
 from scipy.optimize import least_squares
 
 import protocol
+from body_take import BodyTake
 from camera_view import CameraView, parse_exposure, parse_gain, save_settings
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
@@ -451,6 +452,11 @@ class TrackerClass:
             threshold_px=settings.get("corner_deadband_px", 0)  # 0 = stabilizer off: every frame is solved
         )
         self.marker_offsets = MARKER_OFFSETS
+        # Settings > Calibration: a new measurement of the tags, off the loop.
+        self._body_take = BodyTake(
+            rigidbody_path, device_path, stereo_calib_path, on_change=self._use_new_rig,
+            refine=lambda: self.refine_mode, isp=self._isp,
+        )
         # Contour is the default. Crop refine (rapidtag 0.1.10) gave garbage poses on
         # this rig, so it is opt-in: settings.json tracker_refine = "crop". Track with
         # the refinement the rigid body was calibrated with (rigidbody.toml meta.refine).
@@ -789,6 +795,13 @@ class TrackerClass:
         self.streamer.start()
         self.link = Link(self.streamer)
 
+    def _use_new_rig(self) -> None:
+        """Settings > Calibration saved or put back a calibration. The stabilizer may be
+        holding a pose from the old one."""
+        self.rig = RigidBody.load(self._rigidbody_path)
+        self.stabilizer = CornerStabilizer(threshold_px=self.stabilizer.threshold_px)
+        print(f"[RIG] New calibrated body: {self.rig.describe()}", flush=True)
+
     def _end_link(self, why: str) -> None:
         """The app has gone (closed, crashed, out of range). The tracker
         outlives it, over either transport: the session closes and it waits for
@@ -796,6 +809,7 @@ class TrackerClass:
         print(f"[LINK] {why}; session closed, waiting for the app.", flush=True)
         self._want_tracking = False
         self._set_preview(False)
+        self._body_take.link_lost()
         self._close_session()
         self.link.reset()
 
@@ -805,6 +819,7 @@ class TrackerClass:
             # A new app: idle until it asks for tracking.
             self._want_tracking = False
             self._set_preview(False)
+            self._body_take.link_lost()
             self._reload_settings()
             return True, ""
         if kind == protocol.RESTART:
@@ -817,6 +832,8 @@ class TrackerClass:
             return self._trunk_command(body)
         if kind == protocol.STORAGE:
             return self.storage.command(body.decode(errors="replace").strip())
+        if kind == protocol.BODY:
+            return self._body_take.command(body.decode(errors="replace").strip())
         if kind == protocol.SESSION:
             hid = body.decode(errors="replace").strip()
             if not hid:
@@ -1332,13 +1349,17 @@ class TrackerClass:
         t3 = time.perf_counter()
         self._stage_time["refine"] += t3 - t2
 
+        if self._body_take.capturing:
+            self._body_take.frame(
+                time.time(), self._detections_by_id(corners0, ids0),
+                self._detections_by_id(corners1, ids1), allow_stereo, raw0,
+            )
+
         # Before pose estimation: a STOP or SESSION must not wait for a marker
         # to be in view (recording exists for exactly the frames that fail).
         self.link.poll(self._on_message)
         self.link.tick()
-        storage_list = self.storage.poll()
-        if storage_list and self.link.connected:
-            self.link.send(storage_list)
+        self._send_job_updates()
 
         if self.trunk is not None and self.trunk_on:
             self._send_trunk()
@@ -1346,7 +1367,10 @@ class TrackerClass:
         # Pose estimation. With a calibrated body it is one joint solve over
         # every visible corner; without one, a pose per marker whose tip offsets
         # are then averaged.
-        if self.rig is not None:
+        if self._body_take.capturing:
+            # Its tags may be the ones that moved, and no game is listening.
+            have_pose = False
+        elif self.rig is not None:
             board_rvec, board_tvec = self._board_pose(
                 corners0, ids0, corners1, ids1, allow_stereo=allow_stereo
             )
@@ -1411,9 +1435,13 @@ class TrackerClass:
             time.sleep(0.02)
         self.link.poll(self._on_message)
         self.link.tick()
-        storage_list = self.storage.poll()
-        if storage_list and self.link.connected:
-            self.link.send(storage_list)
+        self._send_job_updates()
+
+    def _send_job_updates(self) -> None:
+        """What runs beside the loop has to say: Settings > Storage and > Calibration."""
+        for update in (self.storage.poll(), self._body_take.poll(time.time())):
+            if update and self.link.connected:
+                self.link.send(update)
 
     def _release_starting_cameras(self) -> None:
         """Exiting while the cameras are still coming up: wait, then free them."""
@@ -1483,7 +1511,7 @@ class TrackerClass:
             # Each step on its own: one failing (the trunk worker already gone
             # after a Ctrl-C) must not skip the rest — a skipped streamer.stop()
             # leaves the BLE advertisement on with nothing behind it.
-            steps = []
+            steps = [self._body_take.close]
             if self.record_frames and self._rec_file0 is not None:
                 steps.append(self._close_rec_files)
             steps.append(self._stop_session_recording)

@@ -44,6 +44,7 @@ from scipy.spatial.transform import Rotation
 from rigid_body import (
     DEFAULT_TAG_IDS,
     TAG_SIZE_M,
+    CornerCollector,
     load_cameras,
     load_device,
     stereo_extrinsic,
@@ -76,6 +77,16 @@ CALIBRATION_FRACTION = 0.5
 # the reported position steps as the visible set changes. Good takes measure
 # well under 2 mm; the one that shipped a 29 mm error measured 81 mm.
 AGREEMENT_LIMIT_MM = 10.0
+# Two tags on one body keep their place relative to each other; on real takes they vary
+# by 0.5-2.4 mm and 0.5-1.7 degrees, keeping 79-99% of the samples. A tag fixed in the
+# room measured 81 mm and 45 degrees, and left in it kept the solve going past 8 minutes.
+RIGID_SPREAD_MM = 20.0
+RIGID_SPREAD_DEG = 10.0
+RIGID_KEPT_SHARE = 0.5
+# How far the device must turn from its average pose, in degrees, over 90% of a take. The
+# solve needs tags seen from several angles, and whether they move together cannot be
+# told from a device held still. Held still, it measured 0.3 degrees and passed the rest.
+MIN_TURN_DEG = 15.0
 # ── Per-tag pose ──────────────────────────────────────────────────────────────
 
 def _marker_pose(corners: np.ndarray, K: np.ndarray, D: np.ndarray):
@@ -169,93 +180,6 @@ def _robust_average_transform(candidates: list) -> dict:
 
 
 # ── Capture ───────────────────────────────────────────────────────────────────
-
-class CornerCollector:
-    """Detected corners per frame per camera — never the frames themselves."""
-
-    def __init__(self, camera_names=("cam0", "cam1")):
-        self.camera_names = camera_names
-        self.frames = {name: [] for name in camera_names}
-        # Whether each frame index holds a genuinely simultaneous pair. The
-        # rigid body itself is solved from same-camera pairings and does not
-        # care, but anything cross-camera — refitting the stereo extrinsic —
-        # must use only the frames where this is true.
-        self.paired: list = []
-
-    def add(self, name: str, detections: dict) -> None:
-        self.frames[name].append(detections)
-
-    def add_pair(self, det0: dict, det1: dict, paired: bool) -> None:
-        self.frames[self.camera_names[0]].append(det0)
-        self.frames[self.camera_names[1]].append(det1)
-        self.paired.append(bool(paired))
-
-    def keep_only(self, allowed) -> None:
-        """Drop every detection outside `allowed`, in place."""
-        allowed = set(allowed)
-        for name, frames in self.frames.items():
-            self.frames[name] = [
-                {mid: c for mid, c in frame.items() if mid in allowed}
-                for frame in frames
-            ]
-
-    def counts(self) -> dict:
-        counts: dict[int, int] = {}
-        for frames in self.frames.values():
-            for frame in frames:
-                for mid in frame:
-                    counts[mid] = counts.get(mid, 0) + 1
-        return dict(sorted(counts.items()))
-
-    def save(self, path: Path) -> None:
-        """Flatten to an .npz so a take can be re-solved without recapturing.
-
-        Stored as one row per observation — camera, frame, marker, 8 corner
-        coordinates — because the per-frame dicts are ragged and npz wants
-        rectangles. msgpack would be the obvious alternative but is not
-        installed in this project's venv.
-        """
-        rows, corners = [], []
-        for cam_index, name in enumerate(self.camera_names):
-            for frame_index, frame in enumerate(self.frames[name]):
-                for mid, c in frame.items():
-                    rows.append((cam_index, frame_index, mid))
-                    corners.append(np.asarray(c, dtype=np.float64).reshape(8))
-        np.savez_compressed(
-            path,
-            index=np.asarray(rows, dtype=np.int64),
-            corners=np.asarray(corners, dtype=np.float64),
-            camera_names=np.asarray(self.camera_names),
-            frame_counts=np.asarray(
-                [len(self.frames[n]) for n in self.camera_names], dtype=np.int64
-            ),
-            paired=np.asarray(self.paired, dtype=bool),
-        )
-
-    @classmethod
-    def load(cls, path: Path) -> "CornerCollector":
-        data = np.load(path, allow_pickle=False)
-        names = tuple(str(n) for n in data["camera_names"])
-        collector = cls(names)
-        for name, count in zip(names, data["frame_counts"]):
-            collector.frames[name] = [{} for _ in range(int(count))]
-        for (cam_index, frame_index, mid), corner in zip(
-            data["index"], data["corners"]
-        ):
-            collector.frames[names[cam_index]][frame_index][int(mid)] = corner.reshape(
-                4, 2
-            )
-        if "paired" in data:
-            collector.paired = [bool(x) for x in data["paired"]]
-        else:
-            # Takes recorded before the capture was synchronised: the frames
-            # were paired by index with no check, and measured on this board
-            # that put them nearly three frame periods apart.
-            collector.paired = [False] * max(
-                len(collector.frames[n]) for n in names
-            )
-        return collector
-
 
 def _overlay_status(collector, brightness, tag_px, remaining, tag_ids):
     """Lines for the preview window: what is good, and what still needs doing.
@@ -531,6 +455,15 @@ def _compose(outer: dict, inner: dict) -> dict:
     }
 
 
+def _moves_together(averaged: dict) -> bool:
+    """Whether a pair of tags stays put relative to each other, as tags on one body do."""
+    return (
+        averaged["translation_spread_mm"] <= RIGID_SPREAD_MM
+        and averaged["rotation_spread_deg"] <= RIGID_SPREAD_DEG
+        and averaged["used_count"] >= RIGID_KEPT_SHARE * averaged["sample_count"]
+    )
+
+
 def _chain_transforms(pairs, reference_id):
     """Every tag's transform into the reference frame, hopping where needed.
 
@@ -550,6 +483,8 @@ def _chain_transforms(pairs, reference_id):
         if len(samples) < MIN_SAMPLES_PER_MARKER:
             continue
         averaged = _robust_average_transform(samples)   # maps b's frame into a's
+        if not _moves_together(averaged):
+            continue
         cost = averaged["translation_spread_mm"]
         edges.setdefault(a, []).append((b, averaged, cost))
         edges.setdefault(b, []).append((a, _invert(averaged), cost))
@@ -716,7 +651,17 @@ def _bundle_adjust(collector, poses, cameras, transforms, reference_id, end_fram
     )
     for mid in marker_ids:
         transforms[mid]["R"], transforms[mid]["t"] = unpack(result.x, mid)
+    # Per camera: the two see the body from different places, so their poses differ.
+    turned = []
+    for name in collector.camera_names:
+        rotvecs = [result.x[view_start + 6 * i : view_start + 6 * i + 3]
+                   for i, view in enumerate(views) if view["camera"] == name]
+        if rotvecs:
+            rotations = Rotation.from_rotvec(rotvecs)
+            away = np.degrees((rotations.mean().inv() * rotations).magnitude())
+            turned.append(float(np.percentile(away, 90)))
     return {
+        "turned_deg": max(turned),
         "views": len(views),
         "budget": budget,
         "initial_rmse_px": initial,
@@ -769,6 +714,33 @@ def _tag_agreement(collector, poses, transforms, start_frame) -> dict:
         "median_mm": 1000.0 * float(np.median(spreads)),
         "p95_mm": 1000.0 * float(np.percentile(spreads, 95)),
     }
+
+
+def take_problems(result: dict) -> list:
+    """Why a solved take must not be used. These produced calibrations that looked fine
+    by reprojection and threw the tracked point by centimetres, or look fine because
+    nothing could be measured, so none of them is advisory."""
+    problems = []
+    if not result["bundle"]["success"]:
+        problems.append(
+            f"the bundle did not converge within {result['bundle']['budget']} "
+            "evaluations, so some tags are left wherever the solve stopped"
+        )
+    if result["agreement"]["frames"] == 0:
+        problems.append("no frame could compare two tags, so their agreement is unknown")
+    elif result["agreement"]["median_mm"] > AGREEMENT_LIMIT_MM:
+        problems.append(
+            f"the tags disagree about the tracked point by "
+            f"{result['agreement']['median_mm']:.1f} mm "
+            f"(limit {AGREEMENT_LIMIT_MM:.0f} mm), so the reported position will "
+            "jump as the visible set changes"
+        )
+    if result["bundle"]["turned_deg"] < MIN_TURN_DEG:
+        problems.append(
+            f"the device hardly turned ({result['bundle']['turned_deg']:.0f} degrees, needs "
+            f"{MIN_TURN_DEG:.0f}), so the tags were not seen from enough angles"
+        )
+    return problems
 
 
 def _board_corners(transforms, mid) -> np.ndarray:
@@ -1294,21 +1266,7 @@ if __name__ == "__main__":
             f"{np.round(1000 * tip_ref, 1)} mm"
         )
 
-    # Both of these produced a calibration that looked fine by reprojection and
-    # threw the tracked point by centimetres, so neither is advisory.
-    problems = []
-    if not result["bundle"]["success"]:
-        problems.append(
-            f"the bundle did not converge within {result['bundle']['budget']} "
-            "evaluations, so some tags are left wherever the solve stopped"
-        )
-    if result["agreement"]["median_mm"] > AGREEMENT_LIMIT_MM:
-        problems.append(
-            f"the tags disagree about the tracked point by "
-            f"{result['agreement']['median_mm']:.1f} mm "
-            f"(limit {AGREEMENT_LIMIT_MM:.0f} mm), so the reported position will "
-            "jump as the visible set changes"
-        )
+    problems = take_problems(result)
     if problems and not args.force:
         print("\n[CALIB] NOT WRITING the calibration:")
         for problem in problems:
