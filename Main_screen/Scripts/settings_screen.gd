@@ -5,7 +5,7 @@ extends Control
 ## Tracker tab: {DOCUMENTS}/NOARK_demo/settings.json, saved as it is edited.
 ## `debug` is not listed on purpose (file-only). The LIVE_KEYS are also sent to
 ## the tracker as a CONFIG and apply at once (recording from the next session);
-## the rest need the tracker restarted (sudo systemctl restart noark-tracker).
+## the rest restart the tracker, over the link, so nobody has to do it by hand.
 ## Camera tab: exposure and gain, with a live preview (camera_tab.gd).
 ## Storage tab: the board's camera recordings (storage_tab.gd).
 
@@ -46,6 +46,7 @@ const FIELDS := [
 const MUTED := Color(0.7, 0.72, 0.75)
 const MENU := "res://Main_screen/Scenes/main.tscn"
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
+const RESTART_ACK_WAIT_S := 2.0
 const LINK_STATUS_TEXT := {
 	LinkProtocol.LinkStatus.IDLE: "Not started",
 	LinkProtocol.LinkStatus.SCANNING: "Looking for the tracker...",
@@ -230,11 +231,7 @@ func _changed(key: String, value: Variant) -> void:
 		if not Settings.save():
 			_status.text = "Could not save settings!"
 			return
-		GlobalScript.restart_link()
-		# The tracker picks its transport once, at start, from its own board's
-		# settings.json — the same file when the app runs on the board.
-		_status.text = "This app now connects over %s. The tracker on the board must match: " % value.to_upper() \
-			+ "set it there and run  sudo systemctl restart noark-tracker"
+		_switch_link(value)
 		return
 	if key == "trunk_enabled":
 		TrunkMonitor.set_enabled(value)   # saves, and tells the tracker now
@@ -244,12 +241,48 @@ func _changed(key: String, value: Variant) -> void:
 	if not Settings.save():
 		_status.text = "Could not save settings!"
 		return
-	var live := " (restart the tracker to apply)"
 	if LIVE_KEYS.has(key):
 		var sent := ("on" if value else "off") if value is bool else _as_text(value)
 		GlobalScript.send_tracker_config(LIVE_KEYS[key], sent)
-		live = " (sent to the tracker)"
-	_status.text = "Saved %s = %s%s" % [key, _as_text(value), live]
+		_status.text = "Saved %s = %s (sent to the tracker)" % [key, _as_text(value)]
+		return
+	# The tracker reads the rest only when it starts.
+	var why := GlobalScript.restart_tracker()
+	_status.text = "Saved %s = %s (%s)" % [key, _as_text(value), "restarting the tracker" if why.is_empty() else why]
+
+
+# The tracker picks its transport once, at start, from its own board's settings.json.
+# On the board that is this same file, so restart it, over the old link while that is
+# still up, and then connect the new way. A tablet has its own file and cannot change
+# what the board does.
+func _switch_link(value: String) -> void:
+	var name := value.to_upper()
+	if not GlobalScript.on_the_board():
+		GlobalScript.restart_link()
+		_status.text = "This app now connects over %s. The tracker must match: change it on the board's Settings too." % name
+		return
+	var why := GlobalScript.restart_tracker()
+	if why.is_empty() and GlobalScript.link.connected:
+		var acked := {"done": false}
+		var on_done := func(kind: int, _ok: bool, _detail: String):
+			if kind == LinkProtocol.RESTART:
+				acked["done"] = true
+		GlobalScript.link_command_done.connect(on_done)
+		var waited := 0.0
+		while not acked["done"] and waited < RESTART_ACK_WAIT_S:
+			await get_tree().process_frame
+			waited += get_process_delta_time()
+		GlobalScript.link_command_done.disconnect(on_done)
+	GlobalScript.restart_link()
+	if not is_inside_tree():
+		return
+	if not why.is_empty():
+		_status.text = "Saved, but the tracker did not restart: %s" % why
+	elif value == "ble":
+		# The BLE addon has no Linux ARM build, so the app on the board cannot follow.
+		_status.text = "This board now waits for a tablet over BLE. This app cannot connect until you switch back to UDP here."
+	else:
+		_status.text = "This app and the tracker now connect over %s." % name
 
 
 # 1.0 -> "1", 0.5 -> "0.5"; matches how the option lists are written.

@@ -21,6 +21,8 @@ TRUNK = 0x06          # "neutral" | "snapshot" | "select=<n>"
 STORAGE = 0x07        # "list" | "delete=<path>"; answered later by STORAGE_LIST
 RESTART = 0x08        # ACKed, then the tracker exits and systemd starts it again
 RELIABLE = frozenset({HELLO, SESSION, STOP, CONFIG, TRUNK, STORAGE, RESTART})
+# Not on the link: alone in a datagram to the picture port, over the hotspot.
+PICTURE_HELLO = 0x09
 
 # Tracker -> app
 TRACKER_HEARTBEAT = 0x80  # state u8: what the cameras are doing (below)
@@ -32,7 +34,7 @@ CHUNK = 0x85          # msg_id u8, index u8, total u8, part of another message
 STORAGE_LIST = 0x86   # JSON: the board's recordings and disk (storage.py)
 ROTATION = 0x87       # <B3f: the rigid body's Rodrigues rvec, camera frame
 CAMERA_STATUS = 0x88  # JSON: what the sensors hold and see (camera_view.py); preview on
-PREVIEW = 0x89        # JPEG: both cameras side by side; preview on, over UDP
+PREVIEW = 0x89        # JPEG: both cameras side by side; preview on, over UDP or the hotspot
 
 # What CONFIG track= asks for: one pose message per solved frame, POSITION or
 # ROTATION — a game uses one or the other, never both.

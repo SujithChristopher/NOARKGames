@@ -418,6 +418,11 @@ func _update_tracking() -> void:
 		link.send_command(LinkProtocol.CONFIG, "track=" + mode)
 
 
+## This app runs on the tracker's board, so the two share settings.json.
+func on_the_board() -> bool:
+	return OS.get_name() == "Linux" and FileAccess.file_exists(TRACKER_SERVICE)
+
+
 ## Restart the tracker service. Over the link when the tracker answers (it
 ## exits and systemd starts it again); otherwise, on the board itself, through
 ## systemctl (/etc/sudoers.d/noark-tracker lets it). -> "" or why it could not.
@@ -425,7 +430,7 @@ func restart_tracker() -> String:
 	if link.connected:
 		link.send_command(LinkProtocol.RESTART)
 		return ""
-	if OS.get_name() == "Linux" and FileAccess.file_exists(TRACKER_SERVICE):
+	if on_the_board():
 		var out := []
 		var code := OS.execute("sudo", ["-n", "systemctl", "--no-block", "restart", "noark-tracker"], out, true)
 		if code == 0:

@@ -66,15 +66,23 @@ func _camera_tab() -> void:
 	await get_tree().process_frame
 	var tab = scene._camera
 
-	# Over BLE it only says why not, and starts nothing.
-	Settings.data["stream_type"] = "ble"
-	var sent_before := _configs().size()
-	tab.set_active(true)
-	await get_tree().process_frame
-	_check(not tab._controls.visible and "UDP" in tab._state.text, "over BLE the tab should say it needs UDP")
-	_check(GlobalScript.tracking_mode() == "off", "over BLE the cameras must stay off")
-	_check(_configs().size() == sent_before, "over BLE nothing should be sent")
-	tab.set_active(false)
+	# A setting the tracker reads only at start restarts it: nobody has to type sudo.
+	# One it takes live does not. No frame passes, so the link does not act on these.
+	var link = GlobalScript.link
+	link.connected = true
+	scene._changed("tracker_solver", "joint")
+	_check(not _restart_queued(link), "a live setting must not restart the tracker")
+	scene._changed("display", false)
+	_check(_restart_queued(link), "a setting read at start should restart the tracker")
+	_check("restarting" in scene._status.text, "the screen should say it is restarting")
+	_check(not "sudo" in scene._status.text, "nobody should be told to type sudo")
+	for command in link._queue.duplicate():
+		if command["kind"] == LinkProtocol.RESTART:
+			link._queue.erase(command)
+	link.connected = false
+
+	# Over BLE: numbers over the link, the picture over the board's hotspot.
+	await _camera_tab_over_ble(tab)
 
 	# Shown over UDP: the cameras on, the preview asked for.
 	Settings.data["stream_type"] = "udp"
@@ -144,6 +152,140 @@ func _camera_tab() -> void:
 	scene.queue_free()
 	await get_tree().process_frame
 	print("SMOKE camera tab done")
+
+
+## The tab over BLE: the tracker's status says what the hotspot is doing, the tablet
+## joins it with a password typed once, and pictures come over Wi-Fi. A plain UDP
+## socket here plays the tracker's side of that, and FakeWifi the Android plugin.
+func _camera_tab_over_ble(tab) -> void:
+	Settings.data["stream_type"] = "ble"
+	var wifi := FakeWifi.new()
+	tab._wifi_plugin = wifi
+	tab.set_active(true)
+	await get_tree().process_frame
+	_check(tab._controls.visible, "over BLE the controls should show")
+	_check(GlobalScript.tracking_mode() == "position", "over BLE the tab should hold tracking")
+	_check(_configs()[-1] == "preview=on", "over BLE the tab should ask for the preview")
+
+	_feed(LinkProtocol.CAMERA_STATUS, _status({"state": "starting"}))
+	_check("Starting" in tab._message.text, "the tab should say the Wi-Fi is starting")
+	_check(tab._sliders["gain"].editable, "the sliders should work before the picture does")
+
+	# The tracker's side of the picture channel.
+	var tracker := PacketPeerUDP.new()
+	tracker.bind(0, "127.0.0.1")
+	var bssid := "36:22:7f:b9:c9:20"
+	var on := {"state": "on", "ssid": "NOARK-test", "ip": "127.0.0.1", "port": tracker.get_local_port(), "bssid": bssid}
+
+	# First time for this board: it needs the password, and joins nothing without it.
+	_feed(LinkProtocol.CAMERA_STATUS, _status(on))
+	_check(tab._password_row.visible, "an unknown network should ask for its password")
+	_check(wifi.joins.is_empty(), "nothing to join with until the password is known")
+	tab._password.text = "short"
+	tab._save_password()
+	_check(wifi.joins.is_empty(), "WPA2 needs 8 characters: a shorter one must not be tried")
+	tab._password.text = "password-1"
+	tab._save_password()
+	_check(wifi.joins == [["NOARK-test", "password-1", bssid]], "the tab should join that exact access point with what was typed")
+	_check(not tab._password_row.visible, "the password box should go once it is entered")
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(Settings.path))
+	_check(saved["camera_wifi_passwords"]["NOARK-test"] == "password-1", "the password should be kept per network")
+
+	# Asked again while joining: one attempt, not one per status.
+	_feed(LinkProtocol.CAMERA_STATUS, _status(on))
+	_check(wifi.joins.size() == 1, "a status while joining should not join again")
+
+	# Joined: it says hello to the tracker, and a picture sent in chunks becomes the picture.
+	wifi.joined.emit()
+	await _seconds(0.3)
+	_check(tracker.get_available_packet_count() > 0, "the tablet should say hello once on the Wi-Fi")
+	var hello := tracker.get_packet()
+	_check(hello == PackedByteArray([LinkProtocol.PICTURE_HELLO]), "that should be a PICTURE_HELLO")
+	tracker.set_dest_address(tracker.get_packet_ip(), tracker.get_packet_port())
+	var frame := Image.create(640, 200, false, Image.FORMAT_RGB8)
+	frame.fill(Color.DARK_GRAY)
+	var message := PackedByteArray([LinkProtocol.PREVIEW])
+	message.append_array(frame.save_jpg_to_buffer())
+	var size := 500
+	var parts := ceili(float(message.size()) / size)
+	for i in parts:
+		var chunk := PackedByteArray([LinkProtocol.CHUNK, 7, i, parts])
+		chunk.append_array(message.slice(i * size, mini((i + 1) * size, message.size())))
+		tracker.put_packet(chunk)
+	await _seconds(0.3)
+	_check(tab._picture.texture != null and tab._picture.texture.get_size() == Vector2(640, 200),
+		"a picture over the Wi-Fi should become the picture")
+
+	# The Wi-Fi dropped: it joins again at the next status.
+	wifi.lost.emit()
+	_feed(LinkProtocol.CAMERA_STATUS, _status(on))
+	_check(wifi.joins.size() == 2, "a lost network should be joined again")
+
+	# The tracker could not start it: said plainly, the rest of the tab still works.
+	_feed(LinkProtocol.CAMERA_STATUS, _status({"state": "failed", "reason": "no such device"}))
+	_check("no such device" in tab._message.text, "why the Wi-Fi failed should be shown")
+	_check(tab._sliders["gain"].editable, "the sliders should still work without the picture")
+
+	# A wrong password: asks again rather than repeating it for ever.
+	wifi.joins.clear()
+	_feed(LinkProtocol.CAMERA_STATUS, _status(on))
+	_check(wifi.joins.size() == 1, "it should try once more when the Wi-Fi is back")
+	wifi.failed.emit("declined or not found")
+	_check(tab._password_row.visible, "a failed join should offer the password again")
+	_feed(LinkProtocol.CAMERA_STATUS, _status(on))
+	_check(wifi.joins.size() == 1, "a failed join should wait for a new password")
+	tab._password.text = "password-2"
+	tab._save_password()
+	_check(wifi.joins[-1] == ["NOARK-test", "password-2", bssid], "the new password should be tried")
+
+	# Leaving lets go of the network and the cameras.
+	wifi.joined.emit()
+	tab.set_active(false)
+	await get_tree().process_frame
+	_check(wifi.leaves > 0, "leaving should let go of the network")
+	_check(not tab._picture_link.running(), "leaving should stop the picture channel")
+	_check(_configs()[-1] == "preview=off", "leaving should end the preview")
+	_check(GlobalScript.tracking_mode() == "off", "leaving should let the cameras go")
+
+	# Next time: the same network joins straight away, no password box.
+	wifi.joins.clear()
+	tab.set_active(true)
+	await get_tree().process_frame
+	_feed(LinkProtocol.CAMERA_STATUS, _status(on))
+	_check(not tab._password_row.visible, "a known network should not ask again")
+	_check(wifi.joins == [["NOARK-test", "password-2", bssid]], "a known network should join by itself")
+	tab.set_active(false)
+	await get_tree().process_frame
+	tracker.close()
+	tab._wifi_plugin = null
+
+
+func _restart_queued(link) -> bool:
+	for command in link._queue:
+		if command["kind"] == LinkProtocol.RESTART:
+			return true
+	return false
+
+
+func _status(wifi: Dictionary) -> PackedByteArray:
+	return JSON.stringify({"ask": [10000, 2.5], "exposure": [10000.0, 10000.0], "gain": [2.5, 2.5],
+		"level": [100.0, 100.0], "blown": [0.0, 0.0], "tags": [0, 0], "fps": 30.0,
+		"wifi": wifi}).to_utf8_buffer()
+
+
+## Stands in for the Android plugin's Wi-Fi calls.
+class FakeWifi:
+	signal joined
+	signal lost
+	signal failed(reason: String)
+	var joins := []
+	var leaves := 0
+
+	func join(ssid: String, password: String, bssid: String) -> void:
+		joins.append([ssid, password, bssid])
+
+	func leave() -> void:
+		leaves += 1
 
 
 func _feed(kind: int, payload: PackedByteArray) -> void:

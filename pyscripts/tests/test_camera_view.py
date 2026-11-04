@@ -83,11 +83,37 @@ def test_frame_stats_level_and_blown_out():
     assert level == 100.0 and blown == 0.0, (level, blown)
 
 
-def test_preview_refused_without_udp():
+def test_over_ble_the_status_goes_but_no_picture_until_someone_is_on_the_hotspot():
+    # A picture is several kB and BLE moves 244 bytes a message: encoding one
+    # with nobody on Wi-Fi to take it would be wasted work on the tracking loop.
     view = CameraView(udp=False)
-    assert refused(view.set_enabled, True)
-    assert not view.enabled
-    view.set_enabled(False)  # turning it off is always fine
+    view.set_enabled(True)
+    assert kinds(frame(view, 100.0)) == [protocol.CAMERA_STATUS]
+    view.send_pictures = True
+    assert kinds(frame(view, 100.3)) == [protocol.PREVIEW]
+
+
+def test_status_says_where_the_pictures_are_over_wifi():
+    view = CameraView(udp=False)
+    view.set_enabled(True)
+    view.wifi = {"state": "on", "ssid": "NOARK-c920", "ip": "10.42.0.1", "port": 8010}
+    assert status_of(frame(view, 100.0))["wifi"] == view.wifi
+
+
+def test_status_has_no_wifi_field_over_udp():
+    assert "wifi" not in status_of(frame(view_on(), 100.0))
+
+
+def test_the_largest_status_fits_one_ble_message():
+    # Past 244 bytes the link would chunk it, and every status would then cost
+    # several notifications next to the hand position.
+    view = CameraView(udp=False)
+    view.set_enabled(True)
+    view.wifi = {"state": "on", "ssid": "NOARK-c920", "ip": "10.42.0.1", "port": 8010,
+                 "bssid": "36:22:7f:b9:c9:20"}
+    messages = view.frame(100.0, GREY, GREY, [tuple(range(4))] * 12, [tuple(range(4))] * 12,
+                          lambda: [(16443.7, 15.94), (16443.7, 15.94)], (16000, 15.75))
+    assert len(messages[0]) <= 244, len(messages[0])
 
 
 def test_nothing_sent_while_off():

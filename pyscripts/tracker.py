@@ -22,11 +22,13 @@ import toml
 from scipy.optimize import least_squares
 
 import protocol
-from camera_view import CameraView, parse_exposure, parse_gain
+from camera_view import CameraView, parse_exposure, parse_gain, save_settings
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
+from hotspot import Hotspot
 from link import Link
+from picture_link import PictureLink
 from storage import Storage
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
 from stereo_capture import StereoCapture
@@ -506,6 +508,12 @@ class TrackerClass:
         # answering through the seconds that takes.
         self._init_transport()
         self._camera_view = CameraView(udp=self.stream_type == "udp")
+        # Over BLE the Camera tab's pictures go over the board's own hotspot.
+        self._hotspot = Hotspot()
+        self._picture_link: Optional[PictureLink] = None
+        self._camera_settings_to_save = {}   # settings.json key -> value, tuned by the app
+        if self.stream_type != "udp":
+            self._hotspot.clean_up()
         if platform.system() != "Linux":
             raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
         self.capture: Optional[StereoCapture] = None
@@ -787,7 +795,7 @@ class TrackerClass:
         the next HELLO."""
         print(f"[LINK] {why}; session closed, waiting for the app.", flush=True)
         self._want_tracking = False
-        self._camera_view.set_enabled(False)
+        self._set_preview(False)
         self._close_session()
         self.link.reset()
 
@@ -796,7 +804,7 @@ class TrackerClass:
         if kind == protocol.HELLO:
             # A new app: idle until it asks for tracking.
             self._want_tracking = False
-            self._camera_view.set_enabled(False)
+            self._set_preview(False)
             self._reload_settings()
             return True, ""
         if kind == protocol.RESTART:
@@ -863,6 +871,10 @@ class TrackerClass:
         try:
             key, value = payload.decode().strip().split("=", 1)
             self._apply_setting(key, value)
+            if key == "exposure":
+                self._camera_settings_to_save["camera_exposure_us"] = self._exposure_us
+            elif key == "gain":
+                self._camera_settings_to_save["camera_gain"] = self._gain
         except ValueError as exc:
             print(f"[CFG] refused {payload!r}: {exc}")
             return False, str(exc)
@@ -878,7 +890,7 @@ class TrackerClass:
         trunk_reference (neutral|model),
         track (on|off: the app wants tracking now; the cameras run only then),
         exposure (us), gain (1-16): applied at once if the cameras are up,
-        preview (on|off: the Camera tab is open; UDP only),
+        preview (on|off: the Camera tab is open; over BLE this also runs the hotspot),
         recording (on|off), recording_fps, recording_scale (0-1],
         recording_chunk_frames — the recording ones from the next session.
         """
@@ -918,7 +930,7 @@ class TrackerClass:
             self._gain = parse_gain(value)
             self._apply_exposure()
         elif key == "preview" and value in ("on", "off"):
-            self._camera_view.set_enabled(value == "on")
+            self._set_preview(value == "on")
         elif key == "recording" and value in ("on", "off"):
             self.record_session = value == "on"
         elif key == "recording_fps" and float(value) > 0:
@@ -934,6 +946,47 @@ class TrackerClass:
         """The cameras take the new values now, or when they next come up."""
         if self.capture is not None:
             self.capture.set_exposure(self._exposure_us, self._gain)
+
+    def _set_preview(self, on: bool) -> None:
+        """The Camera tab opened or closed (or the app went). Over BLE that also
+        takes the hotspot up or down, and closing saves what was tuned, because a
+        tablet cannot reach this board's settings.json. Over UDP the app saves it."""
+        self._camera_view.set_enabled(on)
+        if self.stream_type == "udp":
+            return
+        self._hotspot.want(on)
+        if on:
+            return
+        self._close_picture_link()
+        self._camera_view.wifi = None
+        if self._camera_settings_to_save and self._settings_path is not None:
+            save_settings(self._settings_path, self._camera_settings_to_save)
+            self._camera_settings_to_save = {}
+
+    def _close_picture_link(self) -> None:
+        if self._picture_link is not None:
+            self._picture_link.close()
+        self._picture_link = None
+        self._camera_view.send_pictures = False
+
+    def _update_pictures(self, now: float) -> None:
+        """Once a frame while the Camera tab is open over BLE: what the status says
+        about Wi-Fi, and whether a tablet is there to take pictures."""
+        view = self._camera_view
+        if self.stream_type == "udp" or not view.enabled:
+            return
+        view.wifi = self._hotspot.status(PictureLink.PORT)
+        if self._hotspot.state != Hotspot.ON:
+            self._close_picture_link()
+            return
+        if self._picture_link is None:
+            link = PictureLink(self._hotspot.ip)
+            if not link.open():
+                view.wifi = {"state": Hotspot.FAILED, "reason": link.reason[:60]}
+                return
+            self._picture_link = link
+        self._picture_link.poll(now)
+        view.send_pictures = self._picture_link.has_client(now)
 
     def _open_trunk_csv(self) -> None:
         """trunk_debug: every trunk update next to the rigid body's latest pose,
@@ -1326,11 +1379,16 @@ class TrackerClass:
                     )
 
         if self.link.connected:
+            now = time.time()
+            self._update_pictures(now)
             for message in self._camera_view.frame(
-                time.time(), raw0, raw1, corners0, corners1,
+                now, raw0, raw1, corners0, corners1,
                 self.capture.sensor_settings, (self._exposure_us, self._gain),
             ):
-                self.link.send(message)
+                if message[0] == protocol.PREVIEW and self._picture_link is not None:
+                    self._picture_link.send(message)
+                else:
+                    self.link.send(message)
 
         if self.display:
             disp0 = cv2.cvtColor(raw0, cv2.COLOR_GRAY2BGR)
@@ -1429,6 +1487,8 @@ class TrackerClass:
             if self.record_frames and self._rec_file0 is not None:
                 steps.append(self._close_rec_files)
             steps.append(self._stop_session_recording)
+            if self.stream_type != "udp":
+                steps.append(lambda: (self._set_preview(False), self._hotspot.wait(10)))
             if getattr(self, "trunk", None) is not None:
                 steps.append(self.trunk.stop)
             if getattr(self, "capture", None) is not None:

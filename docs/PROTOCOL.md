@@ -104,18 +104,21 @@ one, never both; not a setting, never in settings.json), `solver` (joint/ransac)
 `trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `trunk_reference`
 (neutral/model), `exposure` (µs, above 0; the sensor caps it at the frame period)
 and `gain` (1–16) — on the running cameras at once, otherwise when they next
-start, `preview` (on/off: the app's Camera tab is open; refused unless the link is
-UDP; not a setting, never in settings.json, and off again at every HELLO), `recording`
+start, `preview` (on/off: the app's Camera tab is open; over BLE it also runs the
+board's hotspot, section 5; not a setting, never in settings.json, and off again at
+every HELLO), `recording`
 (on/off), `recording_fps`, `recording_scale` (0–1], `recording_chunk_frames` —
 the recording ones from the next session. At each HELLO the tracker applies the
 same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 `tracker_camera`, `corner_deadband_px`, `camera_exposure_us`, `camera_gain`,
 `trunk_enabled`, `trunk_method`, `trunk_reference`, `recording*`). Everything else
-in settings.json needs `sudo systemctl restart noark-tracker`.
+in settings.json is read at start: the app's Settings screen sends `RESTART` after saving it.
 
 The ACK for `exposure` / `gain` means the value was accepted, not that the sensor
 has it: with the ISP on, rcam writes the sensor when the next frame comes in.
-`CAMERA_STATUS` is what shows what it took.
+`CAMERA_STATUS` is what shows what it took. Over BLE the tracker also writes what the
+app changed into its own settings.json when the tab closes: a tablet cannot reach that
+file, and exposure and gain belong to the board's room. Over UDP the app writes it.
 
 ## 5. Tracker → app
 
@@ -130,7 +133,7 @@ has it: with the ISP on, rcam writes the sensor when the next frame comes in.
 | `0x86` | `STORAGE_LIST` | JSON, below; after each STORAGE job |
 | `0x87` | `ROTATION` | `<B3f`, 13 bytes, below; while `track=rotation` |
 | `0x88` | `CAMERA_STATUS` | JSON, below; every 0.5 s while `preview=on` and tracking |
-| `0x89` | `PREVIEW` | JPEG, below; every 0.2 s while `preview=on` and tracking |
+| `0x89` | `PREVIEW` | JPEG, below; every 0.2 s while `preview=on` and tracking. Over UDP on the link, over BLE on the hotspot |
 
 **POSITION** / **ROTATION**, one per frame with a solved pose (no marker in
 view → none; the heartbeat still shows the tracker is alive, and the app reads
@@ -168,7 +171,9 @@ did (`""` for a list, `deleted <path>`, `error: …`), and every recording
 sensors may have capped; `[a, b]` is the left and right picture of the `PREVIEW`:
 the exposure (µs) and gain read back from the sensor (`null` if the read failed),
 mean image level 0–255, % of pixels blown out, tags found. `fps` is tracking's rate
-since the last status (0 in the first).
+since the last status (0 in the first). Over BLE it also has `wifi`, what the hotspot is
+doing: `{"state": "starting"}`, `{"state": "on", "ssid", "ip", "port", "bssid"}` or
+`{"state": "failed", "reason"}`. It fits one BLE message.
 
 **PREVIEW** is both cameras side by side, 640×200, JPEG quality 50, with the tags
 found outlined. Measured on the board: 3–11 kB by how bright the scene is, so 3–9
@@ -176,6 +181,27 @@ CHUNKs over UDP. Sending both at these rates tracked at 57–59 fps with no re-p
 
 Both are additive, so `VERSION` did not change: an app that does not know them never
 sends `preview=on`, and they are sent only after it.
+
+**Pictures over BLE** go over the board's own hotspot, the way Quick Share moves data:
+BLE finds the device, Wi-Fi carries what is too big for it.
+
+1. `preview=on` starts the hotspot on a thread (`pyscripts/hotspot.py`, through the root
+   helper `setup/noark-hotspot`), and the status says when it is up.
+2. The tablet joins with Android's `WifiNetworkSpecifier` (GdAndroidBLE `wifi_join`), with
+   the password typed once per board. **The password never goes over BLE.** The name
+   and BSSID do: they are not secret. Android asks once per access point, then joins by
+   itself, but only when asked for that exact name and BSSID.
+3. The tablet sends `PICTURE_HELLO` (`0x09`, one byte, no sequence number) to the status's
+   `ip`:`port` about once a second. The tracker sends pictures to whoever said it last,
+   as `PREVIEW` or `CHUNK`s of one, in datagrams of up to 1400 bytes, and stops after 3 s
+   of silence, so nothing is encoded for nobody.
+4. `preview=off`, or the app going, takes the hotspot down.
+
+The port (8010) is open only while the hotspot is up, and bound to its address. The
+hotspot is WPA2, with a password made per board, and routing is off, so a device on it
+reaches the board and nothing behind it. Measured on the board with a tablet: 5 GHz beside
+the normal Wi-Fi, 5.3 ms, no loss at 40 kB five times a second. Without the hotspot
+(`setup/setup_board.sh` not run, or a failure) the tab still works on the numbers.
 
 ## 6. Tools
 

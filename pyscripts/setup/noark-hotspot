@@ -1,0 +1,104 @@
+#!/bin/bash
+# Brings the board's hotspot up or down, for the Camera tab's pictures over BLE.
+# Run as root by the tracker through sudo (pyscripts/hotspot.py). Installed by
+# setup_board.sh, which also creates the NetworkManager profile it starts.
+#
+#   noark-hotspot up     prints ssid=... and ip=...; the reason on stderr if it fails
+#   noark-hotspot down   always succeeds
+#
+# Measured on this board's AIC8800: the hotspot runs beside the normal Wi-Fi, on a
+# second interface. Two things bit: udev renames the new interface to wlx<mac>
+# straight away, and renaming it back breaks wpa_supplicant's AP setup, so the
+# profile is pointed at whatever name it got. And a station and an AP on one radio
+# need their own addresses.
+set -uo pipefail
+
+CONNECTION=noark-hotspot
+STATION=wlan0
+FALLBACK_CHANNEL=149
+
+extra_interface() {
+    iw dev | awk '/Interface/{print $2}' | grep -v "^${STATION}$" | head -1
+}
+
+# The channel the normal Wi-Fi is on when a hotspot may use it (no radar duties),
+# so the radio does not have to hop between two.
+best_channel() {
+    local freq
+    freq=$(iw dev "$STATION" link 2>/dev/null | awk '/freq:/{print $2}')
+    freq=${freq%.*}
+    if [ -n "$freq" ] && { { [ "$freq" -ge 5180 ] && [ "$freq" -le 5240 ]; } || { [ "$freq" -ge 5745 ] && [ "$freq" -le 5825 ]; }; }; then
+        echo $(( (freq - 5000) / 5 ))
+    else
+        echo "$FALLBACK_CHANNEL"
+    fi
+}
+
+report() {
+    echo "ssid=$(nmcli -g 802-11-wireless.ssid connection show "$CONNECTION")"
+    echo "ip=$(nmcli -g ipv4.addresses connection show "$CONNECTION" | cut -d/ -f1)"
+}
+
+remove_extra_interface() {
+    local extra
+    extra=$(extra_interface)
+    if [ -n "$extra" ]; then
+        iw dev "$extra" del 2>/dev/null
+    fi
+}
+
+down() {
+    nmcli connection down "$CONNECTION" >/dev/null 2>&1
+    remove_extra_interface
+    return 0
+}
+
+up() {
+    if nmcli -t -f NAME connection show --active | grep -qx "$CONNECTION"; then
+        report
+        return 0
+    fi
+    if ! nmcli -t -f NAME connection show | grep -qx "$CONNECTION"; then
+        echo "no hotspot profile: run setup_board.sh" >&2
+        return 1
+    fi
+    remove_extra_interface
+
+    local mac address iface forward
+    mac=$(cat "/sys/class/net/${STATION}/address")
+    address=$(printf '%02x' $(( (0x${mac:0:2} | 2) ^ 4 )))${mac:2}
+    if ! iw dev "$STATION" interface add ap0 type __ap addr "$address"; then
+        echo "could not add a second Wi-Fi interface" >&2
+        return 1
+    fi
+    for _ in 1 2 3 4 5 6 7 8; do
+        sleep 0.5
+        iface=$(extra_interface)
+        if [ -n "$iface" ] && [ "$iface" != ap0 ] && nmcli -t -f DEVICE device | grep -qx "$iface"; then
+            break
+        fi
+    done
+    if [ -z "${iface:-}" ]; then
+        echo "the second Wi-Fi interface went away" >&2
+        return 1
+    fi
+
+    nmcli connection modify "$CONNECTION" connection.interface-name "$iface" \
+        802-11-wireless.channel "$(best_channel)"
+    forward=$(sysctl -n net.ipv4.ip_forward)
+    if ! timeout 40 nmcli connection up "$CONNECTION" >/dev/null 2>/tmp/noark-hotspot.err; then
+        tail -1 /tmp/noark-hotspot.err | cut -c1-120 >&2
+        down
+        return 1
+    fi
+    # "Shared" gives the tablet its address and also turns on routing. Turned back
+    # off: a device on the hotspot reaches this board and nothing behind it.
+    sysctl -q -w net.ipv4.ip_forward="$forward"
+    report
+}
+
+case "${1:-}" in
+    up) up ;;
+    down) down ;;
+    *) echo "usage: noark-hotspot up|down" >&2; exit 2 ;;
+esac

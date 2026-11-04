@@ -321,18 +321,29 @@ for big messages, heartbeats both ways.
   the board's camera recordings through the tracker (STORAGE command,
   `pyscripts/storage.py`), so it works from a tablet too. Only recordings —
   never game data, sessions.csv or position CSVs — and never the one in progress.
-- The **Camera tab** sets exposure and gain live, UDP only: CONFIG `exposure` / `gain`, saved on
+- The **Camera tab** sets exposure and gain live: CONFIG `exposure` / `gain`, saved on
   letting go as `camera_exposure_us` / `camera_gain` in settings.json (until then `device.toml`'s
-  apply; calibration always uses `device.toml`). While it is shown it holds tracking and sends
+  apply; calibration always uses `device.toml`). A tablet cannot reach the board's file, so over
+  BLE the tracker saves what changed when the tab closes. While it is shown it holds tracking and sends
   `preview=on`, and the tracker sends CAMERA_STATUS (2 Hz: what the sensors report, image level,
   % blown out, tags per camera, fps) and PREVIEW (5 Hz: both cameras, 640×200 JPEG, tags outlined;
   `pyscripts/camera_view.py`). An ACK only says the value was accepted: with the ISP on, rcam writes
   the sensor on the next frame, so the read-back is in the status. The sensor caps exposure at the
   frame period (~16.4 ms); short exposures can pulse under 50 Hz lights (`device.toml` has the numbers).
+  **Over BLE** the numbers stay on BLE and the picture goes over the board's own hotspot, as Quick
+  Share does: `preview=on` starts it (`pyscripts/hotspot.py`, root helper `setup/noark-hotspot`,
+  installed once with `sudo pyscripts/setup/setup_board.sh [COUNTRY]`), the status's `wifi` field
+  says when it is up, the tablet joins (`android_wifi.gd`, GdAndroidBLE `wifi_join`, Android's
+  `WifiNetworkSpecifier`, password typed once per board, never sent over BLE) and pictures come over
+  UDP (`picture_link.py` / `picture_link.gd`, docs/PROTOCOL.md). The AIC8800 runs the hotspot beside its
+  normal Wi-Fi on a second interface; udev renames that interface and renaming it back breaks
+  wpa_supplicant. Without the hotspot the tab still works on the numbers.
 - Changing a setting: the Settings panel sends it live as a CONFIG; at every HELLO
   the tracker also re-applies the live keys from its own settings.json. Anything
-  else (camera hardware such as `isp`, `stream_type`, trunk thresholds, `display`) needs
-  `sudo systemctl restart noark-tracker`.
+  else (camera hardware such as `isp`, `stream_type`, trunk thresholds, `display`) is read when
+  the tracker starts, so the Settings screen restarts it after saving (RESTART over the link, no
+  password). Nothing holds the board's password: what needs root has its own sudoers line, from
+  `sudo pyscripts/setup/setup_board.sh`, once per board.
 - Godot and the tracker must speak the same `VERSION` (protocol.py /
   link_protocol.gd): a tablet APK built before a protocol change will not
   connect — rebuild it with the board's code.

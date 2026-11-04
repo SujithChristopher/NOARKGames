@@ -2,7 +2,13 @@ extends VBoxContainer
 ## Settings > Camera: the cameras' exposure and gain, changed while watching what
 ## they do. Only while the tab is shown does it keep the cameras on and ask the
 ## tracker for its CAMERA_STATUS and PREVIEW (docs/PROTOCOL.md; CONFIG preview=on).
-## UDP only for now: a preview is several kB per picture, BLE 244 bytes a message.
+##
+## Over UDP both come on the link. Over BLE the numbers do, but a picture is several
+## kB and BLE moves 244 bytes a message, so the board brings up its own hotspot, the
+## status says which, and this joins it and takes pictures there (picture_link.gd),
+## which is how Quick Share works: a slow link to find each other, Wi-Fi to move data.
+## Its password is typed once per board and kept here, never sent over BLE. Without
+## Wi-Fi the numbers still work, and they are what say if an exposure is good.
 ##
 ## Three things say whether a change worked, each proving something else: the
 ## exposure and gain the sensors report (they cap what they cannot do), the image
@@ -14,6 +20,8 @@ extends VBoxContainer
 ## Until they are set there, device.toml's apply. Calibration always uses device.toml.
 
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
+const PictureLink := preload("res://Main_screen/Scripts/picture_link.gd")
+const AndroidWifi := preload("res://Main_screen/Scripts/android_wifi.gd")
 
 const ROWS := {
 	"exposure": {"title": "Exposure", "setting": "camera_exposure_us", "min": 100.0,
@@ -24,7 +32,9 @@ const ROWS := {
 const COLUMNS := [["exposure", "Exposure"], ["gain", "Gain"], ["level", "Image"],
 	["blown", "Blown out"], ["tags", "Tags"]]
 
-const NEEDS_UDP := "Camera settings work over UDP only. This app is set to BLE: change the link on the Tracker tab."
+const PASSWORDS := "camera_wifi_passwords"   ## settings: hotspot name -> password
+const WPA2_MIN_PASSWORD := 8
+enum Join { NONE, JOINING, JOINED, REJECTED }
 const HINT := "10000 µs avoids flicker under 50 Hz lights. Raise exposure before gain: gain adds noise, exposure adds blur."
 const SEND_EVERY_S := 0.15   ## while a slider moves
 const STALE_MS := 2000       ## the tracker sends a status every 0.5 s
@@ -45,7 +55,21 @@ var _send_wait := 0.0
 var _last_status_ms := 0
 var _capped := ""
 var _refused := ""
+var _wifi_note := ""
+var _wifi_info := {}        # the status's wifi field while the hotspot is on
+var _join := Join.NONE
+## The Android plugin's Wi-Fi calls; null elsewhere, where the machine joins by itself.
+var _wifi_plugin = null:
+	set(plugin):
+		_wifi_plugin = plugin
+		if plugin != null:
+			plugin.joined.connect(_on_wifi_joined)
+			plugin.lost.connect(_on_wifi_lost)
+			plugin.failed.connect(_on_wifi_failed)
 
+var _picture_link: Node
+var _password_row: HBoxContainer
+var _password: LineEdit
 var _state: Label
 var _fps: Label
 var _controls: VBoxContainer
@@ -82,6 +106,7 @@ func _ready() -> void:
 	for row in ROWS:
 		_controls.add_child(_slider_row(row))
 	_controls.add_child(_readout())
+	_controls.add_child(_password_box())
 	_message = Label.new()
 	_message.add_theme_font_size_override("font_size", 16)
 	_message.add_theme_color_override("font_color", MUTED)
@@ -90,6 +115,10 @@ func _ready() -> void:
 	_start_sync()
 	_update_message()
 
+	_picture_link = PictureLink.new()
+	_picture_link.picture.connect(_on_preview)
+	add_child(_picture_link)
+	_wifi_plugin = AndroidWifi.find()
 	GlobalScript.camera_status.connect(_on_status)
 	GlobalScript.camera_preview.connect(_on_preview)
 	GlobalScript.link_connected_changed.connect(_on_link_changed)
@@ -103,12 +132,7 @@ func _exit_tree() -> void:
 
 ## The tab came into view, or left it. Nothing runs while it is out of view.
 func set_active(on: bool) -> void:
-	var udp: bool = Settings.get_value("stream_type", "ble") == "udp"
-	_controls.visible = udp
-	if not udp:
-		_state.text = NEEDS_UDP
-		_fps.text = ""
-	if on == _active or (on and not udp):
+	if on == _active:
 		return
 	_active = on
 	if on:
@@ -119,6 +143,7 @@ func set_active(on: bool) -> void:
 	else:
 		_hold.queue_free()
 		_hold = null
+		_leave_wifi()
 	GlobalScript.send_tracker_config("preview", "on" if on else "off")
 
 
@@ -295,6 +320,114 @@ func _on_status(info: Dictionary) -> void:
 		_show_camera(info, camera)
 	_fps.text = "%.1f fps" % info.get("fps", 0.0)
 	_capped = _capped_note(info)
+	if info.has("wifi"):
+		_on_wifi_status(info["wifi"])
+	_update_message()
+
+
+# ── The picture over the board's hotspot (BLE) ────────────────────────────────
+
+func _password_box() -> HBoxContainer:
+	_password_row = HBoxContainer.new()
+	_password_row.add_theme_constant_override("separation", 8)
+	_password_row.visible = false
+	var label := Label.new()
+	label.text = "Hotspot password"
+	_password_row.add_child(label)
+	_password = LineEdit.new()
+	_password.secret = true
+	_password.custom_minimum_size.x = 260
+	_password.text_submitted.connect(func(_text: String): _save_password())
+	_password_row.add_child(_password)
+	var join := Button.new()
+	join.text = "  Join  "
+	join.focus_mode = Control.FOCUS_NONE
+	join.pressed.connect(_save_password)
+	_password_row.add_child(join)
+	return _password_row
+
+
+func _on_wifi_status(wifi: Dictionary) -> void:
+	match wifi.get("state", ""):
+		"on":
+			_wifi_info = wifi
+			if _join == Join.JOINING or _join == Join.JOINED:
+				return
+			if _join == Join.REJECTED:
+				return   # waits for a new password, rather than trying this one for ever
+			var known: String = Settings.get_value(PASSWORDS, {}).get(wifi["ssid"], "")
+			if known.is_empty():
+				_password_row.visible = true
+				_wifi_note = "No picture yet: type the password of %s. It is asked once." % wifi["ssid"]
+			else:
+				_join_wifi(known)
+		"failed":
+			_leave_wifi()
+			_wifi_note = "No picture, the numbers still work: %s" % wifi.get("reason", "the board's Wi-Fi did not start")
+		_:
+			_leave_wifi()
+			_wifi_note = "Starting the board's Wi-Fi for the picture..."
+
+
+func _join_wifi(password: String) -> void:
+	_join = Join.JOINING
+	_password_row.visible = false
+	_wifi_note = "Joining %s: approve it on the tablet if it asks." % _wifi_info["ssid"]
+	if _wifi_plugin != null:
+		_wifi_plugin.join(_wifi_info["ssid"], password, _wifi_info.get("bssid", ""))
+	else:
+		_on_wifi_joined()   # off Android: the machine's own Wi-Fi settings did it
+
+
+func _save_password() -> void:
+	var text := _password.text.strip_edges()
+	if _wifi_info.is_empty():
+		return
+	if text.length() < WPA2_MIN_PASSWORD:
+		_wifi_note = "That is too short: the password has at least %d characters." % WPA2_MIN_PASSWORD
+		_update_message()
+		return
+	var known: Dictionary = Settings.get_value(PASSWORDS, {}).duplicate()
+	known[_wifi_info["ssid"]] = text
+	Settings.set_value(PASSWORDS, known)
+	if not Settings.save():
+		_refused = "Could not save settings!"
+	_password.text = ""
+	_join_wifi(text)
+	_update_message()
+
+
+func _leave_wifi() -> void:
+	_picture_link.stop()
+	if _join != Join.NONE and _wifi_plugin != null:
+		_wifi_plugin.leave()
+	_join = Join.NONE
+	_wifi_info = {}
+	_wifi_note = ""
+	_password_row.visible = false
+
+
+func _on_wifi_joined() -> void:
+	if not _active or _wifi_info.is_empty():
+		return
+	_join = Join.JOINED
+	_wifi_note = ""
+	_picture_link.start(_wifi_info["ip"], int(_wifi_info["port"]))
+	_update_message()
+
+
+func _on_wifi_lost() -> void:
+	_picture_link.stop()
+	_join = Join.NONE   # joined again at the next status that says it is on
+	_wifi_note = "The picture's Wi-Fi dropped: joining again."
+	_update_message()
+
+
+func _on_wifi_failed(reason: String) -> void:
+	_picture_link.stop()
+	_join = Join.REJECTED
+	_password_row.visible = true
+	_wifi_note = "Could not join %s (%s). Check the password." % [_wifi_info.get("ssid", "the board's Wi-Fi"), reason]
 	_update_message()
 
 
@@ -343,6 +476,8 @@ func _update_message() -> void:
 		_message.text = _refused
 	elif not _capped.is_empty():
 		_message.text = _capped
+	elif not _wifi_note.is_empty():
+		_message.text = _wifi_note
 	else:
 		_message.text = HINT
 
@@ -361,6 +496,7 @@ func _on_link_changed(connected: bool) -> void:
 	# A tracker forgets the preview at every HELLO, and re-reads settings.json.
 	if connected and _active:
 		_start_sync()
+		_leave_wifi()   # it takes the hotspot down too; the status brings it back
 		GlobalScript.send_tracker_config("preview", "on")
 
 

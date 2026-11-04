@@ -189,9 +189,11 @@ calibration and the tracker, with `--exposure`, `--gain` and `--isp` to override
 for one run.
 
 The tracker can also take exposure and gain while it runs, from the app's
-**Settings > Camera** tab (UDP only), which shows both cameras at 5 fps with the
-tags outlined, what the sensors report, the image level and how many tags are
-found. What it sets is saved in settings.json (`camera_exposure_us`, `camera_gain`)
+**Settings > Camera** tab, which shows both cameras at 5 fps with the tags outlined,
+what the sensors report, the image level and how many tags are found. From a tablet on
+BLE the numbers go over BLE and the picture over the board's own hotspot, which needs
+`sudo pyscripts/setup/setup_board.sh [COUNTRY]` once per board (it prints the password
+to type into the tablet). What it sets is saved in settings.json (`camera_exposure_us`, `camera_gain`)
 and wins over `device.toml` when tracking; `device.toml` stays what calibration uses.
 Neither changes the frame period or the sync between the cameras (measured). Gain
 below 1 reads as 1, so `gain = 0.0` in `device.toml` means ×1.

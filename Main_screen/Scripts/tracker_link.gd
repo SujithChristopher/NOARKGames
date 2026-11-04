@@ -15,6 +15,7 @@ extends Node
 ## Owned by GlobalScript, which picks the transport.
 
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
+const ChunkAssembler := preload("res://Main_screen/Scripts/chunk_assembler.gd")
 
 ## A message for the app: POSITION, TRUNK_STATUS or SNAPSHOT (whole message).
 signal message(kind: int, msg: PackedByteArray)
@@ -43,9 +44,7 @@ var _in_flight: Dictionary = {}       # {kind, seq, msg, sent_ms, tries}
 var _last_heard_ms := 0
 var _heartbeat_acc := 0.0
 var _hello_refused_until_ms := 0
-# msg_id -> {index: part}; two chunked messages (a snapshot and a storage list)
-# can be on the way at once.
-var _chunks: Dictionary = {}
+var _chunks := ChunkAssembler.new()
 
 
 func _init(transport: Node) -> void:
@@ -197,23 +196,9 @@ func _on_ack(ack: Dictionary) -> void:
 
 
 func _on_chunk(msg: PackedByteArray) -> void:
-	if msg.size() < 4:
-		return
-	var id := msg[1]
-	var total := msg[3]
-	if msg[2] == 0 or not _chunks.has(id):   # a new message under this id
-		_chunks[id] = {}
-	var parts: Dictionary = _chunks[id]
-	parts[msg[2]] = msg.slice(4)
-	if parts.size() < total:
-		return
-	var whole := PackedByteArray()
-	for i in total:
-		if not parts.has(i):
-			return
-		whole.append_array(parts[i])
-	_chunks.erase(id)
-	_on_received(whole)
+	var whole := _chunks.add(msg)
+	if not whole.is_empty():
+		_on_received(whole)
 
 
 func _lost(why: String) -> void:
