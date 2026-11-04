@@ -10,6 +10,9 @@ extends Node
 ## only (patient vvv, no upload; Settings is never saved) and the data folder
 ## points at Godot's user dir.
 
+## Opening the login screens talks to the server (the patient sync, the patient
+## lock), so these are only loaded: that still catches a broken script in them.
+const LOADED_ONLY := ["res://Main_screen/Scenes/main.tscn", "res://Main_screen/Scenes/dose.tscn"]
 const FRAMES := 120
 const TRIAL_S := 2   ## countdown for the GameSession trial, seconds
 const GameSession := preload("res://Main_screen/Scripts/game_session.gd")
@@ -41,6 +44,10 @@ func _ready() -> void:
 	GlobalSignals.data_path = OS.get_user_data_dir().path_join("smoke")
 	_remove_tree(GlobalSignals.data_path)   # FireflyReach logs from _ready: start empty
 	await get_tree().process_frame
+	for path in LOADED_ONLY:
+		print("SMOKE load %s" % path)
+		if load(path) == null:
+			push_error("SMOKE cannot load %s" % path)
 	for entry in SCENES:
 		await _run(entry[0], entry[1])
 	await _camera_tab()

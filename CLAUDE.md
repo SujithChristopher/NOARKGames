@@ -76,12 +76,13 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | 14 | ButtonSoundManager | `Main_screen/Scripts/btn_sound_manager.gd` | Button SFX |
 | 15 | CircularTimer | `Games/random_reach/…/circular_timer.gd` | Visual countdown |
 | 16 | TrunkMonitor | `Main_screen/Scripts/trunk_monitor.gd` | Trunk posture from the tracker (TRUNK_STATUS messages) |
+| 17 | DeviceAgent | `Main_screen/Scripts/device_agent.gd` | Patient lock, through `agent.py` on 127.0.0.1:5055 |
 
 ### Data Flow
 
 **Patient flow**: When the main screen opens it runs `sender_raspberryPI.py --sync` on a thread, which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients whose `devices` include NOARK — `assessment_devices` alone does not count; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used. The **Refresh** button beside the patient box syncs again without leaving the screen. The main screen's **New Patient** button (where Set Origin was — the origin comes from Define Table) creates a patient on the device with just an id and training hand (left/right/both): `PatientDB.add_local_patient()` writes `local_patients.json` beside patients.json in the same shape, so a sync never overwrites it; they are tagged "(this device)" in the list. Once the server lists the same id, the local entry is dropped from that file, so a later server removal removes the patient here too.
 
-**Login flow**: patient id typed or picked from the suggestion list on the main screen → the dose screen (`Main_screen/Scenes/dose.tscn`, `dose_screen.gd`) confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen
+**Login flow**: patient id typed or picked from the suggestion list on the main screen → the dose screen (`Main_screen/Scenes/dose.tscn`, `dose_screen.gd`) confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `DeviceAgent.start(pid)` claims the patient on the server, refused while another device is training them (a network fault never stops therapy: the login goes through without the lock) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen. `agent.py` is started by the app if it is not running, stays up after it closes, and never runs in debug or on Android; a trial's end renews the claim, logging out or closing releases it.
 
 **Trial flow**: game start → `Manager.create_game_log_file(game_name, patient_id)` → `SessionLog.begin_trial` names the raw file → log rows every ~0.02s → game calls `SessionLog.hit()` / `miss()` → `SessionLog.end_trial()` at game over appends the sessions.csv row. Leaving the scene, starting another trial, or closing the app also ends the trial. Every row written starts `sender_raspberryPI.py --upload {pid}` in the background (`SessionLog.upload`, one at a time, later ones queued); closing the app (window X or an Exit button) shows "Saving the session to the server..." and quits only when the upload is done. Games and Exit buttons must not call `get_tree().quit()` themselves — they call `GlobalScript.request_quit()` (what the window X does), which also releases the patient lock. MoveTime excludes pauses (`GlobalTimer.pause_timer` → `SessionLog.set_paused`).
 
@@ -398,7 +399,9 @@ python pyscripts/tests/test_parity.py     # constants GDScript and Python both k
 - `tests/smoke_test.tscn` opens each game (both modes where it has two), the menus, Trunk angles and
   Results for 120 frames; `smoke.py` fails on any `ERROR` / `SCRIPT ERROR` Godot prints and names the
   scene. It runs in debug in memory only, with the data folder in Godot's user dir — never patient
-  data, never an upload. A new game scene goes in its `SCENES` list.
+  data, never an upload; it also fails if `agent.py` gets started. A new game scene goes in its
+  `SCENES` list. The login screens (`main.tscn`, `dose.tscn`) are only loaded, because opening them
+  talks to the server.
 - `test_parity.py` checks the protocol `VERSION`, `MOVEMENT` and the app folder (`Settings.APP_DIR`)
   agree between the GDScript and Python copies.
 - `pyscripts/tests/` also holds the tracker's synthetic tests; each runs as `python <file>`.
