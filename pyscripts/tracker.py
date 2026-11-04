@@ -22,6 +22,7 @@ import toml
 from scipy.optimize import least_squares
 
 import protocol
+from camera_view import CameraView, parse_exposure, parse_gain
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from frame_recorder import FrameRecorder
@@ -504,6 +505,7 @@ class TrackerClass:
         # They come up on their own thread (_manage_cameras), so the link keeps
         # answering through the seconds that takes.
         self._init_transport()
+        self._camera_view = CameraView(udp=self.stream_type == "udp")
         if platform.system() != "Linux":
             raise RuntimeError("Stereo tracking requires Radxa Dragon Q6A dual-camera hardware.")
         self.capture: Optional[StereoCapture] = None
@@ -674,6 +676,9 @@ class TrackerClass:
             if isinstance(result, StereoCapture):
                 self.capture = result
                 self.cam0, self.cam1 = result.cam0, result.cam1
+                # A change that arrived while they were coming up.
+                if (result.exposure_us, result.gain) != (self._exposure_us, self._gain):
+                    result.set_exposure(self._exposure_us, self._gain)
             else:
                 self._cam_retry_at = now + 5.0
 
@@ -782,6 +787,7 @@ class TrackerClass:
         the next HELLO."""
         print(f"[LINK] {why}; session closed, waiting for the app.", flush=True)
         self._want_tracking = False
+        self._camera_view.set_enabled(False)
         self._close_session()
         self.link.reset()
 
@@ -790,6 +796,7 @@ class TrackerClass:
         if kind == protocol.HELLO:
             # A new app: idle until it asks for tracking.
             self._want_tracking = False
+            self._camera_view.set_enabled(False)
             self._reload_settings()
             return True, ""
         if kind == protocol.RESTART:
@@ -816,11 +823,12 @@ class TrackerClass:
         return False, "unknown command"
 
     # settings.json key -> CONFIG key, for what can change without a restart.
-    # The rest (cameras, transport, trunk thresholds, cores) need
+    # The rest (transport, trunk thresholds, cores) need
     # `systemctl restart noark-tracker`.
     _LIVE_SETTINGS = {
         "tracker_solver": "solver", "tracker_refine": "refine",
         "tracker_camera": "camera", "corner_deadband_px": "deadband",
+        "camera_exposure_us": "exposure", "camera_gain": "gain",
         "trunk_enabled": "trunk", "trunk_method": "trunk_method",
         "trunk_reference": "trunk_reference", "recording": "recording", "recording_fps": "recording_fps",
         "recording_scale": "recording_scale",
@@ -869,6 +877,8 @@ class TrackerClass:
         trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot),
         trunk_reference (neutral|model),
         track (on|off: the app wants tracking now; the cameras run only then),
+        exposure (us), gain (1-16): applied at once if the cameras are up,
+        preview (on|off: the Camera tab is open; UDP only),
         recording (on|off), recording_fps, recording_scale (0-1],
         recording_chunk_frames — the recording ones from the next session.
         """
@@ -901,6 +911,14 @@ class TrackerClass:
         elif key == "track" and value in protocol.TRACK_CHOICES:
             self._want_tracking = value != "off"
             self._send_rotation = value == "rotation"
+        elif key == "exposure":
+            self._exposure_us = parse_exposure(value)
+            self._apply_exposure()
+        elif key == "gain":
+            self._gain = parse_gain(value)
+            self._apply_exposure()
+        elif key == "preview" and value in ("on", "off"):
+            self._camera_view.set_enabled(value == "on")
         elif key == "recording" and value in ("on", "off"):
             self.record_session = value == "on"
         elif key == "recording_fps" and float(value) > 0:
@@ -911,6 +929,11 @@ class TrackerClass:
             self.recording_chunk = int(value)
         else:
             raise ValueError(f"unknown key or value: {key}={value}")
+
+    def _apply_exposure(self) -> None:
+        """The cameras take the new values now, or when they next come up."""
+        if self.capture is not None:
+            self.capture.set_exposure(self._exposure_us, self._gain)
 
     def _open_trunk_csv(self) -> None:
         """trunk_debug: every trunk update next to the rigid body's latest pose,
@@ -1301,6 +1324,13 @@ class TrackerClass:
                     self.csv_writer.writerow(
                         [datetime.now().strftime("%d/%m/%Y %H:%M:%S"), *centroid]
                     )
+
+        if self.link.connected:
+            for message in self._camera_view.frame(
+                time.time(), raw0, raw1, corners0, corners1,
+                self.capture.sensor_settings, (self._exposure_us, self._gain),
+            ):
+                self.link.send(message)
 
         if self.display:
             disp0 = cv2.cvtColor(raw0, cv2.COLOR_GRAY2BGR)

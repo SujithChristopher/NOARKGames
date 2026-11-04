@@ -102,13 +102,20 @@ app wants tracking now, and which of POSITION or ROTATION to send — a game use
 one, never both; not a setting, never in settings.json), `solver` (joint/ransac), `refine`
 (crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
 `trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `trunk_reference`
-(neutral/model), `recording`
+(neutral/model), `exposure` (µs, above 0; the sensor caps it at the frame period)
+and `gain` (1–16) — on the running cameras at once, otherwise when they next
+start, `preview` (on/off: the app's Camera tab is open; refused unless the link is
+UDP; not a setting, never in settings.json, and off again at every HELLO), `recording`
 (on/off), `recording_fps`, `recording_scale` (0–1], `recording_chunk_frames` —
 the recording ones from the next session. At each HELLO the tracker applies the
 same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
-`tracker_camera`, `corner_deadband_px`, `trunk_enabled`, `trunk_method`,
-`trunk_reference`, `recording*`). Everything else in settings.json needs
-`sudo systemctl restart noark-tracker`.
+`tracker_camera`, `corner_deadband_px`, `camera_exposure_us`, `camera_gain`,
+`trunk_enabled`, `trunk_method`, `trunk_reference`, `recording*`). Everything else
+in settings.json needs `sudo systemctl restart noark-tracker`.
+
+The ACK for `exposure` / `gain` means the value was accepted, not that the sensor
+has it: with the ISP on, rcam writes the sensor when the next frame comes in.
+`CAMERA_STATUS` is what shows what it took.
 
 ## 5. Tracker → app
 
@@ -122,6 +129,8 @@ same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 | `0x85` | `CHUNK` | `msg_id u8 · index u8 · total u8 · part`, of a message too big for the transport |
 | `0x86` | `STORAGE_LIST` | JSON, below; after each STORAGE job |
 | `0x87` | `ROTATION` | `<B3f`, 13 bytes, below; while `track=rotation` |
+| `0x88` | `CAMERA_STATUS` | JSON, below; every 0.5 s while `preview=on` and tracking |
+| `0x89` | `PREVIEW` | JPEG, below; every 0.2 s while `preview=on` and tracking |
 
 **POSITION** / **ROTATION**, one per frame with a solved pose (no marker in
 view → none; the heartbeat still shows the tracker is alive, and the app reads
@@ -153,7 +162,26 @@ snapshot pixels — the subject picker's image and one outline per person.
 did (`""` for a list, `deleted <path>`, `error: …`), and every recording
 (`active`: being written, cannot be deleted).
 
+**CAMERA_STATUS** json (`pyscripts/camera_view.py`; `camera_tab.gd`):
+`{"ask": [exposure_us, gain], "exposure": [a, b], "gain": [a, b], "level": [a, b],
+"blown": [a, b], "tags": [a, b], "fps": f}`. `ask` is what is in force, which the
+sensors may have capped; `[a, b]` is the left and right picture of the `PREVIEW`:
+the exposure (µs) and gain read back from the sensor (`null` if the read failed),
+mean image level 0–255, % of pixels blown out, tags found. `fps` is tracking's rate
+since the last status (0 in the first).
+
+**PREVIEW** is both cameras side by side, 640×200, JPEG quality 50, with the tags
+found outlined. Measured on the board: 3–11 kB by how bright the scene is, so 3–9
+CHUNKs over UDP. Sending both at these rates tracked at 57–59 fps with no re-pair.
+
+Both are additive, so `VERSION` did not change: an app that does not know them never
+sends `preview=on`, and they are sent only after it.
+
 ## 6. Tools
+
+- `uv run pyscripts/tests/test_camera_live.py` — a client against the running
+  tracker on the board's cameras: exposure and gain reach the sensor, the image
+  follows, a cap shows, the preview stops. Close the app first; about a minute.
 
 - `uv run pyscripts/ble_test.py` — a BLE peripheral with the tracker's service
   and link, no cameras, streaming a fake hand circle.

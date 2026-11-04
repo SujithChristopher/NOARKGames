@@ -188,6 +188,14 @@ All three live in `calibration/device.toml` under `[cameras]`, shared by the
 calibration and the tracker, with `--exposure`, `--gain` and `--isp` to override
 for one run.
 
+The tracker can also take exposure and gain while it runs, from the app's
+**Settings > Camera** tab (UDP only), which shows both cameras at 5 fps with the
+tags outlined, what the sensors report, the image level and how many tags are
+found. What it sets is saved in settings.json (`camera_exposure_us`, `camera_gain`)
+and wins over `device.toml` when tracking; `device.toml` stays what calibration uses.
+Neither changes the frame period or the sync between the cameras (measured). Gain
+below 1 reads as 1, so `gain = 0.0` in `device.toml` means ×1.
+
 ```toml
 [cameras]
 exposure_us = 10000   # a whole number of the mains half-period

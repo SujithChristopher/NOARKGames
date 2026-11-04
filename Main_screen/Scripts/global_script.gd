@@ -154,6 +154,11 @@ signal tracker_config_applied(text: String)
 ## The board's recordings and disk, after a STORAGE command (storage.py):
 ## {total, free, event, recordings: [{path, patient, session, name, bytes, active}]}.
 signal storage_listed(info: Dictionary)
+## While Settings > Camera asks for them (CONFIG preview=on; camera_view.py). What
+## the sensors hold and see: {ask, exposure, gain, level, blown, tags, fps}, the
+## per-camera ones [left picture, right picture]; and the JPEG of both cameras.
+signal camera_status(info: Dictionary)
+signal camera_preview(jpeg: PackedByteArray)
 
 
 # The tracker runs on its own (the noark-tracker service on the board); the app
@@ -214,6 +219,14 @@ func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
 				storage_listed.emit(info)
 			else:
 				push_error("[LINK] Unreadable STORAGE_LIST")
+		LinkProtocol.CAMERA_STATUS:
+			var info = JSON.parse_string(LinkProtocol.payload_text(msg))
+			if info is Dictionary:
+				camera_status.emit(info)
+			else:
+				push_error("[LINK] Unreadable CAMERA_STATUS")
+		LinkProtocol.PREVIEW:
+			camera_preview.emit(msg.slice(1))
 		_:
 			push_warning("[LINK] Unexpected message type 0x%02x" % kind)
 
@@ -364,7 +377,7 @@ func send_storage_command(arg: String) -> void:
 
 ## Keep the tracker tracking while `node` is in the tree (a screen outside
 ## res://Games/ that shows the hand or the trunk: the trunk panel in the game
-## menus, Trunk angles, Define Table).
+## menus, Trunk angles, Define Table, Settings > Camera).
 func hold_tracking(node: Node) -> void:
 	_hold(_tracking_holders, node)
 

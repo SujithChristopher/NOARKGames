@@ -289,7 +289,7 @@ for big messages, heartbeats both ways.
   until Godot sends CONFIG `track=position`. `GlobalScript._update_tracking` sends it while
   the current scene is under `res://Games/` or a node called
   `GlobalScript.hold_tracking(self)` (trunk panel in the game menus when trunk is on,
-  Trunk angles, Define Table); `track=rotation` while a node that called
+  Trunk angles, Define Table, Settings > Camera); `track=rotation` while a node that called
   `GlobalScript.want_rotation(self)` is in the tree (Cannon Defense) — the tracker then
   sends ROTATION (the rvec) instead of POSITION, never both; everywhere else `track=off`. The cameras take 2–5 s to
   come up (own thread; the link keeps answering) and go off `camera_idle_off_s` (20 s)
@@ -316,13 +316,21 @@ for big messages, heartbeats both ways.
   `link_protocol.gd`, `tracker_link.gd`, `udp_transport.gd` / `ble_transport.gd`;
   `GlobalScript.link` is the link, `link_status` drives the status dot.
 - The main menu's **Settings** button opens its own scene (`Main_screen/Scenes/settings_screen.tscn`,
-  `settings_screen.gd`): a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live) and a Storage tab (`storage_tab.gd`) that lists and deletes
+  `settings_screen.gd`): a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live), a Camera tab (`camera_tab.gd`) and a Storage tab (`storage_tab.gd`) that lists and deletes
   the board's camera recordings through the tracker (STORAGE command,
   `pyscripts/storage.py`), so it works from a tablet too. Only recordings —
   never game data, sessions.csv or position CSVs — and never the one in progress.
+- The **Camera tab** sets exposure and gain live, UDP only: CONFIG `exposure` / `gain`, saved on
+  letting go as `camera_exposure_us` / `camera_gain` in settings.json (until then `device.toml`'s
+  apply; calibration always uses `device.toml`). While it is shown it holds tracking and sends
+  `preview=on`, and the tracker sends CAMERA_STATUS (2 Hz: what the sensors report, image level,
+  % blown out, tags per camera, fps) and PREVIEW (5 Hz: both cameras, 640×200 JPEG, tags outlined;
+  `pyscripts/camera_view.py`). An ACK only says the value was accepted: with the ISP on, rcam writes
+  the sensor on the next frame, so the read-back is in the status. The sensor caps exposure at the
+  frame period (~16.4 ms); short exposures can pulse under 50 Hz lights (`device.toml` has the numbers).
 - Changing a setting: the Settings panel sends it live as a CONFIG; at every HELLO
   the tracker also re-applies the live keys from its own settings.json. Anything
-  else (cameras, `stream_type`, trunk thresholds, `display`) needs
+  else (camera hardware such as `isp`, `stream_type`, trunk thresholds, `display`) needs
   `sudo systemctl restart noark-tracker`.
 - Godot and the tracker must speak the same `VERSION` (protocol.py /
   link_protocol.gd): a tablet APK built before a protocol change will not
@@ -394,3 +402,4 @@ python pyscripts/tests/test_parity.py     # constants GDScript and Python both k
 - `test_parity.py` checks the protocol `VERSION`, `MOVEMENT` and the app folder (`Settings.APP_DIR`)
   agree between the GDScript and Python copies.
 - `pyscripts/tests/` also holds the tracker's synthetic tests; each runs as `python <file>`.
+  `test_camera_live.py` needs the board: a client against the running tracker and real cameras.

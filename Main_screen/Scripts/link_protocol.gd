@@ -27,6 +27,8 @@ const SNAPSHOT := 0x84        # u16 json_len, json, jpeg
 const CHUNK := 0x85           # msg_id u8, index u8, total u8, part of another message
 const STORAGE_LIST := 0x86    # JSON: the board's recordings and disk
 const ROTATION := 0x87        # <B3f: the rigid body's Rodrigues rvec, camera frame
+const CAMERA_STATUS := 0x88   # JSON: what the sensors hold and see; preview on
+const PREVIEW := 0x89         # JPEG: both cameras side by side; preview on, over UDP
 
 const VEC3_SIZE := 13         # POSITION and ROTATION
 const ACK_SIZE := 4

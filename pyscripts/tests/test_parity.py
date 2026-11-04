@@ -45,6 +45,15 @@ def test_protocol_version():
     print(f"  protocol VERSION         {gd} in both")
 
 
+def test_camera_message_types():
+    # A mismatch only shows as a Camera tab that stays empty.
+    for name in ("CAMERA_STATUS", "PREVIEW"):
+        gd = gd_const("Main_screen/Scripts/link_protocol.gd", name)
+        py = py_const("pyscripts/protocol.py", name)
+        assert gd == py, f"link_protocol.gd {name} {gd:#x} != protocol.py {name} {py:#x}"
+    print("  camera message types     the same in both")
+
+
 def test_movement_per_game():
     gd = gd_const("Main_screen/Scripts/session_log.gd", "MOVEMENT")
     py = py_const("pyscripts/rebuild_sessions.py", "MOVEMENT")

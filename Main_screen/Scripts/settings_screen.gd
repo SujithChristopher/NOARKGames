@@ -6,8 +6,10 @@ extends Control
 ## `debug` is not listed on purpose (file-only). The LIVE_KEYS are also sent to
 ## the tracker as a CONFIG and apply at once (recording from the next session);
 ## the rest need the tracker restarted (sudo systemctl restart noark-tracker).
+## Camera tab: exposure and gain, with a live preview (camera_tab.gd).
 ## Storage tab: the board's camera recordings (storage_tab.gd).
 
+const CameraTab := preload("res://Main_screen/Scripts/camera_tab.gd")
 const StorageTab := preload("res://Main_screen/Scripts/storage_tab.gd")
 const TrunkMonitorScript := preload("res://Main_screen/Scripts/trunk_monitor.gd")
 
@@ -52,6 +54,7 @@ const LINK_STATUS_TEXT := {
 }
 
 var _tabs: TabContainer
+var _camera: Control
 var _storage: Control
 var _status: Label
 var _link_label: Label
@@ -97,10 +100,15 @@ func _ready() -> void:
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(_tabs)
 	_tabs.add_child(_tracker_tab())
+	_camera = CameraTab.new()
+	_camera.name = "Camera"
+	_tabs.add_child(_camera)
 	_storage = StorageTab.new()
 	_storage.name = "Storage"
 	_tabs.add_child(_storage)
-	_tabs.tab_changed.connect(func(_i: int): _refresh_storage_if_shown())
+	_tabs.tab_changed.connect(func(_i: int):
+		_camera.set_active(_tabs.get_current_tab_control() == _camera)
+		_refresh_storage_if_shown())
 
 
 func _back() -> void:

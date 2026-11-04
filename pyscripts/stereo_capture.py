@@ -230,6 +230,36 @@ class StereoCapture:
             self.close()
             raise
 
+    def set_exposure(self, exposure_us: int, gain: float) -> None:
+        """Change both cameras' exposure and gain while they run.
+
+        settle=False: settling drains one camera's queue and then the other's,
+        which would undo the pairing _align_pairing set up. The new values show
+        in the image 1-3 frames later (measured on this rig); neither the frame
+        period nor the phase moves, as long as exposure stays under the frame
+        period, where the sensor caps it.
+        """
+        self.exposure_us = exposure_us
+        self.gain = gain
+        controls = {"ExposureTime": exposure_us, "AnalogueGain": gain}
+        for cam in (self.cam0, self.cam1):
+            cam.set_controls(controls, settle=False)
+
+    def sensor_settings(self) -> list:
+        """What each sensor holds now: (exposure_us, gain), or None if unreadable.
+
+        Four v4l2-ctl runs, about 3.4 ms each here, so not for every frame.
+        """
+        settings = []
+        for cam in (self.cam0, self.cam1):
+            try:
+                settings.append((cam.get_control("exposure") * cam.line_time_us(),
+                                 cam.get_control("analogue_gain") / 16.0))
+            except Exception as exc:  # a failed read must not stop tracking
+                print(f"[CAM] Could not read the sensor back: {exc!r}", flush=True)
+                settings.append(None)
+        return settings
+
     # ── Frame synchronisation ─────────────────────────────────────────────────
 
     def _init_frame_sync(self) -> None:
