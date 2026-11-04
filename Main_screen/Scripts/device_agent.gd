@@ -24,6 +24,12 @@ var patient: String = ""   # the patient this device holds, "" when none
 func _ready() -> void:
 	# The close request pauses the tree while it waits; the release must still go out.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# After the first frame's _ready calls: debug can be switched on in memory until
+	# then (the smoke test), and debug must never start the agent or reach the server.
+	_start_if_enabled.call_deferred()
+
+
+func _start_if_enabled() -> void:
 	if _enabled():
 		_ensure_running()
 

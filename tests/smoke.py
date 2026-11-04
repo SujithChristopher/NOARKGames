@@ -50,6 +50,10 @@ def main() -> int:
     if errors:
         print(f"FAIL: {len(errors)} errors")
         return 1
+    # agent.py talks to the server, and stays up after the run.
+    if "[agent] started" in output:
+        print("FAIL: the smoke run started agent.py")
+        return 1
     print(output[output.index("SMOKE DONE"):].splitlines()[0] + " — no errors")
     return 0
 
