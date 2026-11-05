@@ -7,7 +7,6 @@ extends Button
 @onready var hosp_id_edit: LineEdit = $"../TextureRect/HospID"
 @onready var sync_status: Label = $"../TextureRect/SyncStatus"
 @onready var refresh_button: Button = $"../TextureRect/RefreshButton"
-@onready var loading_dialog: AcceptDialog = AcceptDialog.new()
 const DOSE_SCENE = "res://Main_screen/Scenes/dose.tscn"
 const GameButton := preload("res://Main_screen/Scripts/game_button.gd")
 @onready var restart_button: Button = $"../RestartTrackerButton"
@@ -19,9 +18,6 @@ var _restart_started_ms := 0
 const RESTART_TIMEOUT_S := 60
 var endgame : bool
 
-# Fetches patients.json from the server when the main screen opens, and again
-# on Refresh. The sender only uses the standard library, so any python3 runs it.
-var sync_thread := Thread.new()
 const LOCAL_TAG := "  (this device)"
 const LOCAL_COLOR := Color(1.0, 0.8, 0.4)
 
@@ -38,6 +34,7 @@ func _ready() -> void:
     _style_menu()
     _build_suggestions()
     refresh_button.pressed.connect(_refresh_patients)
+    PatientDB.sync_finished.connect(_on_sync_finished)
     _refresh_patients()
     GlobalScript.link_connected_changed.connect(_on_link_connected_changed)
 
@@ -53,35 +50,19 @@ func _style_menu() -> void:
     GameButton.style_line_edit(hosp_id_edit)
 
 
-func _exit_tree() -> void:
-    if sync_thread.is_started():
-        sync_thread.wait_to_finish()
-
-
 func _refresh_patients() -> void:
-    if sync_thread.is_started():
-        return   # one sync at a time
     refresh_button.disabled = true
     sync_status.text = "Fetching patients..."
-    sync_thread.start(_sync_patients)
+    PatientDB.sync()
 
 
-func _sync_patients() -> void:
-    var output := []
-    var code := OS.execute(GlobalScript.python(), [GlobalScript.sender_path(), "--sync"], output, true)
-    print("[sync] ", "".join(output).strip_edges())
-    _on_sync_done.call_deferred(code)
-
-
-func _on_sync_done(code: int) -> void:
-    sync_thread.wait_to_finish()
+func _on_sync_finished(ok: bool) -> void:
     refresh_button.disabled = false
-    PatientDB.load_database()
     if suggestions.visible:
         _show_suggestions()
     var n := PatientDB.counts()
     var local := " + %d on this device" % n["local"] if n["local"] > 0 else ""
-    if code == 0:
+    if ok:
         sync_status.text = "%d server patients (v%d)%s" % [n["server"], PatientDB.version, local]
     elif n["server"] + n["local"] > 0:
         sync_status.text = "Server unreachable - %d saved server patients%s" % [n["server"], local]

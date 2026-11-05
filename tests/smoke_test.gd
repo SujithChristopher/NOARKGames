@@ -23,6 +23,7 @@ const CANNON := "res://Games/cannon_defense/cannon_defense.tscn"
 const REACH_SCAN := "res://Games/firefly_reach/reach_assessment.tscn"
 const SHEEP_FLOCK := "res://Games/random_reach/Scripts/sheep_flock.gd"
 const APPLE := "res://Games/random_reach/scenes/apple.tscn"
+const MAIN_SCREEN := "res://Main_screen/Scenes/main.tscn"
 
 ## [scene, mode]. The 2D+3D games run in both modes.
 const SCENES := [
@@ -57,6 +58,7 @@ func _ready() -> void:
 		await _run(entry[0], entry[1])
 	await _debug_means_mouse()
 	await _sheep_snack_is_heard()
+	await _leaving_main_screen_skips_the_sync()
 	await _camera_tab()
 	await _calibration_tab()
 	print("SMOKE DONE %d scenes" % SCENES.size())
@@ -158,6 +160,36 @@ func _sheep_snack_is_heard() -> void:
 	_check(flock._laugh.playing, "the sheep should laugh after its snack")
 	await _close(field)
 	print("SMOKE sheep snack done")
+
+
+## Leaving the main screen must not wait for its patient sync: offline that froze the
+## app until the connection gave up. A stand-in sleeps in the sender's place, then exits
+## as the sender does when the server is unreachable, so this never reaches the server.
+func _leaving_main_screen_skips_the_sync() -> void:
+	var sender := OS.get_user_data_dir().path_join("smoke_slow_sender.py")
+	var file := FileAccess.open(sender, FileAccess.WRITE)
+	file.store_string("import sys, time\ntime.sleep(2)\nsys.exit(3)\n")
+	file.close()
+	PatientDB.sync_command = [GlobalScript.python(), [sender]]
+	var main := await _open(MAIN_SCREEN)
+	_check(PatientDB.is_syncing(), "the main screen should start a sync")
+	var left := Time.get_ticks_msec()
+	await _close(main)
+	_check(Time.get_ticks_msec() - left < 1000, "leaving the main screen should not wait for the sync")
+	_check(PatientDB.is_syncing(), "the sync should carry on after the screen has gone")
+	# Back before it ends: this screen joins that sync and shows how it ended.
+	main = await _open(MAIN_SCREEN)
+	var status: Label = main.find_child("SyncStatus", true, false)
+	var refresh: Button = main.find_child("RefreshButton", true, false)
+	_check(status.text == "Fetching patients..." and refresh.disabled, "the screen should show the sync still running")
+	if PatientDB.is_syncing():
+		await PatientDB.sync_finished
+	_check(status.text.begins_with("Server unreachable"), "the screen should show how the sync ended")
+	_check(not refresh.disabled, "Refresh should work again after the sync")
+	await _close(main)
+	PatientDB.sync_command = []
+	DirAccess.remove_absolute(sender)
+	print("SMOKE leaving the main screen done")
 
 
 func _open(path: String) -> Node:

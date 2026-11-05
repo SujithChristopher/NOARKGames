@@ -61,7 +61,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 | # | Name | Script | Purpose |
 |---|------|--------|---------|
 | 1 | Settings | `Main_screen/Scripts/settings.gd` | User settings file (must be first) |
-| 2 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Read-only patient list from the server's patients.json |
+| 2 | PatientDB | `Main_screen/Scripts/patient_db.gd` | Patient list from the server's patients.json, and the sync that fetches it |
 | 3 | SessionLog | `Main_screen/Scripts/session_log.gd` | Per-patient sessions.csv, trial numbering, therapy dose |
 | 4 | Manager | `Main_screen/Scripts/manager.gd` | Raw trial CSV creation |
 | 5 | GlobalSignals | `Main_screen/Scripts/global_signals.gd` | Signal bus + shared state |
@@ -80,7 +80,7 @@ Order in `project.godot` is critical — later autoloads can depend on earlier o
 
 ### Data Flow
 
-**Patient flow**: When the main screen opens it runs `sender_raspberryPI.py --sync` on a thread, which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients whose `devices` include NOARK — `assessment_devices` alone does not count; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used. The **Refresh** button beside the patient box syncs again without leaving the screen. The main screen's **New Patient** button (where Set Origin was — the origin comes from Define Table) creates a patient on the device with just an id and training hand (left/right/both): `PatientDB.add_local_patient()` writes `local_patients.json` beside patients.json in the same shape, so a sync never overwrites it; they are tagged "(this device)" in the list. Once the server lists the same id, the local entry is dropped from that file, so a later server removal removes the patient here too.
+**Patient flow**: When the main screen opens it calls `PatientDB.sync()`, which runs `sender_raspberryPI.py --sync` on a thread (in the autoload, so leaving the screen never waits for it; only quitting does), which fetches `{DOCUMENTS}/NOARK_demo/patients.json` from the server (`{"version", "patients": [{"user_id", "status", "side", "devices"}]}`). `PatientDB` reads it (active patients whose `devices` include NOARK — `assessment_devices` alone does not count; `side` → `affected_hand`), the main screen fills its dropdown, and the id is the server's `user_id`. Offline, the last fetched file is used; connecting gives up after 3 s (`CONNECT_TIMEOUT_SECONDS`), while a connected server gets its full timeout to reply. The **Refresh** button beside the patient box syncs again without leaving the screen. The main screen's **New Patient** button (where Set Origin was — the origin comes from Define Table) creates a patient on the device with just an id and training hand (left/right/both): `PatientDB.add_local_patient()` writes `local_patients.json` beside patients.json in the same shape, so a sync never overwrites it; they are tagged "(this device)" in the list. Once the server lists the same id, the local entry is dropped from that file, so a later server removal removes the patient here too.
 
 **Login flow**: patient id typed or picked from the suggestion list on the main screen → the dose screen (`Main_screen/Scenes/dose.tscn`, `dose_screen.gd`) confirms/enters the daily therapy dose (appends to `configdata.csv` if new or changed) → `DeviceAgent.start(pid)` claims the patient on the server, refused while another device is training them (a network fault never stops therapy: the login goes through without the lock) → `SessionLog.start_session(pid)` (SessionNumber = max in sessions.csv + 1) → 2D/3D mode screen. `agent.py` is started by the app if it is not running, stays up after it closes, and never runs in debug or on Android; a trial's end renews the claim, logging out or closing releases it.
 
@@ -427,7 +427,7 @@ python pyscripts/tests/test_parity.py     # constants GDScript and Python both k
   scene. It runs in debug in memory only, with the data folder in Godot's user dir — never patient
   data, never an upload; it also fails if `agent.py` gets started. A new game scene goes in its
   `SCENES` list. The login screens (`main.tscn`, `dose.tscn`) are only loaded, because opening them
-  talks to the server.
+  talks to the server; the main screen is also opened with a stand-in for the sender (`PatientDB.sync_command`).
 - `test_parity.py` checks the protocol `VERSION`, `MOVEMENT` and the app folder (`Settings.APP_DIR`)
   agree between the GDScript and Python copies.
 - `pyscripts/tests/` also holds the tracker's synthetic tests; each runs as `python <file>`.

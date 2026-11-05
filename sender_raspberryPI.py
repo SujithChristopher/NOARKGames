@@ -37,6 +37,10 @@ LOCK_RENEW_SECONDS = 30
 # How long one lock request (claim / check / release) waits for the server before giving up
 LOCK_TIMEOUT_SECONDS = 3
 
+# How long connecting to the server may take. Left alone, Windows keeps trying for 21 s when nothing answers.
+# Waiting for the reply keeps each request's own timeout, so a slow server is not taken for a dead one.
+CONNECT_TIMEOUT_SECONDS = 3
+
 NUDGE_PORT = 5001   # must match patients_store.NUDGE_PORT
 
 CSV_NAMES = ["sessions.csv", "configdata.csv"]
@@ -283,9 +287,10 @@ def server_request(header, timeout=30):
     header_data = json.dumps(header).encode("utf-8")
 
     with socket.create_connection(
-        (SERVER_IP, SERVER_PORT), timeout=timeout
+        (SERVER_IP, SERVER_PORT), timeout=min(timeout, CONNECT_TIMEOUT_SECONDS)
     ) as client:
 
+        client.settimeout(timeout)
         client.sendall(len(header_data).to_bytes(4, "big"))
         client.sendall(header_data)
 

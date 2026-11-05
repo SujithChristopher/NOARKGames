@@ -16,6 +16,8 @@ extends Node
 ##   {"version": 2, "updated_at": "...", "patients": [
 ##       {"user_id": "AG12312", "status": "active", "side": "left", "devices": [...]}]}
 
+signal sync_finished(ok: bool)   # ok: the server answered. The list is already reloaded.
+
 # Singleton instance for global access
 static var instance
 
@@ -38,6 +40,10 @@ var patient_register: Dictionary = {}
 var current_patient_id: String = ""
 var version: int = 0
 
+# [program, args] to run instead of the sender: the smoke test's stand-in.
+var sync_command: Array = []
+var _sync_thread := Thread.new()
+
 # File paths
 var database_file_path: String
 var local_file_path: String
@@ -48,6 +54,41 @@ func _init():
 	local_file_path = Settings.base_dir.path_join(LOCAL_FILE)
 	print("Patient database path: ", database_file_path)
 	load_database()
+
+
+## Fetches patients.json from the server: when the main screen opens, and on its
+## Refresh. On a thread here and not on that screen, because offline it takes seconds
+## and leaving a screen must not wait for it. The sender only uses the standard
+## library, so any python3 runs it.
+func sync() -> void:
+	if is_syncing():
+		return   # one at a time; sync_finished tells this caller too
+	var command := sync_command if not sync_command.is_empty() 		else [GlobalScript.python(), [GlobalScript.sender_path(), "--sync"]]
+	_sync_thread.start(_run_sync.bind(command[0], command[1]))
+
+
+func is_syncing() -> bool:
+	return _sync_thread.is_started()
+
+
+func _run_sync(program: String, args: Array) -> void:
+	var output := []
+	var code := OS.execute(program, args, output, true)
+	print("[sync] ", "".join(output).strip_edges())
+	_on_sync_done.call_deferred(code)
+
+
+func _on_sync_done(code: int) -> void:
+	_sync_thread.wait_to_finish()
+	load_database()
+	sync_finished.emit(code == 0)
+
+
+## Quitting is the one time a sync is waited for: a thread must end before the app does.
+func _exit_tree() -> void:
+	if is_syncing():
+		_sync_thread.wait_to_finish()
+
 
 func load_database() -> bool:
 	patient_register = {}
