@@ -332,7 +332,10 @@ for big messages, heartbeats both ways.
   `link_protocol.gd`, `tracker_link.gd`, `udp_transport.gd` / `ble_transport.gd`;
   `GlobalScript.link` is the link, `link_status` drives the status dot.
 - The main menu's **Settings** button opens its own scene (`Main_screen/Scenes/settings_screen.tscn`,
-  `settings_screen.gd`): a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live), a Camera tab (`camera_tab.gd`), a Calibration tab (`calibration_tab.gd`, under Marker Geometry) and a Storage tab (`storage_tab.gd`) that lists and deletes
+  `settings_screen.gd`). Its look is one Theme in `settings_style.gd` (`Style`), modelled on a bedside monitor rather than the
+  games: a tab names what a thing is (`"Card"`, `"Helper"`, `"PrimaryButton"`) and takes colours from `Style`; blue is something
+  to press, green / amber / red how a reading stands; the typeface is Atkinson Hyperlegible Next (no µ: it falls back to Godot's font).
+  A rail on the left picks the tab (`_tabs` is a TabContainer with its own tabs hidden) and shows the link's state. Tabs: a Tracker tab (settings.json, incl. the UDP/BLE choice, applied live), a Camera tab (`camera_tab.gd`), a Calibration tab (`calibration_tab.gd`, under Marker Geometry) and a Storage tab (`storage_tab.gd`) that lists and deletes
   the board's camera recordings through the tracker (STORAGE command,
   `pyscripts/storage.py`), so it works from a tablet too. Only recordings —
   never game data, sessions.csv or position CSVs — and never the one in progress.

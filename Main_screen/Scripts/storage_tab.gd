@@ -7,11 +7,12 @@ extends VBoxContainer
 ## over BLE the app runs on a tablet and cannot see the board's disk. The
 ## tracker refuses the recording being written now.
 
+const Style := preload("res://Main_screen/Scripts/settings_style.gd")
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 
-const DANGER := Color(0.86, 0.27, 0.22)
-const ACCENT := Color(0.35, 0.62, 0.9)
-const MUTED := Color(0.7, 0.72, 0.75)
+const DANGER := Style.DANGER
+const ACCENT := Style.ACCENT
+const MUTED := Style.MUTED
 const LOW_DISK := 0.1          # free share under which the bar turns red
 const CONFIRM_LIST_MAX := 8    # recordings named in the confirm dialog
 
@@ -36,21 +37,19 @@ func _ready() -> void:
 
 	# Disk
 	var disk := HBoxContainer.new()
-	disk.add_theme_constant_override("separation", 12)
-	add_child(disk)
-	var disk_title := Label.new()
-	disk_title.text = "Board disk"
-	disk.add_child(disk_title)
+	disk.add_theme_constant_override("separation", 14)
+	add_child(Style.card(disk))
+	disk.add_child(Style.label("Board disk"))
 	_disk_bar = ProgressBar.new()
 	_disk_bar.show_percentage = false
-	_disk_bar.custom_minimum_size = Vector2(240, 22)
+	_disk_bar.custom_minimum_size = Vector2(200, 10)
 	_disk_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_disk_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_disk_fill = StyleBoxFlat.new()
-	_disk_fill.set_corner_radius_all(4)
+	_disk_fill.set_corner_radius_all(5)
 	_disk_bar.add_theme_stylebox_override("fill", _disk_fill)
 	disk.add_child(_disk_bar)
-	_disk_label = Label.new()
+	_disk_label = Style.label("", "Helper")
 	disk.add_child(_disk_label)
 
 	# Recordings
@@ -61,8 +60,10 @@ func _ready() -> void:
 	_tree.column_titles_visible = true
 	_tree.set_column_title(0, "Camera recordings")
 	_tree.set_column_title(1, "Size")
+	_tree.set_column_title_alignment(0, HORIZONTAL_ALIGNMENT_LEFT)
+	_tree.set_column_title_alignment(1, HORIZONTAL_ALIGNMENT_RIGHT)
 	_tree.set_column_expand(1, false)
-	_tree.set_column_custom_minimum_width(1, 140)
+	_tree.set_column_custom_minimum_width(1, 120)
 	_tree.select_mode = Tree.SELECT_ROW
 	_tree.item_edited.connect(_on_item_edited)
 	add_child(_tree)
@@ -75,26 +76,22 @@ func _ready() -> void:
 	actions.add_child(_refresh_button)
 	actions.add_child(_button("Select all", func(): _check_all(true)))
 	actions.add_child(_button("Clear", func(): _check_all(false)))
-	_summary = Label.new()
+	_summary = Style.label("", "Helper")
 	_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	actions.add_child(_summary)
-	_delete_button = _button("  Delete selected  ", _ask_delete)
-	_delete_button.add_theme_color_override("font_color", DANGER)
-	_delete_button.add_theme_color_override("font_hover_color", DANGER.lightened(0.2))
+	_delete_button = _button("Delete selected", _ask_delete)
+	_delete_button.theme_type_variation = "DangerButton"
 	actions.add_child(_delete_button)
 
-	_status = Label.new()
-	_status.add_theme_color_override("font_color", MUTED)
-	_status.add_theme_font_size_override("font_size", 16)
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status = Style.wrapped("", "Helper")
 	add_child(_status)
 
 	_confirm = ConfirmationDialog.new()
 	_confirm.title = "Delete recordings?"
 	_confirm.ok_button_text = "Delete"
 	_confirm.cancel_button_text = "Cancel"
-	_confirm.get_ok_button().add_theme_color_override("font_color", DANGER)
+	_confirm.get_ok_button().theme_type_variation = "DangerButton"
 	_confirm.confirmed.connect(_delete_selected)
 	add_child(_confirm)
 
@@ -119,7 +116,7 @@ func _button(text: String, on_press: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size.y = 44
+	b.custom_minimum_size.y = 40
 	b.pressed.connect(on_press)
 	return b
 
@@ -173,8 +170,7 @@ func _show_offline() -> void:
 	_recordings = []
 	_build_tree()
 	_show_disk({})
-	_status.text = "Not connected to the tracker. The recordings are on the board; " \
-		+ "this tab lists them once the tracker is running."
+	_status.text = "The recordings are on the board; this tab lists them once the tracker is running."
 
 
 # One deletion answered: `path` deleted, or refused / failed with `error`.
@@ -213,7 +209,7 @@ func _show_disk(info: Dictionary) -> void:
 	var total: float = info.get("total", 0.0)
 	if total <= 0:
 		_disk_bar.value = 0
-		_disk_label.text = "—"
+		_disk_label.text = "Not known yet"
 		return
 	var free: float = info.get("free", 0.0)
 	var in_recordings := 0.0
@@ -232,7 +228,9 @@ func _build_tree() -> void:
 	var root := _tree.create_item()
 	if _recordings.is_empty():
 		var empty := _tree.create_item(root)
-		empty.set_text(0, "No camera recordings on the board." if GlobalScript.link.connected else "—")
+		empty.set_text(0, "No camera recordings on the board." if GlobalScript.link.connected \
+			else "Not connected to the tracker.")
+		empty.set_custom_color(0, MUTED)
 		empty.set_selectable(0, false)
 		empty.set_selectable(1, false)
 		_update_selection()

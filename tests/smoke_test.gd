@@ -437,9 +437,15 @@ func _calibration_tab() -> void:
 	var camera = scene._camera
 	var current := {"tags": [1, 2, 3, 4, 5], "created": "2026-10-29T09:08:46", "agreement_mm": 1.6, "can_restore": true}
 
+	# The rail picks the tab, and shows the one in view however it got there.
+	scene._nav[camera.get_index()].pressed.emit()
+	_check(scene._tabs.current_tab == camera.get_index(), "the rail should pick the tab")
+
 	# Opening it: asks where things stand, holds the cameras, asks for the picture.
 	scene._tabs.current_tab = tab.get_index()
 	await get_tree().process_frame
+	_check(scene._nav[tab.get_index()].button_pressed and not scene._nav[camera.get_index()].button_pressed,
+		"the rail should show the tab in view")
 	_check(_body_commands()[-1] == "status", "opening should ask where things stand")
 	_check(_configs()[-1] == "preview=on", "opening should ask for the picture")
 	_check(GlobalScript.tracking_mode() == "position", "opening should hold the cameras")

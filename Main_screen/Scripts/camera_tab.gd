@@ -19,6 +19,7 @@ extends VBoxContainer
 ## (camera_exposure_us, camera_gain), where the tracker reads them at every HELLO.
 ## Until they are set there, device.toml's apply. Calibration always uses device.toml.
 
+const Style := preload("res://Main_screen/Scripts/settings_style.gd")
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 const PictureLink := preload("res://Main_screen/Scripts/picture_link.gd")
 const AndroidWifi := preload("res://Main_screen/Scripts/android_wifi.gd")
@@ -42,10 +43,8 @@ const CAP_TOLERANCE := 0.02  ## the sensor rounds exposure to whole lines
 # The calibration's own limits for a usable image (rigidbody_calib.py).
 const LEVEL_DARK := 40.0
 const LEVEL_BRIGHT := 200.0
-const GOOD := Color(0.45, 0.85, 0.5)
-const WARN := Color(0.95, 0.75, 0.3)
-const MUTED := Color(0.7, 0.72, 0.75)
-const TRACK := Color(0.32, 0.34, 0.38)
+const GOOD := Style.GOOD
+const WARN := Style.WARN
 
 var _active := false
 var _hold: Node             # in the tree while the tab holds the cameras on
@@ -70,10 +69,12 @@ var _wifi_plugin = null:
 var _picture_link: Node
 var _password_row: HBoxContainer
 var _password: LineEdit
+var _state_dot: Panel
 var _state: Label
 var _fps: Label
 var _controls: VBoxContainer
 var _picture: TextureRect
+var _no_picture: Label
 var _sliders := {}
 var _value_labels := {}
 var _buttons: Array[Button] = []
@@ -82,35 +83,42 @@ var _message: Label
 
 
 func _ready() -> void:
-	add_theme_constant_override("separation", 8)
+	add_theme_constant_override("separation", 10)
 	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 10)
 	add_child(top)
-	_state = Label.new()
+	_state_dot = Style.dot()
+	top.add_child(_state_dot)
+	_state = Style.wrapped("")
 	_state.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	top.add_child(_state)
-	_fps = Label.new()
-	_fps.add_theme_color_override("font_color", MUTED)
+	_fps = Style.label("", "Helper")
 	top.add_child(_fps)
 
 	_controls = VBoxContainer.new()
 	_controls.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_controls.add_theme_constant_override("separation", 6)
+	_controls.add_theme_constant_override("separation", 10)
 	add_child(_controls)
 	_picture = TextureRect.new()
 	_picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_picture.custom_minimum_size.y = 150
+	Style.picture_well(_picture)
+	_no_picture = Style.label("No picture yet", "Helper")
+	_no_picture.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_no_picture.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_picture.add_child(_no_picture)
+	_no_picture.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_controls.add_child(_picture)
+	var sliders := VBoxContainer.new()
+	sliders.add_theme_constant_override("separation", 6)
 	for row in ROWS:
-		_controls.add_child(_slider_row(row))
+		sliders.add_child(_slider_row(row))
+	_controls.add_child(Style.card(sliders))
 	_controls.add_child(_readout())
 	_controls.add_child(_password_box())
-	_message = Label.new()
-	_message.add_theme_font_size_override("font_size", 16)
-	_message.add_theme_color_override("font_color", MUTED)
-	_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_message = Style.wrapped("", "Helper")
 	_controls.add_child(_message)
 	_start_sync()
 	_update_message()
@@ -158,6 +166,7 @@ func _process(delta: float) -> void:
 
 func _update_state() -> void:
 	var text := "Waiting for the cameras..."
+	var colour := Style.MUTED
 	if not GlobalScript.link.connected:
 		text = "Waiting for the tracker..."
 	else:
@@ -166,10 +175,13 @@ func _update_state() -> void:
 				text = "Cameras starting..."
 			LinkProtocol.TrackerState.FAILED:
 				text = "The cameras would not start; trying again..."
+				colour = WARN
 			LinkProtocol.TrackerState.TRACKING:
 				var stale := Time.get_ticks_msec() - _last_status_ms > STALE_MS
 				text = "No word from the tracker" if stale else "Live"
+				colour = WARN if stale else GOOD
 	_state.text = text
+	Style.set_dot(_state_dot, colour)
 
 
 # ── Sliders ───────────────────────────────────────────────────────────────────
@@ -177,12 +189,11 @@ func _update_state() -> void:
 func _slider_row(row: String) -> HBoxContainer:
 	var spec: Dictionary = ROWS[row]
 	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	var title := Label.new()
-	title.text = spec["title"]
-	title.custom_minimum_size.x = 110
+	box.add_theme_constant_override("separation", 10)
+	var title := Style.label(spec["title"])
+	title.custom_minimum_size.x = 76
 	box.add_child(title)
-	box.add_child(_step_button("-", row, -spec["button"]))
+	box.add_child(_step_button("−", row, -spec["button"]))
 	var slider := HSlider.new()
 	slider.min_value = spec["min"]
 	slider.max_value = spec["max"]
@@ -190,13 +201,6 @@ func _slider_row(row: String) -> HBoxContainer:
 	slider.focus_mode = Control.FOCUS_NONE
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# The default track vanishes on this background: how far it goes would not show.
-	var track := StyleBoxFlat.new()
-	track.bg_color = TRACK
-	track.set_corner_radius_all(3)
-	track.content_margin_top = 3
-	track.content_margin_bottom = 3
-	slider.add_theme_stylebox_override("slider", track)
 	slider.value_changed.connect(func(_v: float): _on_slider_moved(row))
 	slider.drag_ended.connect(func(changed: bool):
 		if changed:
@@ -204,8 +208,8 @@ func _slider_row(row: String) -> HBoxContainer:
 	box.add_child(slider)
 	_sliders[row] = slider
 	box.add_child(_step_button("+", row, spec["button"]))
-	var value := Label.new()
-	value.custom_minimum_size.x = 120
+	var value := Style.label("", "Value")
+	value.custom_minimum_size.x = 96
 	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	box.add_child(value)
 	_value_labels[row] = value
@@ -214,7 +218,8 @@ func _slider_row(row: String) -> HBoxContainer:
 
 func _step_button(text: String, row: String, amount: float) -> Button:
 	var button := Button.new()
-	button.text = "  %s  " % text
+	button.text = text
+	button.custom_minimum_size = Vector2(44, 38)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(func():
 		_sliders[row].value += amount
@@ -286,27 +291,27 @@ func _sync_sliders(ask: Array) -> void:
 
 # ── What the tracker says ─────────────────────────────────────────────────────
 
-func _readout() -> GridContainer:
+func _readout() -> Control:
 	var grid := GridContainer.new()
 	grid.columns = COLUMNS.size() + 1
-	grid.add_theme_constant_override("h_separation", 32)
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 2)
 	grid.add_child(Control.new())
 	for column in COLUMNS:
-		grid.add_child(_cell(column[1], MUTED))
+		grid.add_child(_cell(column[1], "TableHead"))
 	for camera in 2:
-		grid.add_child(_cell("Left picture" if camera == 0 else "Right picture", MUTED))
+		grid.add_child(_cell("Left picture" if camera == 0 else "Right picture", "TableHead"))
 		for column in COLUMNS:
-			var label := _cell("-", Color.WHITE)
+			var label := _cell("-", "Value")
 			grid.add_child(label)
 			_cells["%s%d" % [column[0], camera]] = label
-	return grid
+	return Style.card(grid)
 
 
-func _cell(text: String, colour: Color) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.add_theme_font_size_override("font_size", 18)
-	label.add_theme_color_override("font_color", colour)
+func _cell(text: String, variation: String) -> Label:
+	var label := Style.label(text, variation)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	return label
 
 
@@ -329,18 +334,17 @@ func _on_status(info: Dictionary) -> void:
 
 func _password_box() -> HBoxContainer:
 	_password_row = HBoxContainer.new()
-	_password_row.add_theme_constant_override("separation", 8)
+	_password_row.add_theme_constant_override("separation", 10)
 	_password_row.visible = false
-	var label := Label.new()
-	label.text = "Hotspot password"
-	_password_row.add_child(label)
+	_password_row.add_child(Style.label("Hotspot password"))
 	_password = LineEdit.new()
 	_password.secret = true
 	_password.custom_minimum_size.x = 260
 	_password.text_submitted.connect(func(_text: String): _save_password())
 	_password_row.add_child(_password)
 	var join := Button.new()
-	join.text = "  Join  "
+	join.text = "Join"
+	join.theme_type_variation = "PrimaryButton"
 	join.focus_mode = Control.FOCUS_NONE
 	join.pressed.connect(_save_password)
 	_password_row.add_child(join)
@@ -472,6 +476,8 @@ static func _capped_note(info: Dictionary) -> String:
 
 
 func _update_message() -> void:
+	_message.add_theme_color_override("font_color",
+		WARN if not (_refused.is_empty() and _capped.is_empty()) else Style.MUTED)
 	if not _refused.is_empty():
 		_message.text = _refused
 	elif not _capped.is_empty():
@@ -490,6 +496,7 @@ func _on_preview(jpeg: PackedByteArray) -> void:
 		push_warning("[Camera] Unreadable preview")
 		return
 	_picture.texture = ImageTexture.create_from_image(image)
+	_no_picture.visible = false
 
 
 func _on_link_changed(connected: bool) -> void:

@@ -11,16 +11,18 @@ extends VBoxContainer
 ## with the tags outlined. Over BLE the picture needs the hotspot the Camera tab joins, so
 ## here the list says what the cameras see.
 
+const Style := preload("res://Main_screen/Scripts/settings_style.gd")
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 
 # The calibration's own limits for a usable image (rigidbody_calib.py).
 const LEVEL_DARK := 40
 const LEVEL_BRIGHT := 200
 const TAG_PX_SMALL := 45
-const GOOD := Color(0.45, 0.85, 0.5)
-const WARN := Color(0.95, 0.75, 0.3)
-const MUTED := Color(0.7, 0.72, 0.75)
+const GOOD := Style.GOOD
+const WARN := Style.WARN
+const MUTED := Style.MUTED
 const ROW_COLUMNS := 3
+const ROWS_MAX_HEIGHT := 270   # about 9 tags; past that the list scrolls, and the picture keeps its room
 
 var _active := false
 var _hold: Node             # in the tree while this tab keeps the cameras on
@@ -29,8 +31,11 @@ var _note := ""             # the answer to the last button
 
 var _state: Label
 var _picture: TextureRect
+var _rows_card: Control
+var _rows_scroll: ScrollContainer
 var _rows: GridContainer
 var _message: Label
+var _actions: HBoxContainer
 var _start: Button
 var _finish: Button
 var _cancel: Button
@@ -39,45 +44,48 @@ var _restore: Button
 
 
 func _ready() -> void:
-	add_theme_constant_override("separation", 8)
-	_state = Label.new()
-	_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	add_child(_state)
+	add_theme_constant_override("separation", 10)
+
+	# Where things stand, what to do about it, and the buttons to do it with, together;
+	# what the cameras see is the evidence below.
+	var summary := VBoxContainer.new()
+	summary.add_theme_constant_override("separation", 6)
+	add_child(Style.card(summary))
+	_state = Style.wrapped("", "Value")
+	summary.add_child(_state)
+	_message = Style.wrapped("", "Helper")
+	_message.add_theme_color_override("font_color", MUTED)
+	summary.add_child(_message)
+	_actions = HBoxContainer.new()
+	_actions.add_theme_constant_override("separation", 10)
+	summary.add_child(_actions)
+	_start = _button(_actions, "start", "PrimaryButton")
+	_finish = _button(_actions, "finish", "PrimaryButton")
+	_finish.text = "Finish now"
+	_save = _button(_actions, "save", "PrimaryButton")
+	_save.text = "Save and use"
+	_cancel = _button(_actions, "cancel")
+	_restore = _button(_actions, "restore")
+	_restore.text = "Put the previous one back"
 
 	_picture = TextureRect.new()
 	_picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_picture.custom_minimum_size.y = 150
+	Style.picture_well(_picture)
 	add_child(_picture)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(scroll)
+	_rows_scroll = ScrollContainer.new()
+	_rows_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_rows_card = Style.card(_rows_scroll)
+	add_child(_rows_card)
 	_rows = GridContainer.new()
 	_rows.columns = ROW_COLUMNS
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("h_separation", 32)
-	scroll.add_child(_rows)
-
-	_message = Label.new()
-	_message.add_theme_font_size_override("font_size", 16)
-	_message.add_theme_color_override("font_color", MUTED)
-	_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	add_child(_message)
-
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 10)
-	add_child(actions)
-	_start = _button(actions, "start")
-	_finish = _button(actions, "finish")
-	_finish.text = "  Finish now  "
-	_cancel = _button(actions, "cancel")
-	_save = _button(actions, "save")
-	_save.text = "  Save and use  "
-	_restore = _button(actions, "restore")
-	_restore.text = "  Put the previous one back  "
+	_rows.add_theme_constant_override("h_separation", 24)
+	_rows.add_theme_constant_override("v_separation", 8)
+	_rows_scroll.add_child(_rows)
 
 	GlobalScript.body_status.connect(_on_status)
 	GlobalScript.camera_preview.connect(_on_preview)
@@ -86,10 +94,11 @@ func _ready() -> void:
 	_show()
 
 
-func _button(parent: Container, command: String) -> Button:
+func _button(parent: Container, command: String, variation: String = "") -> Button:
 	var button := Button.new()
+	button.theme_type_variation = variation
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size.y = 44
+	button.custom_minimum_size.y = 40
 	button.pressed.connect(func():
 		_note = ""
 		GlobalScript.send_body_command(command))
@@ -197,8 +206,8 @@ func _show(connected: bool = GlobalScript.link.connected) -> void:
 	for label in _rows.get_children():
 		_rows.remove_child(label)
 		label.queue_free()
-	_start.text = "  Start a take  "
-	_cancel.text = "  Cancel  "
+	_start.text = "Start a take"
+	_cancel.text = "Cancel"
 	_state.remove_theme_color_override("font_color")
 	_message.add_theme_color_override("font_color", MUTED)
 	_picture.visible = _hold != null and _sends_picture() and _picture.texture != null
@@ -221,12 +230,17 @@ func _show(connected: bool = GlobalScript.link.connected) -> void:
 				_state.text = "That take did not work."
 				_state.add_theme_color_override("font_color", WARN)
 				text = _info.get("reason", "")
-				_start.text = "  Try again  "
+				_start.text = "Try again"
 				_start.visible = true
 				_restore.visible = _info.get("current", {}).get("can_restore", false)
 			_:
 				_state.text = "Asking the tracker..."
 	_message.text = text if _note.is_empty() else ("%s\n%s" % [_note, text]).strip_edges()
+	_message.visible = not _message.text.is_empty()
+	_actions.visible = [_start, _finish, _cancel, _save, _restore].any(func(b: Button): return b.visible)
+	# As tall as its rows, so the picture takes the rest. A scroll has no height of its own.
+	_rows_card.visible = _rows.get_child_count() > 0
+	_rows_scroll.custom_minimum_size.y = minf(_rows.get_combined_minimum_size().y, ROWS_MAX_HEIGHT)
 
 
 func _show_idle() -> String:
@@ -290,11 +304,11 @@ func _show_review(result: Dictionary) -> String:
 	else:
 		_state.text = "This take cannot be used. Nothing has changed."
 		_state.add_theme_color_override("font_color", WARN)
-		_start.text = "  Try again  "
+		_start.text = "Try again"
 		_start.visible = true
 		for problem in result.get("problems", []):
 			lines.append(_sentence(problem))
-	_cancel.text = "  Discard  "
+	_cancel.text = "Discard"
 	_cancel.visible = true
 	for tag in result.get("tags", []):
 		var seen := "seen %d" % tag["seen"]
@@ -320,10 +334,9 @@ func _show_review(result: Dictionary) -> String:
 func _row(tag: String, what: String, colour: Color, seen: String) -> void:
 	var cells := [tag, what, seen]
 	for i in cells.size():
-		var label := Label.new()
-		label.text = cells[i]
-		label.add_theme_font_size_override("font_size", 18)
+		var label := Style.label(cells[i], "Helper" if i == 2 else "")
 		if i == 1:
+			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			label.add_theme_color_override("font_color", colour)
 		_rows.add_child(label)
 
