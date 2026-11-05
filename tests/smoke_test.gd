@@ -20,6 +20,7 @@ const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 const SETTINGS_SCREEN := "res://Main_screen/Scenes/settings_screen.tscn"
 const MENU_2D := "res://Main_screen/Scenes/select_game.tscn"
 const CANNON := "res://Games/cannon_defense/cannon_defense.tscn"
+const RotationInput := preload("res://Games/cannon_defense/rotation_input.gd")
 const REACH_SCAN := "res://Games/firefly_reach/reach_assessment.tscn"
 const SHEEP_FLOCK := "res://Games/random_reach/Scripts/sheep_flock.gd"
 const APPLE := "res://Games/random_reach/scenes/apple.tscn"
@@ -57,12 +58,107 @@ func _ready() -> void:
 	for entry in SCENES:
 		await _run(entry[0], entry[1])
 	await _debug_means_mouse()
+	_cannon_range_is_the_arc()
+	await _cannon_calibrates_on_enter()
 	await _sheep_snack_is_heard()
 	await _leaving_main_screen_skips_the_sync()
 	await _camera_tab()
 	await _calibration_tab()
 	print("SMOKE DONE %d scenes" % SCENES.size())
 	get_tree().quit()
+
+
+## Cannon Defense's whole arc is the patient's turn from initial to max: both are
+## usually the extremes of what that arm allows, so there is no middle to measure from.
+func _cannon_range_is_the_arc() -> void:
+	print("SMOKE cannon range")
+	# Any grip: an arbitrary axis and starting orientation, turned either way round.
+	var about := Vector3(1, 2, -2).normalized()
+	var start := Basis(Vector3.RIGHT, 0.7)
+	for way in [1.0, -1.0]:
+		var at := func(deg: float) -> Basis: return Basis(about, deg_to_rad(way * deg)) * start
+		# [degrees turned from initial, aim for start_side 1]; start_side -1 mirrors it.
+		for turn in [[0.0, 65.0], [15.0, 32.5], [30.0, 0.0], [60.0, -65.0], [-10.0, 65.0], [75.0, -65.0]]:
+			for side in [1, -1]:
+				var rot = RotationInput.new()
+				rot.start_side = side
+				rot.capture(at.call(0.0))
+				rot.capture(at.call(60.0))
+				_check(rot.calibrated(), "initial and a 60° max should calibrate")
+				var aim: float = rot.aim_deg(at.call(turn[0]), 65.0)
+				_check(absf(aim - side * turn[1]) < 0.01,
+					"%.0f° turned, side %d: aim %.2f, wanted %.2f" % [turn[0], side, aim, side * turn[1]])
+
+	# Tilting the handle sideways is not turning it.
+	var tilted = RotationInput.new()
+	tilted.capture(Basis.IDENTITY)
+	tilted.capture(Basis(Vector3.UP, deg_to_rad(60)))
+	var tilt := Basis(Vector3.RIGHT, deg_to_rad(20)) * Basis(Vector3.UP, deg_to_rad(30))
+	_check(absf(tilted.aim_deg(tilt, 65.0)) < 0.01, "a sideways tilt should not move the aim")
+
+	# Past the end of a wide range the twist wraps at 180°: stay at the far end, no jump back.
+	var wide = RotationInput.new()
+	wide.capture(Basis.IDENTITY)
+	wide.capture(Basis(Vector3.UP, deg_to_rad(170)))
+	var past: float = wide.aim_deg(Basis(Vector3.UP, deg_to_rad(200)), 65.0)
+	_check(absf(past + 65.0) < 0.01, "30° past a 170° range: aim %.2f, wanted -65" % past)
+
+	# A turn too small to fill the arc is asked again, and the initial pose is kept.
+	var small = RotationInput.new()
+	small.capture(Basis.IDENTITY)
+	small.capture(Basis(Vector3.UP, deg_to_rad(5)))
+	_check(not small.calibrated() and small.problem != "", "a 5° turn should be asked again")
+	small.capture(Basis(Vector3.UP, deg_to_rad(60)))
+	_check(small.calibrated() and small.problem == "", "the next turn should still count from initial")
+	_check(absf(small.aim_deg(Basis.IDENTITY, 65.0) - 65.0) < 0.01, "initial should be the first pose")
+
+
+## Enter takes the poses, in the game; the training hand says which end initial is.
+func _cannon_calibrates_on_enter() -> void:
+	print("SMOKE cannon calibrates on enter")
+	# [training hand, aim at max, the way the calibration arrow points at max].
+	for case in [["Left", 65.0, 1], ["Right", -65.0, -1], ["", -65.0, -1]]:
+		GlobalSignals.selected_training_hand = case[0]
+		var cannon := await _open(CANNON)
+		cannon._mouse = false   # as without debug; the handle is set here, not by a tracker
+		cannon._on_global_timer_play_pressed(0)
+		_check(cannon._state == cannon.State.CALIBRATE, "the game should start by calibrating")
+
+		# Not in view: no pose, however far it last was.
+		GlobalScript.last_packet_ms = 0
+		GlobalScript._last_rvec = Vector3(0, deg_to_rad(60), 0)
+		_press_enter(cannon)
+		GlobalScript.last_packet_ms = Time.get_ticks_msec()
+		GlobalScript._last_rvec = Vector3.ZERO
+		_press_enter(cannon)
+		_check(not cannon._rot.calibrated(), "Enter with the handle out of view should capture nothing")
+		await _frames(1)
+		_check(cannon._world.arrow == case[2], "%s hand: arrow %d" % [case[0], cannon._world.arrow])
+
+		GlobalScript._last_rvec = Vector3(0, deg_to_rad(60), 0)
+		_press_enter(cannon)
+		_check(cannon._rot.calibrated(), "%s hand: Enter at max should finish calibrating" % case[0])
+		cannon._summary_until = 0
+		await _frames(2)
+		_check(cannon._state == cannon.State.PLAY, "%s hand: play should follow calibration" % case[0])
+		GlobalScript.last_packet_ms = Time.get_ticks_msec()
+		await _frames(2)
+		_check(absf(cannon._aim - case[1]) < 0.01, "%s hand: aim at max %.2f" % [case[0], cannon._aim])
+
+		cannon._recalibrate()
+		_check(not cannon._rot.calibrated(), "recalibrating should start again")
+		await _close(cannon)
+	GlobalSignals.selected_training_hand = ""
+	GlobalScript.last_packet_ms = 0
+	GlobalScript._last_rvec = Vector3.ZERO
+	print("SMOKE cannon calibrates on enter done")
+
+
+func _press_enter(node: Node) -> void:
+	var key := InputEventKey.new()
+	key.keycode = KEY_ENTER
+	key.pressed = true
+	node._unhandled_input(key)
 
 
 ## Debug means the mouse instead of the tracker, in every game, whatever the tracker

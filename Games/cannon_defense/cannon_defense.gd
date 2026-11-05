@@ -4,7 +4,7 @@ extends Node2D
 # cannon at meteors falling on a town. It trains turning — forearm rotation,
 # wrist deviation or a dial turn, whichever the therapist asks for: calibration
 # measures the axis the patient turns about (rotation_input.gd).
-#   timer selector -> calibration (middle, left, right) -> play -> game over
+#   timer selector -> calibration (initial, max; Enter takes each) -> play -> game over
 # Score = meteors shot (ScoreManager, "CannonDefense"). Every meteor is a target
 # for SessionLog: shot = hit, reached the dome = miss.
 # Raw CSV (Manager): a row every LOG_INTERVAL. Beside it, <same name>_targets.csv:
@@ -135,6 +135,9 @@ func _begin() -> void:
 
 func _start_calibration() -> void:
 	_rot.reset()
+	# A right hand starts as far right as it goes and turns left; a left hand the
+	# reverse. So turning moves the cannon the same way. No hand known: as the right.
+	_rot.start_side = -1 if GlobalSignals.selected_training_hand == "Left" else 1
 	_summary_until = -1
 	_state = State.CALIBRATE
 	_world.show_aim = false
@@ -143,38 +146,38 @@ func _start_calibration() -> void:
 
 func _calibrate() -> void:
 	if _rot.calibrated():
-		_world.hold = -1.0
 		_world.arrow = 0
 		if Time.get_ticks_msec() >= _summary_until:
 			_calibration_done()
 		return
 	if not _handle_seen():
-		_world.hold = -1.0
 		_world.arrow = 0
 		_show_prompt("Waiting for the handle...", "Make sure the cameras can see it.")
 		return
-	var r := GlobalScript.hand_rotation()
-	if _rot.feed(r):
-		_sounds.play("step")
-		if _rot.calibrated():
-			_summary_until = Time.get_ticks_msec() + int(SUMMARY_S * 1000)
-			_world.show_aim = true
-			_events.append("calibrated:left=%.1f:right=%.1f" % [_rot.left_deg, _rot.right_deg])
-			_show_prompt("Ready!", _range_text())
-			return
-	_world.hold = _rot.hold_progress
 	match _rot.step:
-		RotationInput.Step.MIDDLE:
+		RotationInput.Step.INITIAL:
 			_world.arrow = 0
-			_show_prompt("Hold the handle in a relaxed middle position", "Keep it still.")
-		RotationInput.Step.LEFT:
-			_world.arrow = -1
-			_show_prompt("Turn LEFT as far as is comfortable, and hold",
-				"Turned %d°" % roundi(_rot.turned_from_middle(r)))
-		RotationInput.Step.RIGHT:
-			_world.arrow = 1
-			_show_prompt("Now turn RIGHT as far as is comfortable, and hold",
-				_rot.problem if _rot.problem != "" else "Turned %d°" % roundi(_rot.turned_from_middle(r)))
+			_show_prompt("Hold the handle where the turn starts", "Press Enter.")
+		RotationInput.Step.MAX:
+			_world.arrow = -_rot.start_side
+			var turned := roundi(_rot.turned_from_initial(GlobalScript.hand_rotation()))
+			_show_prompt("Now turn as far as you can",
+				_rot.problem if _rot.problem != "" else "Turned %d°. Press Enter." % turned)
+
+
+# Enter takes the pose. Not with the handle out of view: its last rotation is stale.
+func _capture_pose() -> void:
+	if _rot.calibrated() or not _handle_seen():
+		return
+	_rot.capture(GlobalScript.hand_rotation())
+	if _rot.problem != "":
+		return   # too small a turn: _calibrate says why
+	_sounds.play("step")
+	if _rot.calibrated():
+		_summary_until = Time.get_ticks_msec() + int(SUMMARY_S * 1000)
+		_world.show_aim = true
+		_events.append("calibrated:range=%.1f:start_side=%d" % [_rot.range_deg, _rot.start_side])
+		_show_prompt("Ready!", _range_text())
 
 
 func _calibration_done() -> void:
@@ -188,7 +191,7 @@ func _calibration_done() -> void:
 
 
 func _range_text() -> String:
-	return "Your turning range: left %d°, right %d°" % [roundi(-_rot.left_deg), roundi(_rot.right_deg)]
+	return "Your turning range: %d°" % roundi(_rot.range_deg)
 
 
 # ── play ──────────────────────────────────────────────────────────────────────
@@ -199,7 +202,6 @@ func _start_play() -> void:
 	_holds.clear()
 	_world.reset()
 	_world.show_aim = true
-	_world.hold = -1.0
 	_world.arrow = 0
 	if _duration > 0:
 		GlobalTimerManager.start_countdown_with_time(_duration)
@@ -360,7 +362,6 @@ func _game_over() -> void:
 	_state = State.OVER
 	_holds.clear()
 	_world.running = false
-	_world.hold = -1.0
 	_world.arrow = 0
 	_trunk_feedback.paused_for_trunk = false
 	_pause_panel.visible = false
@@ -412,6 +413,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_P, KEY_SPACE:
 			get_viewport().set_input_as_handled()
 			_toggle_pause()
+		KEY_ENTER, KEY_KP_ENTER:
+			if _state == State.CALIBRATE:
+				get_viewport().set_input_as_handled()
+				_capture_pose()
 
 
 func _exit_tree() -> void:
@@ -443,7 +448,7 @@ func _open_logs() -> void:
 	var header := [
 		"input,%s" % ("mouse" if _mouse else "tracker"),
 		"rot_axis_x,%f" % _rot.axis.x, "rot_axis_y,%f" % _rot.axis.y, "rot_axis_z,%f" % _rot.axis.z,
-		"rot_left_deg,%.2f" % _rot.left_deg, "rot_right_deg,%.2f" % _rot.right_deg,
+		"rot_range_deg,%.2f" % _rot.range_deg, "rot_start_side,%d" % _rot.start_side,
 		"arc_deg,%.1f" % World.ARC_DEG, "aim_tol_deg,%.1f" % World.AIM_TOL_DEG,
 		"dwell_s,%.2f" % World.DWELL_S,
 	]
