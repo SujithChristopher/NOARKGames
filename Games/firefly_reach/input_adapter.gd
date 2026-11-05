@@ -5,7 +5,7 @@ extends RefCounted
 # (~100 Hz, camera capture clock). GlobalScript keeps only the latest position,
 # so a sample here is one per frame, timed by the wall clock: holds are judged
 # at frame rate and movement times carry that much jitter.
-# Mouse fallback (round_runner.gd) when no packet has ever arrived.
+# In debug round_runner.gd takes the mouse instead and never asks here for a sample.
 
 
 # One sample per frame, in the shape round_runner.gd reads:

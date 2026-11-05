@@ -18,6 +18,9 @@ const TRIAL_S := 2   ## countdown for the GameSession trial, seconds
 const GameSession := preload("res://Main_screen/Scripts/game_session.gd")
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
 const SETTINGS_SCREEN := "res://Main_screen/Scenes/settings_screen.tscn"
+const MENU_2D := "res://Main_screen/Scenes/select_game.tscn"
+const CANNON := "res://Games/cannon_defense/cannon_defense.tscn"
+const REACH_SCAN := "res://Games/firefly_reach/reach_assessment.tscn"
 
 ## [scene, mode]. The 2D+3D games run in both modes.
 const SCENES := [
@@ -50,10 +53,107 @@ func _ready() -> void:
 			push_error("SMOKE cannot load %s" % path)
 	for entry in SCENES:
 		await _run(entry[0], entry[1])
+	await _debug_means_mouse()
 	await _camera_tab()
 	await _calibration_tab()
 	print("SMOKE DONE %d scenes" % SCENES.size())
 	get_tree().quit()
+
+
+## Debug means the mouse instead of the tracker, in every game, whatever the tracker
+## is doing; without debug no game takes the mouse. Debug only goes off between
+## awaits, in memory, so nothing that reaches the server can see it off.
+func _debug_means_mouse() -> void:
+	print("SMOKE debug means mouse")
+	Settings.path = GlobalSignals.data_path.path_join("settings.json")
+
+	# The Settings screen turns it on: saved, and none of the tracker's business.
+	var screen := await _open(SETTINGS_SCREEN)
+	_check(screen.FIELDS.any(func(f): return f[0] == "debug"), "Settings should offer debug")
+	var link = GlobalScript.link
+	link.connected = true
+	var commands: int = link._queue.size()
+	screen._changed("debug", true)
+	_check(link._queue.size() == commands, "debug should send the tracker nothing")
+	link.connected = false
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(Settings.path))
+	_check(saved is Dictionary and saved.get("debug") == true, "debug should be saved")
+	_check(Settings.get_node("DebugBanner").visible, "debug should show on every screen")
+	await _close(screen)
+
+	# The game menus do not hold the cameras for the trunk panel, even with trunk on.
+	var settings_before: Dictionary = Settings.data.duplicate()
+	Settings.data["trunk_enabled"] = true
+	var menu := await _open(MENU_2D)
+	_check(GlobalScript.tracking_mode() == "off", "a menu in debug should not hold the cameras")
+	await _close(menu)
+	Settings.data = settings_before
+
+	# Cannon Defense: no calibration, the tracker asked for nothing, the mouse aims.
+	var cannon := await _open(CANNON)
+	_check(GlobalScript.tracking_mode() == "off", "a game in debug should ask the tracker for nothing")
+	Settings.data["debug"] = false
+	var without_debug := GlobalScript.tracking_mode()
+	Settings.data["debug"] = true
+	_check(without_debug == "rotation", "Cannon Defense should ask for rotation without debug")
+	cannon._on_global_timer_play_pressed(0)
+	_check(cannon._state == cannon.State.PLAY, "debug should start without calibrating")
+	_mouse_at(cannon, cannon.World.PIVOT + Vector2(300, -300))
+	await _frames(2)
+	_check(cannon._aim > 30.0, "the mouse should aim right: %.1f" % cannon._aim)
+	_mouse_at(cannon, cannon.World.PIVOT + Vector2(-300, -300))
+	await _frames(2)
+	_check(cannon._aim < -30.0, "the mouse should aim left: %.1f" % cannon._aim)
+	await _close(cannon)
+
+	# Reach Scan: the mouse is the hand, even with a tracker that was streaming.
+	var scan := await _open(REACH_SCAN)
+	var runner = scan.get_child(0)
+	GlobalScript.last_packet_ms = Time.get_ticks_msec() - 60000
+	_mouse_at(runner, Vector2(500, 400))
+	await _frames(2)
+	_check(runner._hand.distance_to(runner._ts.screen_to_mm(Vector2(500, 400))) < 1.0, "the mouse should move the hand")
+	_check(not runner._paused, "debug should not wait for the tracker")
+
+	# Without debug and without a tracker: it waits, and the mouse does nothing.
+	var hand: Vector2 = runner._hand
+	GlobalScript.last_packet_ms = 0
+	_mouse_at(runner, Vector2(900, 300))
+	Settings.data["debug"] = false
+	runner._read_hand()
+	runner._update_pause()
+	Settings.data["debug"] = true
+	_check(runner._hand == hand, "without debug the mouse should not move the hand")
+	_check(runner._paused, "without debug the scan should wait for the tracker")
+	await _close(scan)
+	print("SMOKE debug means mouse done")
+
+
+func _open(path: String) -> Node:
+	var scene := (load(path) as PackedScene).instantiate()
+	get_tree().root.add_child(scene)
+	get_tree().current_scene = scene
+	await get_tree().process_frame
+	return scene
+
+
+func _close(scene: Node) -> void:
+	scene.queue_free()
+	await get_tree().process_frame
+
+
+func _frames(count: int) -> void:
+	for i in count:
+		await get_tree().process_frame
+
+
+## Puts the mouse at pos on node's canvas: headless, the event is what moves it.
+func _mouse_at(node: CanvasItem, pos: Vector2) -> void:
+	var motion := InputEventMouseMotion.new()
+	motion.global_position = node.get_viewport().get_screen_transform() * pos
+	motion.position = motion.global_position
+	Input.parse_input_event(motion)
+	Input.flush_buffered_events()
 
 
 ## Settings > Camera, with the tracker's messages fed in as the link would hand

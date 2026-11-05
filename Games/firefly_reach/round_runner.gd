@@ -173,7 +173,7 @@ func _ready() -> void:
 	if not _test and not _scan_only:
 		_log.open(GAME_NAME, String(config["participant"]), _header_lines())
 	# The participant sees only the wisp; the system arrow is hidden (it
-	# still moves, for the mouse fallback in development).
+	# still moves, and in debug it is the hand).
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 
@@ -389,11 +389,11 @@ func _now() -> float:
 # Feeds every tracker sample since the last frame to the hold logic and the
 # hand log. input_adapter.gd gives one per frame.
 func _read_hand() -> void:
-	var samples: Array = Tracker.take_samples()
-	if not Tracker.connected():
-		# Mouse fallback (development only): one sample per frame, not logged.
+	if Settings.is_debug():
+		# The mouse is the hand: one sample per frame, not logged.
 		_on_sample(_now(), _ts.screen_to_mm(get_global_mouse_position()))
 		return
+	var samples: Array = Tracker.take_samples()
 	var phase := _phase_name()
 	var rnd := _round_number()
 	var rows: Array = []
@@ -438,10 +438,10 @@ func _on_sample(t: float, mm: Vector2) -> void:
 		_finish_apple("caught", t)
 
 
-# Tracker was streaming but packets stopped: freeze the round and drop the
-# apple, or hold the reach scan's quiet timer.
+# No packets, whether they stopped or never came: freeze the round and drop the
+# apple, or hold the reach scan's quiet timer. Nothing else can move the hand.
 func _update_pause() -> void:
-	var lost: bool = Tracker.connected() and not Tracker.is_fresh()
+	var lost: bool = not Settings.is_debug() and not Tracker.is_fresh()
 	if lost == _paused:
 		return
 	_paused = lost

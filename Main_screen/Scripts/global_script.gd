@@ -410,13 +410,16 @@ func _hold(holders: Array[Node], node: Node) -> void:
 	node.tree_exiting.connect(func(): holders.erase(node), CONNECT_ONE_SHOT)
 
 
-## What the tracker should send now: "off", "position" or "rotation".
+## What the tracker should send now: "off", "position" or "rotation". A game in
+## debug plays with the mouse and asks for nothing; the screens that hold tracking
+## to set up the rig (Define Table, Settings > Camera, ...) still get it.
 func tracking_mode() -> String:
-	if not _rotation_holders.is_empty():
-		return "rotation"
-	var scene := get_tree().current_scene
-	if scene != null and scene.scene_file_path.begins_with("res://Games/"):
-		return "position"
+	if not Settings.is_debug():
+		if not _rotation_holders.is_empty():
+			return "rotation"
+		var scene := get_tree().current_scene
+		if scene != null and scene.scene_file_path.begins_with("res://Games/"):
+			return "position"
 	return "off" if _tracking_holders.is_empty() else "position"
 
 

@@ -26,10 +26,11 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	# After the first frame's _ready calls: debug can be switched on in memory until
 	# then (the smoke test), and debug must never start the agent or reach the server.
-	_start_if_enabled.call_deferred()
+	start_if_enabled.call_deferred()
 
 
-func _start_if_enabled() -> void:
+## At startup, and when the Settings screen turns debug off.
+func start_if_enabled() -> void:
 	if _enabled():
 		_ensure_running()
 

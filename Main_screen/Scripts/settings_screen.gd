@@ -3,9 +3,9 @@ extends Control
 ## button; Back (or Esc) returns to the main menu.
 ##
 ## Tracker tab: {DOCUMENTS}/NOARK_demo/settings.json, saved as it is edited.
-## `debug` is not listed on purpose (file-only). The LIVE_KEYS are also sent to
-## the tracker as a CONFIG and apply at once (recording from the next session);
-## the rest restart the tracker, over the link, so nobody has to do it by hand.
+## The LIVE_KEYS are also sent to the tracker as a CONFIG and apply at once
+## (recording from the next session); the rest restart the tracker, over the link,
+## so nobody has to do it by hand. `debug` is the app's own: the tracker is not told.
 ## Camera tab: exposure and gain, with a live preview (camera_tab.gd).
 ## Calibration tab: a new measurement of the device's tags (calibration_tab.gd).
 ## Storage tab: the board's camera recordings (storage_tab.gd).
@@ -43,6 +43,8 @@ const FIELDS := [
 	["tracker_camera", "Cameras", "choice", ["both", "cam0", "cam1"]],
 	["corner_deadband_px", "Corner deadband (px)", "choice", ["0", "0.5", "1", "2"]],
 	["display", "Show tracker window", "bool", []],
+	["Debug"],
+	["debug", "Play with the mouse, not the tracker", "bool", []],
 ]
 
 const MUTED := Color(0.7, 0.72, 0.75)
@@ -252,6 +254,11 @@ func _changed(key: String, value: Variant) -> void:
 	Settings.set_value(key, value)
 	if not Settings.save():
 		_status.text = "Could not save settings!"
+		return
+	if key == "debug":
+		DeviceAgent.start_if_enabled()   # just off: the next login needs the patient lock
+		_status.text = "Debug on: games use the mouse, logged as vvv, nothing uploaded." if value \
+			else "Debug off: games use the tracker."
 		return
 	if LIVE_KEYS.has(key):
 		var sent := ("on" if value else "off") if value is bool else _as_text(value)

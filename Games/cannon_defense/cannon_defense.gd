@@ -12,10 +12,8 @@ extends Node2D
 # an event in the raw CSV).
 # Play is held — meteors stop, MoveTime and the countdown pause — while paused,
 # while the trunk compensates (as Random Reach) and while the handle is out of
-# view. "Play with mouse" (shown during the first calibration) lets the mouse aim
-# instead, uncalibrated, to try it on a PC. Never chosen automatically: over BLE
-# the link can still be connecting when Play is pressed. Esc or Menu leaves for
-# the menu; P / Space pauses.
+# view. In debug the mouse aims instead, uncalibrated, with no handle to wait for.
+# Esc or Menu leaves for the menu; P / Space pauses.
 
 const World := preload("res://Games/cannon_defense/cannon_world.gd")
 const RotationInput := preload("res://Games/cannon_defense/rotation_input.gd")
@@ -47,7 +45,7 @@ enum State { SETUP, CALIBRATE, PLAY, OVER }
 
 var _state: int = State.SETUP
 var _patient_id := ""
-var _mouse := false            # no tracker: the mouse aims
+var _mouse := Settings.is_debug()   # debug: the mouse aims, nothing to calibrate
 var _duration := 0             # seconds from the timer selector; 0 = untimed
 var _score := 0
 var _misses := 0
@@ -69,7 +67,6 @@ var _log_timer: Timer
 var _hud_bar: Label
 var _prompt: Label
 var _detail: Label
-var _mouse_button: Button
 var _pause_button: Button
 var _recal_button: Button
 var _pause_panel: Control
@@ -141,7 +138,6 @@ func _start_calibration() -> void:
 	_summary_until = -1
 	_state = State.CALIBRATE
 	_world.show_aim = false
-	_mouse_button.visible = not _trial_open()
 	_pause_button.visible = false
 
 
@@ -182,7 +178,6 @@ func _calibrate() -> void:
 
 
 func _calibration_done() -> void:
-	_mouse_button.visible = false
 	_show_prompt("", "")
 	if _trial_open():
 		_state = State.PLAY
@@ -194,12 +189,6 @@ func _calibration_done() -> void:
 
 func _range_text() -> String:
 	return "Your turning range: left %d°, right %d°" % [roundi(-_rot.left_deg), roundi(_rot.right_deg)]
-
-
-func _on_mouse_pressed() -> void:
-	_mouse = true
-	_world.show_aim = true
-	_calibration_done()
 
 
 # ── play ──────────────────────────────────────────────────────────────────────
@@ -376,7 +365,6 @@ func _game_over() -> void:
 	_trunk_feedback.paused_for_trunk = false
 	_pause_panel.visible = false
 	_pause_button.visible = false
-	_mouse_button.visible = false
 	_show_prompt("", "")
 	GlobalTimerManager.stop_countdown()
 	GlobalTimer.stop_timer()
@@ -543,9 +531,6 @@ func _build_hud() -> void:
 	corner.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 16)
 	corner.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	corner.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_mouse_button = _button("Play with mouse", _on_mouse_pressed)
-	_mouse_button.visible = false
-	corner.add_child(_mouse_button)
 	_pause_button = _button("Pause", _toggle_pause)
 	_pause_button.visible = false
 	corner.add_child(_pause_button)
