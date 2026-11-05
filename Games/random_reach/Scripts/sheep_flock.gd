@@ -3,6 +3,7 @@ extends Node2D
 ## No physics bodies: scenery sheep cannot collect targets or block the player.
 
 const SheepSprite = preload("res://Games/random_reach/Scripts/sheep_sprite.gd")
+const SheepLaugh = preload("res://Games/random_reach/Scripts/sheep_laugh.gd")
 const FLOCK_SIZE := 2
 const WALK_SPEED := 45.0
 const SNACK_SPEED := 380.0
@@ -12,10 +13,21 @@ const FIELD := Rect2(85.0, 170.0, 970.0, 390.0)
 var player: Node2D
 var sheep: Array[Dictionary] = []
 var current_apple: Node2D
+var _munch := AudioStreamPlayer.new()
+var _laugh := AudioStreamPlayer.new()
 
 func _ready() -> void:
 	name = "BlackSheepFlock"
 	z_index = 1
+	# The player's apple sound, lower and quieter (that one is +9.5 dB): a miss must
+	# not sound like a point. Here, not on the apple, which is freed before it ends.
+	_munch.stream = preload("res://Games/random_reach/Sprites/apple_eating1.mp3")
+	_munch.pitch_scale = 0.7
+	_munch.volume_db = 6.0
+	add_child(_munch)
+	_laugh.stream = SheepLaugh.stream()
+	_laugh.volume_db = -18.0   # measured: a little under the player's apple sound (-34 vs -32 LUFS)
+	add_child(_laugh)
 	for index in FLOCK_SIZE:
 		var sprite := AnimatedSprite2D.new()
 		sprite.set_script(SheepSprite)
@@ -83,6 +95,9 @@ func _process(delta: float) -> void:
 			"graze", "snack":
 				animal.wait -= delta
 				if animal.wait <= 0.0:
+					if animal.state == "snack":   # the snack's wait outlasts the munch
+						_laugh.pitch_scale = randf_range(0.92, 1.08)   # varied: it is heard on every miss
+						_laugh.play()
 					animal.state = "walk"
 					animal.goal = _grazing_point()
 					sprite.play(&"walk")
@@ -112,6 +127,7 @@ func _process(delta: float) -> void:
 					animal.state = "snack"
 					animal.wait = 1.0
 					sprite.play(&"eat")
+					_munch.play()
 					animal.apple.eat_by_black_sheep()
 					animal.apple = null
 	queue_redraw()

@@ -21,6 +21,8 @@ const SETTINGS_SCREEN := "res://Main_screen/Scenes/settings_screen.tscn"
 const MENU_2D := "res://Main_screen/Scenes/select_game.tscn"
 const CANNON := "res://Games/cannon_defense/cannon_defense.tscn"
 const REACH_SCAN := "res://Games/firefly_reach/reach_assessment.tscn"
+const SHEEP_FLOCK := "res://Games/random_reach/Scripts/sheep_flock.gd"
+const APPLE := "res://Games/random_reach/scenes/apple.tscn"
 
 ## [scene, mode]. The 2D+3D games run in both modes.
 const SCENES := [
@@ -54,6 +56,7 @@ func _ready() -> void:
 	for entry in SCENES:
 		await _run(entry[0], entry[1])
 	await _debug_means_mouse()
+	await _sheep_snack_is_heard()
 	await _camera_tab()
 	await _calibration_tab()
 	print("SMOKE DONE %d scenes" % SCENES.size())
@@ -127,6 +130,34 @@ func _debug_means_mouse() -> void:
 	_check(runner._paused, "without debug the scan should wait for the tracker")
 	await _close(scan)
 	print("SMOKE debug means mouse done")
+
+
+## The black sheep eating a missed apple is heard, and lower than the player's own
+## apple (pitch 1.0): a miss must not sound like a point.
+func _sheep_snack_is_heard() -> void:
+	var field := Node2D.new()
+	get_tree().root.add_child(field)
+	get_tree().current_scene = field   # the apple's sparkles go here
+	var flock: Node2D = load(SHEEP_FLOCK).new()
+	field.add_child(flock)
+	var apple: Node2D = (load(APPLE) as PackedScene).instantiate()
+	apple.flock = flock
+	field.add_child(apple)
+	apple.global_position = flock.sheep[0].sprite.global_position + Vector2(40, 0)
+	_check(not flock._munch.playing, "the sheep should be quiet before its snack")
+	apple._on_timer_timeout()
+	for i in 120:
+		await get_tree().process_frame
+		if apple.score_label.text == "Black sheep's snack!":
+			break
+	_check(apple.score_label.text == "Black sheep's snack!", "the sheep should reach the missed apple")
+	_check(flock._munch.playing, "the sheep's snack should make a sound")
+	_check(flock._munch.pitch_scale < 1.0, "the sheep should sound lower than a point")
+	_check(not flock._laugh.playing, "the sheep should finish eating before it laughs")
+	await get_tree().create_timer(1.2).timeout
+	_check(flock._laugh.playing, "the sheep should laugh after its snack")
+	await _close(field)
+	print("SMOKE sheep snack done")
 
 
 func _open(path: String) -> Node:
