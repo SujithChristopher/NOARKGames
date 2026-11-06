@@ -380,30 +380,39 @@ script = ExtResource("3_54gjo")
 
 [node name="NewPatientButton" type="Button" parent="." unique_id=981569524]
 layout_mode = 0
-offset_left = 336
+offset_left = 254
 offset_top = 406
-offset_right = 488
+offset_right = 406
 offset_bottom = 470
 theme = ExtResource("3_oasjk")
 text = "New Patient"
 
 [node name="DefineTableButton" type="Button" parent="." unique_id=177023916]
 layout_mode = 0
-offset_left = 500
+offset_left = 418
 offset_top = 406
-offset_right = 652
+offset_right = 570
 offset_bottom = 470
 theme = ExtResource("3_oasjk")
 text = "Define Table"
 
 [node name="SettingsButton" type="Button" parent="." unique_id=604815372]
 layout_mode = 0
-offset_left = 664
+offset_left = 582
 offset_top = 406
-offset_right = 816
+offset_right = 734
 offset_bottom = 470
 theme = ExtResource("3_oasjk")
 text = "Settings"
+
+[node name="ExperimentsButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 746
+offset_top = 406
+offset_right = 898
+offset_bottom = 470
+theme = ExtResource("3_oasjk")
+text = "Experiments"
 
 [node name="Logo" type="TextureRect" parent="." unique_id=163609671]
 layout_mode = 0
@@ -564,6 +573,7 @@ theme_override_font_sizes/font_size = 13
 [connection signal="pressed" from="NewPatientButton" to="PlayButton" method="_on_new_patient_pressed"]
 [connection signal="pressed" from="DefineTableButton" to="PlayButton" method="_on_define_table_pressed"]
 [connection signal="pressed" from="SettingsButton" to="PlayButton" method="_on_settings_pressed"]
+[connection signal="pressed" from="ExperimentsButton" to="PlayButton" method="_on_experiments_pressed"]
 [connection signal="pressed" from="RestartTrackerButton" to="PlayButton" method="_on_restart_tracker_pressed"]
 [connection signal="pressed" from="Warning/Button" to="PlayButton" method="_on_window_close_requested"]
 [connection signal="pressed" from="Patient_notfound/patient_nf_ok" to="PlayButton" method="_on_patient_nf_ok_pressed"]

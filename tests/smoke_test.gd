@@ -25,6 +25,8 @@ const REACH_SCAN := "res://Games/firefly_reach/reach_assessment.tscn"
 const SHEEP_FLOCK := "res://Games/random_reach/Scripts/sheep_flock.gd"
 const APPLE := "res://Games/random_reach/scenes/apple.tscn"
 const MAIN_SCREEN := "res://Main_screen/Scenes/main.tscn"
+const STATIC_GRID := "res://Experiments/static_grid.tscn"
+const StaticGrid := preload("res://Experiments/static_grid.gd")
 
 ## [scene, mode]. The 2D+3D games run in both modes.
 const SCENES := [
@@ -42,6 +44,8 @@ const SCENES := [
 	["res://Main_screen/Scenes/3d_games.tscn", "3D"],
 	["res://Main_screen/Scenes/trunk_view.tscn", "2D"],
 	["res://Results/scenes/user_progress.tscn", "2D"],
+	["res://Experiments/experiment_menu.tscn", "2D"],
+	[STATIC_GRID, "2D"],
 ]
 
 
@@ -64,8 +68,136 @@ func _ready() -> void:
 	await _leaving_main_screen_skips_the_sync()
 	await _camera_tab()
 	await _calibration_tab()
+	_grid_points()
+	await _static_grid_run()
 	print("SMOKE DONE %d scenes" % SCENES.size())
 	get_tree().quit()
+
+
+## The experiment's grid: 4 x 6 inside the margin, snaking, row 1 at the top.
+func _grid_points() -> void:
+	print("SMOKE grid points")
+	var corners := [Vector2(-500, -300), Vector2(-500, 300), Vector2(500, 300), Vector2(500, -300)]
+	var points := StaticGrid.grid_targets(corners, 4, 6, 50.0)
+	_check(points.size() == 24, "24 points, got %d" % points.size())
+	var first: Dictionary = points[0]
+	_check(first["mm"].is_equal_approx(Vector2(-450, -250)) and first["row"] == 1 and first["col"] == 1,
+		"first point at the top-left margin: %s" % str(first))
+	_check(points[5]["mm"].is_equal_approx(Vector2(450, -250)) and points[5]["col"] == 6,
+		"row 1 ends at the top-right margin: %s" % str(points[5]))
+	_check(points[6]["col"] == 6 and points[6]["row"] == 2, "row 2 starts where row 1 ended: %s" % str(points[6]))
+	_check(points[23]["mm"].is_equal_approx(Vector2(-450, 250)), "last point: %s" % str(points[23]))
+	_check(points[23]["index"] == 24, "indexed in visiting order")
+	_check(StaticGrid.grid_targets(corners, 4, 6, 300.0).is_empty(), "no room inside that margin")
+	# One row or column sits on the middle line, however big the margin.
+	_check(StaticGrid.grid_targets(corners, 1, 1, 50.0)[0]["mm"].is_equal_approx(Vector2.ZERO), "1 x 1 is the centre")
+
+
+## One run through the screen, with the tracker's answers fed in: start, each point held
+## until it captures, a capture rejected and repeated, the end. Nothing leaves the app:
+## the link is marked connected only for the Start press, and what it would have sent is read back.
+func _static_grid_run() -> void:
+	print("SMOKE scene static grid run")
+	var table_was := [GlobalScript.table_set, GlobalScript.table_k, GlobalScript._table_corners, GlobalScript._table_basis, GlobalScript._table_centre]
+	# set in memory only: set_table would write table.json over the real one.
+	GlobalScript.table_set = true
+	GlobalScript.table_k = 1000.0
+	GlobalScript._table_basis = Transform2D.IDENTITY
+	GlobalScript._table_centre = Vector2.ZERO
+	GlobalScript._table_corners = [Vector2(-0.4, -0.25), Vector2(-0.4, 0.25), Vector2(0.4, 0.25), Vector2(0.4, -0.25)]
+	var scene: Control = (load(STATIC_GRID) as PackedScene).instantiate()
+	get_tree().root.add_child(scene)
+	get_tree().current_scene = scene
+	await get_tree().process_frame
+	_check(scene._start_button.disabled, "no start without the experiment's name")
+	scene._label.text = "trial 03/a"
+	scene._label.text_changed.emit(scene._label.text)
+	_check(scene._run_label() == "trial_03a", "the name as a folder: %s" % scene._run_label())
+	_check(not scene._start_button.disabled, "named, with a table with corners, it can start")
+	scene._inputs["rows"].value = 1
+	scene._inputs["cols"].value = 2
+	scene._inputs["settle_s"].value = 0.05
+
+	GlobalScript.link.connected = true
+	scene._start()
+	GlobalScript.link.connected = false   # so the link does not send what it holds
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "/somewhere")
+	_check(scene._view == StaticGrid.View.RUN, "the tracker's yes starts the run")
+	var sent: Array = _experiment_commands()
+	_check(sent[0] == "start static_grid 60 trial_03a", "start: %s" % str(sent))
+	for command in sent:
+		_check(command.length() < 240, "fits one BLE write: %d: %s" % [command.length(), command])
+	_check(sent.any(func(c): return c.begins_with("meta table_frame")), "the table goes with the run")
+
+	# Away from the point: nothing captures.
+	_put_hand(Vector2(0.0, 0.0))
+	for i in 10:
+		_put_hand(Vector2(0.0, 0.0))
+		await get_tree().process_frame
+	_check(not scene._capturing, "away from the point nothing captures")
+
+	# On the point and still: it captures, the target's numbers in the command.
+	var point: Vector2 = scene._targets[0]["mm"]
+	await _hold_hand(scene, point / 1000.0)
+	_check(scene._capturing, "held on the point: it captures")
+	var capture: String = _experiment_commands().back()
+	_check(capture.begins_with("capture 1 1 1 -350.000 0.000 30"), "capture: %s" % capture)
+
+	# Rejected: still point 1, and it has to be held again.
+	_feed_experiment({"state": "ready", "last": {"target": 1, "attempt": 1, "accepted": false, "reason": "moved"}})
+	_check(not scene._capturing and scene._at == 0, "a rejected capture asks for the same point")
+	await _hold_hand(scene, point / 1000.0)
+	_check(_experiment_commands().back().begins_with("capture 1 "), "point 1 again")
+	# An answer about the attempt before does not count.
+	_feed_experiment({"state": "capturing", "last": {"target": 1, "attempt": 1, "accepted": false, "reason": "moved"},
+		"capture": {"target": 1, "attempt": 2, "frames": 30, "ok": 12, "failed": 0}})
+	_check(scene._capturing and scene._capture_ok == 12, "still on the second attempt")
+	_feed_experiment({"state": "ready", "last": {"target": 1, "attempt": 2, "accepted": true, "reason": ""}})
+	_check(scene._at == 1, "accepted: the next point lights up")
+
+	# The last point ends the run, and the tracker's word says where it went.
+	var last: Vector2 = scene._targets[1]["mm"]
+	await _hold_hand(scene, last / 1000.0)
+	_feed_experiment({"state": "ready", "last": {"target": 2, "attempt": 1, "accepted": true, "reason": ""}})
+	_check(scene._view == StaticGrid.View.DONE, "the last point ends the run")
+	_check(_experiment_commands().back() == "stop complete", "stop: %s" % _experiment_commands().back())
+	_feed_experiment({"state": "idle", "last": null, "saved": {"path": "/there/run_1", "status": "complete", "accepted": 2, "dropped": [0, 0]}})
+	_check("/there/run_1" in scene._done_text.text, "says where: %s" % scene._done_text.text)
+
+	GlobalScript.link._queue.clear()
+	scene.queue_free()
+	await get_tree().process_frame
+	GlobalScript.table_set = table_was[0]
+	GlobalScript.table_k = table_was[1]
+	GlobalScript._table_corners = table_was[2]
+	GlobalScript._table_basis = table_was[3]
+	GlobalScript._table_centre = table_was[4]
+
+
+func _put_hand(table_m: Vector2) -> void:
+	GlobalScript.table_r = table_m
+	GlobalScript.last_packet_ms = Time.get_ticks_msec()
+
+
+## Keeps the hand there until the screen asks for a capture, or a second has passed.
+func _hold_hand(scene: Control, table_m: Vector2) -> void:
+	var end := Time.get_ticks_msec() + 1000
+	while not scene._capturing and Time.get_ticks_msec() < end:
+		_put_hand(table_m)
+		await get_tree().process_frame
+
+
+func _feed_experiment(info: Dictionary) -> void:
+	_feed(LinkProtocol.EXPERIMENT_STATUS, JSON.stringify(info).to_utf8_buffer())
+
+
+## The EXPERIMENT commands waiting to go out, as text.
+func _experiment_commands() -> Array:
+	var out := []
+	for command in GlobalScript.link._queue:
+		if command["kind"] == LinkProtocol.EXPERIMENT:
+			out.append(command["body"].get_string_from_utf8())
+	return out
 
 
 ## Cannon Defense's whole arc is the patient's turn from initial to max: both are

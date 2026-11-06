@@ -9,6 +9,7 @@ extends Button
 @onready var refresh_button: Button = $"../TextureRect/RefreshButton"
 const DOSE_SCENE = "res://Main_screen/Scenes/dose.tscn"
 const GameButton := preload("res://Main_screen/Scripts/game_button.gd")
+const TableOverlay := preload("res://Main_screen/Scripts/table_overlay.gd")
 @onready var restart_button: Button = $"../RestartTrackerButton"
 @onready var restart_status: Label = $"../RestartStatus"
 # Restart tracker: 0 none, 1 waiting for the old tracker to go, 2 for the new
@@ -44,6 +45,7 @@ func _style_menu() -> void:
     GameButton.apply($"../NewPatientButton", GameButton.BLUE, 17)
     GameButton.apply($"../DefineTableButton", GameButton.ORANGE, 17)
     GameButton.apply($"../SettingsButton", GameButton.PURPLE, 17)
+    GameButton.apply($"../ExperimentsButton", GameButton.SLATE, 15)
     GameButton.apply($"../TextureRect/ExitButton", GameButton.RED, 20)
     GameButton.apply(restart_button, GameButton.TEAL, 14)
     GameButton.apply(refresh_button, GameButton.TEAL, 14)
@@ -263,12 +265,11 @@ func _on_settings_pressed() -> void:
 
 
 func _on_define_table_pressed() -> void:
-    var overlay: Control = load("res://Main_screen/Scripts/table_overlay.gd").new()
-    var layer := CanvasLayer.new()
-    layer.layer = 50
-    layer.add_child(overlay)
-    overlay.tree_exited.connect(layer.queue_free)
-    get_tree().current_scene.add_child(layer)
+    TableOverlay.open(get_tree().current_scene)
+
+
+func _on_experiments_pressed() -> void:
+    get_tree().change_scene_to_file("res://Experiments/experiment_menu.tscn")
 
 
 func _on_assess_button_pressed() -> void:

@@ -104,6 +104,7 @@ class StereoCapture:
         self._dropped  = [0, 0]    # frames the sensors made that never arrived
         self._stale_skipped = 0     # pairs passed over because a newer one was already queued
         self._repairs  = 0         # times the capture queues had to be re-paired
+        self.nudges    = 0         # times _resync moved a sensor, since the cameras started
 
         self._init_cameras()
 
@@ -490,6 +491,7 @@ class StereoCapture:
                     stamps[0], stamps[1], self.resync_threshold_us
                 )
                 if report is not None:
+                    self.nudges += 1
                     print(f"[SYNC] Phase was {report.phase_us:+.0f} µs — nudged")
             except Exception as exc:  # a failed nudge must not end the session
                 print(f"[SYNC] Resync failed: {exc!r}")

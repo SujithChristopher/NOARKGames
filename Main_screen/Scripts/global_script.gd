@@ -52,6 +52,7 @@ var table_r:      Vector2     = Vector2.ZERO   # hand, real metres from the tabl
 var _table_basis: Transform2D = Transform2D.IDENTITY   # camera x-z -> screen-aligned unit axes
 var _table_centre: Vector2    = Vector2.ZERO   # camera x-z of the table centre (m)
 var _table_y0:    float       = 0.0
+var _table_corners: Array     = []             # camera x-z of the corners, as recorded; a table saved before these were kept has none
 
 # ── tracker link ──────────────────────────────────────────────────────────────
 ## The app's end of the link to the tracker (tracker_link.gd), over the
@@ -162,6 +163,8 @@ signal camera_preview(jpeg: PackedByteArray)
 ## Measuring the device's tags (Settings > Calibration; body_take.py):
 ## {state, anchor, current, capture | elapsed | result | reason}.
 signal body_status(info: Dictionary)
+## An experiment run (EXPERIMENT_STATUS, experiment.py).
+signal experiment_status(info: Dictionary)
 
 
 # The tracker runs on its own (the noark-tracker service on the board); the app
@@ -236,6 +239,12 @@ func _on_tracker_message(kind: int, msg: PackedByteArray) -> void:
 				body_status.emit(info)
 			else:
 				push_error("[LINK] Unreadable BODY_STATUS")
+		LinkProtocol.EXPERIMENT_STATUS:
+			var info = JSON.parse_string(LinkProtocol.payload_text(msg))
+			if info is Dictionary:
+				experiment_status.emit(info)
+			else:
+				push_error("[LINK] Unreadable EXPERIMENT_STATUS")
 		_:
 			push_warning("[LINK] Unexpected message type 0x%02x" % kind)
 
@@ -287,6 +296,7 @@ func set_table(corners: Array, y0: float) -> bool:
 	_table_basis = fr["basis"]
 	_table_centre = centre
 	_table_y0 = y0
+	_table_corners = corners.duplicate()
 	table_k = k
 	table_set = true
 	save_table()
@@ -296,6 +306,7 @@ func set_table(corners: Array, y0: float) -> bool:
 func clear_table() -> void:
 	table_set = false
 	table_r = Vector2.ZERO
+	_table_corners = []
 	if FileAccess.file_exists(_table_path()):
 		DirAccess.remove_absolute(_table_path())
 
@@ -304,12 +315,24 @@ func _table_path() -> String:
 	return Settings.path.get_base_dir().path_join("table.json")
 
 
-func save_table() -> void:
-	var d := {
+# The table's corners in the order they were recorded (table_overlay.gd), in table metres
+# (as table_r); empty if the saved table predates keeping them.
+func table_corners() -> Array:
+	return _table_corners.map(func(c): return _table_basis * (c - _table_centre))
+
+
+# What defines the table: table.json, and a record of it for an experiment.
+func table_frame() -> Dictionary:
+	return {
 		"k": table_k, "y0": _table_y0,
 		"centre": [_table_centre.x, _table_centre.y],
 		"basis": [_table_basis.x.x, _table_basis.x.y, _table_basis.y.x, _table_basis.y.y],
 	}
+
+
+func save_table() -> void:
+	var d := table_frame()
+	d["corners"] = _table_corners.map(func(c): return [c.x, c.y])
 	DirAccess.make_dir_recursive_absolute(_table_path().get_base_dir())
 	var f := FileAccess.open(_table_path(), FileAccess.WRITE)
 	if f:
@@ -329,6 +352,7 @@ func load_table() -> void:
 	_table_basis = Transform2D(Vector2(b[0], b[1]), Vector2(b[2], b[3]), Vector2.ZERO)
 	_table_centre = Vector2(c[0], c[1])
 	_table_y0 = float(d.get("y0", 0.0))
+	_table_corners = d.get("corners", []).map(func(p): return Vector2(p[0], p[1]))
 	table_k = float(d["k"])
 	table_set = true
 
@@ -387,6 +411,11 @@ func send_storage_command(arg: String) -> void:
 # Settings > Calibration: "status", "start", "finish", "cancel", "save", "restore".
 func send_body_command(arg: String) -> void:
 	link.send_command(LinkProtocol.BODY, arg)
+
+
+# An experiment run on the tracker (experiment.py); state comes as experiment_status.
+func send_experiment_command(arg: String) -> void:
+	link.send_command(LinkProtocol.EXPERIMENT, arg)
 
 
 ## Keep the tracker tracking while `node` is in the tree (a screen outside

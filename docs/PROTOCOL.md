@@ -90,6 +90,7 @@ again and is not applied twice.
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
 | `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
 | `0x0A` | `BODY` | `status` \| `start` \| `finish` \| `cancel` \| `save` \| `restore` \| `tip <tag> <x> <y> <z>` | below, or why refused |
+| `0x0B` | `EXPERIMENT` | `status` \| `start <name> <frames> <label>` \| `meta <key> <json>` \| `capture <target> <row> <col> <x_mm> <y_mm> <frames> <still_mm>` \| `stop <why>` | below, or why refused |
 
 STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
 board's camera recordings: `<patient>/<session>/Video/rec_*` and
@@ -136,6 +137,7 @@ file, and exposure and gain belong to the board's room. Over UDP the app writes 
 | `0x88` | `CAMERA_STATUS` | JSON, below; every 0.5 s while `preview=on` and tracking |
 | `0x89` | `PREVIEW` | JPEG, below; every 0.2 s while `preview=on` and tracking. Over UDP on the link, over BLE on the hotspot |
 | `0x8A` | `BODY_STATUS` | JSON, below; after `status` or a change, and every 0.5 s during a take or a solve |
+| `0x8B` | `EXPERIMENT_STATUS` | JSON, below; after `status` or a change, and every 0.25 s during a run |
 
 **POSITION** / **ROTATION**, one per frame with a solved pose (no marker in
 view → none; the heartbeat still shows the tracker is alive, and the app reads
@@ -236,6 +238,22 @@ the normal Wi-Fi, 5.3 ms, no loss at 40 kB five times a second. Without the hots
 
 A link lost or a new `HELLO` ends a take; a solve goes on and `status` finds its result.
 Additive like the others: `VERSION` did not change.
+
+**EXPERIMENT** (`pyscripts/experiment.py`): a run the app steers and the tracker writes,
+on the board. `start` opens the run folder and answers its path, or why not (one run at a
+time, not enough disk); `<frames>` is what the disk check is for, `<label>` (the name or number typed for the run: letters, digits, `_`, `-`) starts the folder's name. `meta` adds a key to its
+metadata.json, in pieces because one BLE write holds about 240 bytes; `table_frame`
+(`centre`, `basis`) also gives poses.csv its table columns. `capture` saves frames until
+`<frames>` have a pose, or gives up after 5 s with none. `stop` closes the run, `<why>` going
+into `status` (`complete`, `stopped`); a link lost or a new `HELLO` closes it as `link_lost`.
+
+`EXPERIMENT_STATUS`: `{"state": "idle" | "ready" | "capturing", "last", "saved", "capture"}`.
+`last` is the latest capture's result, repeated until the next, so a lost status costs
+nothing: `{"target", "attempt", "accepted", "reason", "frames_ok", "frames_failed",
+"max_dev_mm", "fps"}`. `reason` is `moved` (over `<still_mm>` from its mean in the table's
+plane), `no_pose`, `stopped` or empty. `capture`, while one runs: `{"target", "attempt",
+"frames", "ok", "failed"}`. `saved`, once a run has ended: `{"path", "status", "accepted",
+"dropped"}`. Additive: `VERSION` did not change.
 
 ## 6. Tools
 

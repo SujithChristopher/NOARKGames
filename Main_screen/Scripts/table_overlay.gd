@@ -10,6 +10,17 @@ signal table_done
 
 const CORNER_LABELS: Array = ["top-left", "bottom-left", "bottom-right", "top-right"]
 
+# Opens it over `parent`, above everything else on the screen.
+static func open(parent: Node) -> Control:
+	var overlay: Control = load("res://Main_screen/Scripts/table_overlay.gd").new()
+	var layer := CanvasLayer.new()
+	layer.layer = 50
+	layer.add_child(overlay)
+	overlay.tree_exited.connect(layer.queue_free)
+	parent.add_child(layer)
+	return overlay
+
+
 var _corners: Array = []      # Vector2(camera x, z) per recorded corner
 var _ys: Array = []
 var _screen_pts: Array = []   # where the cursor was, for feedback only

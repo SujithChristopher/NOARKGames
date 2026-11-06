@@ -458,3 +458,56 @@ data/PATIENT_ID1/
   read each pair of numbers.
 - Files under the fixed dummy-patient folder used in debug/testing mode are not
   clinical data and should be excluded from analysis.
+
+---
+
+## Experiments
+
+Written by the tracker on the board (`pyscripts/experiment.py`), never by the app, and
+outside `data/`: no patient, no upload, not listed in Settings > Storage.
+
+```text
+NOARK_demo/experiments/static_grid/{label}_{YYYY-MM-DD}_{HH-MM-SS}/
+    metadata.json   label (the name or number typed at the start), status (running, complete, stopped, link_lost, tracker_stopped),
+                    times, code version, tracker setup, table, grid, dwell, notes,
+                    units, every column name, images dropped
+    targets.csv     one row per capture attempt
+    poses.csv       one row per camera frame captured
+    recording/      the same frames as images (frame_recorder.py's format), every frame
+                    at full size: settings.json recording_fps / recording_scale do not apply
+      sync_events.msgpack  every mocap trigger edge of the run, [timestamp_ns, value, line_seqno],
+                    saved as it happens; no file if there were none (metadata.json `sync`
+                    says whether the line was there at all)
+      phase_log.msgpack    camera phase once a second for the run, [monotonic_ns, phase_us,
+                    jitter_us, drift_ppm, n, nudged]; nudged = the tracker moved the alignment
+    calibration/    rigidbody.toml, device.toml, the stereo calibration and settings.json
+                    as they were when the run started
+```
+
+**Use only `accepted = 1` rows of targets.csv**, and the poses with the same `target` and
+`attempt`. A rejected attempt stays in the files, so that what the acceptance check removed
+can be looked at. Join poses to images on `sensor_ns0` / `sensor_ns1`.
+
+`poses.csv`: `target` (1-based, visiting order), `attempt`, `row`, `col` (1-based, row 1 at
+the top), `frame` (within the attempt, failed frames included), `pose_ok`, `wall_time_unix`,
+`sensor_ns0`, `sensor_ns1`, `seq0`, `seq1`, `sync` (trigger line level when the frame was taken;
+too coarse to time a pulse, use the edges), `tip_{x,y,z}_m`, `rvec_{x,y,z}`, `tvec_{x,y,z}_m`,
+`table_{x,y}_mm`, `tags_cam0`, `tags_cam1` (ids found, space-separated). Pose fields are empty
+when `pose_ok` is 0. Tip and tvec are in metres in the camera frame; table values are mm from
+the table's centre, x right and y down as on screen.
+
+`targets.csv`: `target`, `attempt`, `row`, `col`, `expected_{x,y}_mm`, `accepted`, `reason`
+(`moved`, `no_pose`, `stopped`, or empty), `frames_ok`, `frames_failed`, `fps` (from sensor
+time), `wall_start_unix`, `wall_end_unix`, `sensor_ns_start`, `sensor_ns_end` (first and last frame, cam0),
+`sync_edges`, `sync_first_rise_ns` (edges between those two), `phase_us` (at the attempt's end),
+`tip_mean_{x,y,z}_m`, `tip_std_{x,y,z}_mm`,
+`table_mean_{x,y}_mm`, `offset_{x,y}_mm` (mean minus expected), `max_dev_mm` (furthest frame
+from the mean, in the table's plane).
+
+`sensor_ns*`, edge timestamps and the phase log's `monotonic_ns` are all CLOCK_MONOTONIC, so a
+pulse is placed against a frame or an attempt by comparing them. Edges outside every attempt's
+range (while the device was moving) are kept but counted in no row.
+
+The expected positions come from the table's corners as the tracker measured them, and the
+device is steered by the screen. So the data measures precision across the table, not
+absolute accuracy: `offset_*` mostly says where the operator stopped inside the point's radius.

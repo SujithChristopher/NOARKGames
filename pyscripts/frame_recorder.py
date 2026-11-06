@@ -64,7 +64,11 @@ class SyncLine:
     session without the trigger box still records.
     """
 
-    def __init__(self, chip: str = "gpiochip4", line="PIN_11", latch_edges: bool = True):
+    def __init__(self, chip: str = "gpiochip4", line="PIN_11", latch_edges: bool = True,
+                 events_path: Optional[Path] = None):
+        # Edges go here as they happen, so a crash keeps them. Created at the first edge.
+        self._events_path = Path(events_path) if events_path is not None else None
+        self._events_file = None
         self.available = False
         self.edges_available = False
         self.chip = chip
@@ -145,13 +149,30 @@ class SyncLine:
                     continue
                 for event in self._req.read_edge_events():
                     value = 1 if event.event_type == event.Type.RISING_EDGE else 0
-                    with self._lock:
-                        self._events.append(
-                            (event.timestamp_ns, value, event.line_seqno)
-                        )
-                        self._level = value
+                    self._note_edge(event.timestamp_ns, value, event.line_seqno)
         except Exception as exc:      # a dead latch must not end the recording
             print(f"[SYNC] Edge latch stopped: {exc!r}")
+
+    def _note_edge(self, timestamp_ns: int, value: int, seqno: int) -> None:
+        record = (timestamp_ns, value, seqno)
+        with self._lock:
+            self._events.append(record)
+            self._level = value
+        # Outside the lock: get_value takes it on the capture path, and a disk may stall.
+        if self._events_path is not None:
+            try:
+                if self._events_file is None:
+                    self._events_file = open(self._events_path, "ab")
+                self._events_file.write(msgpack.packb(list(record)))
+                self._events_file.flush()
+            except OSError as exc:   # the edges are still in memory for write_events
+                print(f"[SYNC] Cannot save edges as they come: {exc!r}")
+                self._events_path = None
+
+    def events(self) -> list:
+        """The edges so far, as (timestamp_ns, value, line_seqno)."""
+        with self._lock:
+            return list(self._events)
 
     def _latched_level(self) -> int:
         with self._lock:
@@ -176,6 +197,8 @@ class SyncLine:
         if not events:
             return None
         path = Path(out_dir) / filename
+        if path == self._events_path:
+            return path             # already there, edge by edge
         with open(path, "wb") as fh:
             for record in events:
                 fh.write(msgpack.packb(list(record)))
@@ -185,6 +208,8 @@ class SyncLine:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
+        if self._events_file is not None:
+            self._events_file.close()
         if self._req is not None:
             try:
                 self._req.release()
@@ -313,7 +338,8 @@ class FrameRecorder:
                  scale: float = 1.0):
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        self.sync = SyncLine(sync_chip, sync_pin)
+        self.sync = SyncLine(sync_chip, sync_pin,
+                             events_path=self.out_dir / "sync_events.msgpack")
         self._writers = [
             _CameraWriter(i, self.out_dir, chunk_frames, scale) for i in (0, 1)
         ]
@@ -354,8 +380,9 @@ class FrameRecorder:
             json.dump(payload, fh, indent=2)
         print(f"[REC] Recording to {self.out_dir}")
 
-    def add(self, frame0, frame1, sensor_ns0, sensor_ns1, sequences) -> None:
-        """Offer one pair, subject to the target rate.
+    def add(self, frame0, frame1, sensor_ns0, sensor_ns1, sequences) -> Optional[int]:
+        """Offer one pair, subject to the target rate -> the sync level kept with it,
+        None if the pair was skipped.
 
         Cheap on the caller either way: a skipped pair costs one comparison,
         and a kept one hands the packing to the writer threads.
@@ -366,7 +393,7 @@ class FrameRecorder:
                 self._next_due = now_ns
             if now_ns < self._next_due:
                 self.skipped += 1
-                return
+                return None
             self._next_due += self._interval_ns
             if self._next_due <= now_ns:
                 # A gap longer than the interval: resync rather than trying to
@@ -381,6 +408,7 @@ class FrameRecorder:
         ):
             writer.offer(frame, [sync, wall, mono, sensor_ns, seq])
         self.frames += 1
+        return sync
 
     @property
     def status(self) -> str:

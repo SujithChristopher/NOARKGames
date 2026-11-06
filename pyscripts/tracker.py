@@ -26,6 +26,7 @@ from body_take import BodyTake
 from camera_view import CameraView, parse_exposure, parse_gain, save_settings
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
+from experiment import Experiments
 from frame_recorder import FrameRecorder
 from hotspot import Hotspot
 from link import Link
@@ -460,6 +461,13 @@ class TrackerClass:
             rigidbody_path, device_path, stereo_calib_path, on_change=self._use_new_rig,
             refine=lambda: self.refine_mode, isp=self._isp,
         )
+        self._experiment = Experiments(
+            DATA_ROOT.parent / "experiments", self._experiment_setup, self._experiment_recorder,
+            lambda: 2 * self.frame_size[0] * self.frame_size[1],
+            lambda: [rigidbody_path, device_path, stereo_calib_path, DATA_ROOT.parent / "settings.json"],
+            lambda: (self.capture.phase_report(), self.capture.nudges)
+            if self.capture is not None else (None, 0),
+        )
         # Contour is the default. Crop refine (rapidtag 0.1.10) gave garbage poses on
         # this rig, so it is opt-in: settings.json tracker_refine = "crop". Track with
         # the refinement the rigid body was calibrated with (rigidbody.toml meta.refine).
@@ -820,6 +828,7 @@ class TrackerClass:
         self._want_tracking = False
         self._set_preview(False)
         self._body_take.link_lost()
+        self._experiment.link_lost()
         self._close_session()
         self.link.reset()
 
@@ -830,6 +839,7 @@ class TrackerClass:
             self._want_tracking = False
             self._set_preview(False)
             self._body_take.link_lost()
+            self._experiment.link_lost()
             self._reload_settings()
             return True, ""
         if kind == protocol.RESTART:
@@ -844,6 +854,8 @@ class TrackerClass:
             return self.storage.command(body.decode(errors="replace").strip())
         if kind == protocol.BODY:
             return self._body_take.command(body.decode(errors="replace").strip())
+        if kind == protocol.EXPERIMENT:
+            return self._experiment.command(body.decode(errors="replace").strip())
         if kind == protocol.SESSION:
             hid = body.decode(errors="replace").strip()
             if not hid:
@@ -1304,6 +1316,47 @@ class TrackerClass:
             scale=self.recording_scale,
         )
 
+    def _experiment_recorder(self, out_dir: Path, metadata: dict) -> FrameRecorder:
+        """An experiment keeps every frame at full size, whatever the session's recording
+        is set to: settings.json's recording_fps and recording_scale do not apply."""
+        return FrameRecorder(
+            out_dir,
+            metadata={
+                **metadata,
+                "resolution": list(self.frame_size),
+                "camera_order": list(self._camera_order),
+                "exposure_us": self._exposure_us,
+                "gain": self._gain,
+                "isp": self._isp or "raw",
+                "rigidbody": str(self._rigidbody_path),
+            },
+            sync_chip=self._sync_chip,
+            sync_pin=self._sync_pin,
+            target_hz=0,
+            chunk_frames=self.recording_chunk,
+            scale=1.0,
+        )
+
+    def _experiment_setup(self) -> dict:
+        """How tracking is set up now, for a run's metadata.json."""
+        return {
+            "solver": self.solver,
+            "refine": self.refine_mode,
+            "camera": self.camera_choice,
+            "deadband_px": self.stabilizer.threshold_px,
+            "exposure_us": self._exposure_us,
+            "gain": self._gain,
+            "isp": self._isp or "raw",
+            "resolution": list(self.frame_size),
+            "camera_order": list(self._camera_order),
+            "flip": bool(self.flip_frames),
+            "fps_cap": self.fps_value,
+            "stream_type": self.stream_type,
+            "protocol_version": protocol.VERSION,
+            "rigidbody": str(self._rigidbody_path),
+            "stereo_calibration": str(self._stereo_calib_path),
+        }
+
     def _recording_dirs(self) -> list:
         """The recordings being written now, which Storage must not delete."""
         dirs = [self.recorder.out_dir] if self.recorder is not None else []
@@ -1328,6 +1381,7 @@ class TrackerClass:
             # after this, so detection below always runs on the full frame
             # whatever the recording is configured to keep.
             self.recorder.add(raw0, raw1, ts0, ts1, self.capture.last_sequence)
+        self._experiment.images(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._frame_count += 1
         if self.trunk is not None and self.trunk_on:
             # Before the flip: the stereo calibration describes the sensor image.
@@ -1431,6 +1485,7 @@ class TrackerClass:
                     self.csv_writer.writerow(
                         [datetime.now().strftime("%d/%m/%Y %H:%M:%S"), *centroid]
                     )
+        self._experiment.frame((centroid, ref_rvec, ref_tvec) if have_pose else None, ids0, ids1)
 
         if self.link.connected:
             now = time.time()
@@ -1468,8 +1523,9 @@ class TrackerClass:
         self._send_job_updates()
 
     def _send_job_updates(self) -> None:
-        """What runs beside the loop has to say: Settings > Storage and > Calibration."""
-        for update in (self.storage.poll(), self._body_take.poll(time.time())):
+        """What runs beside the loop has to say: Settings > Storage and > Calibration, experiments."""
+        now = time.time()
+        for update in (self.storage.poll(), self._body_take.poll(now), self._experiment.poll(now)):
             if update and self.link.connected:
                 self.link.send(update)
 
@@ -1543,7 +1599,7 @@ class TrackerClass:
             # Each step on its own: one failing (the trunk worker already gone
             # after a Ctrl-C) must not skip the rest — a skipped streamer.stop()
             # leaves the BLE advertisement on with nothing behind it.
-            steps = [self._body_take.close]
+            steps = [self._body_take.close, self._experiment.close]
             if self.record_frames and self._rec_file0 is not None:
                 steps.append(self._close_rec_files)
             steps.append(self._stop_session_recording)
