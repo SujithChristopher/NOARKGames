@@ -961,7 +961,7 @@ class TrackerClass:
             self._set_preview(value == "on")
         elif key == "recording" and value in ("on", "off"):
             self.record_session = value == "on"
-        elif key == "recording_fps" and float(value) > 0:
+        elif key == "recording_fps" and float(value) >= 0:  # 0: every frame
             self.recording_hz = float(value)
         elif key == "recording_scale" and 0 < float(value) <= 1:
             self.recording_scale = float(value)
@@ -1571,8 +1571,9 @@ if __name__ == "__main__":
     parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH,
                         help="The user settings file (default: ~/Documents/NOARK_demo/settings.json).")
     parser.add_argument("--record", action="store_true", help="Record raw frames from both cameras")
-    parser.add_argument("--fps", type=int, default=60, choices=[15, 30, 60, 90, 100],
-                         help="Cap the sensor FrameRate. Omit to free-run at max achievable fps.")
+    parser.add_argument("--fps", type=int, default=None, choices=[15, 30, 60, 90, 100],
+                         help="Cap the sensor FrameRate. Omit for the fastest the exposure allows. "
+                              "What a recording saves is settings.json recording_fps.")
     parser.add_argument("--flip", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--cpus", default=None, metavar="LIST",
                         help="Cores to run on, e.g. 4-7, overriding "

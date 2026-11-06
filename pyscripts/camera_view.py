@@ -34,7 +34,8 @@ MIN_GAIN, MAX_GAIN = 1.0, 16.0  # past 16 rcam goes on in digital gain
 def parse_exposure(text: str) -> int:
     """A CONFIG exposure, in microseconds. ValueError if it cannot be one.
 
-    Too long is not refused: the sensor caps it at the frame period, and the
+    Too long is not refused: the frame stretches to fit it, or under --fps the
+    sensor caps it at the frame period, and the
     status shows what it took. Zero is, because rcam reads 0 as "hand it back to
     auto exposure", which is off here: acknowledged, then nothing would happen.
     """

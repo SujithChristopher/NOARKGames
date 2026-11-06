@@ -108,7 +108,7 @@ and `gain` (1–16) — on the running cameras at once, otherwise when they next
 start, `preview` (on/off: the app's Camera tab is open; over BLE it also runs the
 board's hotspot, section 5; not a setting, never in settings.json, and off again at
 every HELLO), `recording`
-(on/off), `recording_fps`, `recording_scale` (0–1], `recording_chunk_frames` —
+(on/off), `recording_fps` (0 = every frame), `recording_scale` (0–1], `recording_chunk_frames` —
 the recording ones from the next session. At each HELLO the tracker applies the
 same keys from its own settings.json (`tracker_solver`, `tracker_refine`,
 `tracker_camera`, `corner_deadband_px`, `camera_exposure_us`, `camera_gain`,

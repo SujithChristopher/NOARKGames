@@ -79,7 +79,8 @@ stream1 = "cam0"
 # Reach for exposure before gain: gain amplifies sensor noise, and the corner
 # positions every later stage is built on are exactly what noise spoils. But
 # exposure costs motion blur on a moving device, and it cannot exceed the frame
-# period (16.6 ms at the free-running rate), so a dark room may need both.
+# period, and at the fastest rate a longer exposure lowers the frame rate (10 ms
+# gives about 98 fps, 16 ms about 60), so a dark room may need both.
 #
 # The calibration prints the image level it is actually getting, with a verdict.
 exposure_us = 1000

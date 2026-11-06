@@ -192,6 +192,11 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
   `pyscripts/bench_cameras.py` scores both mappings on one take;
   `pyscripts/bench_solvers.py` does the same for the two solvers.
 
+**Frame rate:** the cameras run as fast as the exposure allows unless `tracker.py --fps` caps them
+(`fastest_blanking` in `stereo_capture.py`): frame length = exposure + 25 lines, at least 910 lines. So 10 ms gives about
+98 fps, and changing exposure live moves the frame period. It has to be set: the sensor's own default is about 60 fps. What a
+recording saves is separate, `recording_fps` in settings.json (0 = every frame), kept by the sensor timestamp.
+
 **Following the body (`tracker_refine` = `multistage`, `pyscripts/body_search.py`):** instead of
 searching the whole frame, each camera searches one window around the whole rigid body: every tag projected
 through the last pose, joined with the corners that camera last saw, moved on by the window's last step. Then
@@ -435,6 +440,7 @@ python tests/smoke.py                     # every game scene headless (~1 min); 
 python pyscripts/tests/test_parity.py     # constants GDScript and Python both keep
 ```
 
+- **Stop `noark-tracker` before running `smoke.py` on the board.** Its Settings checks can reach a live tracker over UDP: on 2026-11-06 a run sent a real `tip 3` and rewrote `device.toml` and `rigidbody.toml`.
 - `tests/smoke_test.tscn` opens each game (both modes where it has two), the menus, Trunk angles and
   Results for 120 frames; `smoke.py` fails on any `ERROR` / `SCRIPT ERROR` Godot prints and names the
   scene. It runs in debug in memory only, with the data folder in Godot's user dir — never patient

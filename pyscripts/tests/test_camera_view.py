@@ -241,6 +241,7 @@ class FakeCamera:
 def capture_with(cam0, cam1):
     capture = StereoCapture.__new__(StereoCapture)
     capture.cam0, capture.cam1 = cam0, cam1
+    capture.exposure_us, capture.fps_value = 10000, 60  # a capped rate: the frame stays put
     return capture
 
 

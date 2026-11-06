@@ -137,11 +137,13 @@ def run(client: Client) -> None:
         assert bright["level"][0] > 1.2 * low["level"][0], (bright["level"], low["level"])
         print(f"  2000 us x4    level {bright['level']}")
 
+        # The frame stretches to fit it, at a lower rate (a cap with --fps only).
         client.need("exposure=25000")
-        capped = client.settled()
-        assert capped["ask"][0] == 25000, capped
-        assert capped["exposure"][0] < 17000, capped
-        print(f"  asked 25000   sensor took {capped['exposure']}")
+        long = client.settled()
+        assert long["ask"][0] == 25000, long
+        assert near(long["exposure"][0], 25000), long
+        assert long["fps"] < 45, long
+        print(f"  asked 25000   sensor took {long['exposure']}, {long['fps']} fps")
 
         for bad in ("exposure=0", "exposure=inf", "gain=99", "gain=0"):
             ok, detail = client.config(bad)

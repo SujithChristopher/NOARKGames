@@ -26,6 +26,7 @@ CLOCK_MONOTONIC as stamped by CAMSS in its frame-done interrupt, ~100 us of
 jitter against the 1-2 ms a userspace arrival time carries.
 """
 
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -35,6 +36,17 @@ import threading
 
 import cv2  # noqa: F401 - kept for parity with callers' expectations
 import numpy as np
+
+
+_MIN_BLANKING = 110      # the driver's limits
+_MAX_BLANKING = 51_540
+FRAME_INTEGRATION_DIFF = 25   # rcam/isp.py: lines the frame must exceed the exposure by
+
+
+def fastest_blanking(exposure_us: float, line_us: float, height: int) -> int:
+    """vertical_blanking for the shortest frame that still fits the exposure."""
+    lines = math.ceil(exposure_us / line_us) + FRAME_INTEGRATION_DIFF
+    return min(max(lines - height, _MIN_BLANKING), _MAX_BLANKING)
 
 
 class StereoCapture:
@@ -76,6 +88,7 @@ class StereoCapture:
         self.cam1 = None   # stereo second view
         self._executor         = None
         self._frame_period_us  = 0.0
+        self._last_pair_ns     = 0
         self._skew_baseline_us = 0.0   # measured cam0->cam1 sensor phase offset
         self._frame_sync   = None      # rcam.FrameSync once both cameras are up
         self._resync_busy  = threading.Event()
@@ -131,7 +144,9 @@ class StereoCapture:
         simultaneous, so callers can decline to triangulate the ones that are
         not rather than silently fusing two different instants.
         """
+        self._skip_late_frames()
         raw0, raw1, ts0, ts1 = self._capture_pair()
+        self._last_pair_ns = ts0
         # Tracking a frame costs more than the sensor's frame period, so the V4L2
         # queue fills and every frame is served 3-4 periods late (measured: 55 ms
         # mean age on dequeue). A frame older than one period means the next one is
@@ -142,6 +157,7 @@ class StereoCapture:
             if not self._frame_period_us or age_us <= self._frame_period_us:
                 break
             raw0, raw1, ts0, ts1 = self._capture_pair()
+            self._last_pair_ns = ts0
             self._stale_skipped += 1
         if abs((ts1 - ts0) / 1000.0 - self._skew_baseline_us) >= 0.5 * self._frame_period_us:
             raw0, raw1, ts0, ts1 = self._catch_up(raw0, raw1, ts0, ts1)
@@ -176,8 +192,8 @@ class StereoCapture:
                 "(is the driver loaded? try: sudo modprobe ov9282)"
             )
 
-        # No FrameRate control means the sensor free-runs at whatever rate its
-        # current exposure/blanking allows — i.e. max achievable fps.
+        # No fps_value means as fast as the exposure allows. That has to be asked
+        # for: left alone the sensor keeps its default blanking, about 60 fps.
         cam_controls = {
             "ExposureTime": self.exposure_us,
             "AnalogueGain": self.gain,
@@ -192,12 +208,14 @@ class StereoCapture:
 
         self.cam0 = Camera(labels[0])
         self.cam0.configure(size=self.frame_size, bit_depth=8, isp=self.isp)
+        self._set_fastest(self.cam0)
         self.cam0.set_controls(cam_controls)
         self.cam0.start()
 
         # cam1 is always active — used for stereo_pnp on every frame
         self.cam1 = Camera(labels[1])
         self.cam1.configure(size=self.frame_size, bit_depth=8, isp=self.isp)
+        self._set_fastest(self.cam1)
         self.cam1.set_controls(cam_controls)
         self.cam1.start()
 
@@ -235,15 +253,48 @@ class StereoCapture:
 
         settle=False: settling drains one camera's queue and then the other's,
         which would undo the pairing _align_pairing set up. The new values show
-        in the image 1-3 frames later (measured on this rig); neither the frame
-        period nor the phase moves, as long as exposure stays under the frame
-        period, where the sensor caps it.
+        in the image 1-3 frames later (measured on this rig).
+
+        At the fastest rate the frame period follows the exposure, so a longer
+        exposure gets its longer frame before it is written, and a shorter one
+        gives the time back after. The phase the change leaves behind is what
+        _resync() already corrects.
         """
+        longer = exposure_us > self.exposure_us
         self.exposure_us = exposure_us
         self.gain = gain
         controls = {"ExposureTime": exposure_us, "AnalogueGain": gain}
+        if longer:
+            self._retime()
         for cam in (self.cam0, self.cam1):
             cam.set_controls(controls, settle=False)
+        if not longer:
+            self._retime()
+
+    def _set_fastest(self, cam) -> None:
+        """Before the exposure is written: the sensor caps it at the frame period."""
+        if self.fps_value is None:
+            cam.set_controls({"vertical_blanking": fastest_blanking(
+                self.exposure_us, cam.line_time_us(), cam.height)})
+
+    def _retime(self) -> None:
+        """Give both cameras the fastest frame this exposure allows, while they run."""
+        if self.fps_value is not None or self._frame_sync is None:
+            return
+        cam = self.cam0
+        blanking = fastest_blanking(self.exposure_us, self._frame_sync.line_time_us, cam.height)
+        if blanking == cam.get_control("vertical_blanking"):
+            return
+        # A nudge restores the blanking it read, which would undo this.
+        while self._resync_busy.is_set():
+            time.sleep(0.002)
+        for cam in (self.cam0, self.cam1):
+            cam.set_controls({"vertical_blanking": blanking}, settle=False)
+        self._frame_sync.period_us = self.cam0.frame_period_us()
+        self._frame_period_us = self._frame_sync.period_us
+        # Stamps from the old period would read as a phase error.
+        for stamps in self._recent_ns:
+            stamps.clear()
 
     def sensor_settings(self) -> list:
         """What each sensor holds now: (exposure_us, gain), or None if unreadable.
@@ -300,6 +351,29 @@ class StereoCapture:
             f"{self._frame_sync.line_time_us:.2f} µs/line):"
         )
         self._frame_sync.align(tol_us=self.phase_tol_us)
+
+    def _skip_late_frames(self) -> None:
+        """Drop the frames that finished while the last one was being tracked.
+
+        Their pixels are never decoded. Taking a frame only to find it old costs a
+        whole capture, and once the sensor outruns the loop that is every frame:
+        at 98 fps it took the loop from 58 to 38 pairs a second. Both cameras in
+        parallel and by the same count, so the pairing holds; the check in
+        next_pair() still catches what this estimate misses.
+        """
+        if not self._last_pair_ns or not self._frame_period_us:
+            return
+        periods = (time.monotonic_ns() - self._last_pair_ns) / 1000.0 / self._frame_period_us
+        count = min(int(periods) - 1, self._MAX_STALE_SKIPS)
+        if count < 1:
+            return
+        futures = [self._executor.submit(self._drain, cam, count) for cam in (self.cam0, self.cam1)]
+        for future in futures:
+            future.result()
+        self._stale_skipped += count
+        for i in (0, 1):  # asked for, so not a frame the sensor lost
+            if self._last_seq[i] is not None:
+                self._last_seq[i] += count
 
     def _drain(self, cam, n: int) -> None:
         """Discard n queued frames from one camera without copying pixels out."""
