@@ -168,3 +168,5 @@ addons/gdble/~*
 android/build/
 /graphify-out/cache/
 /.superpowers/
+# Old checkout of the plugin; the submodule lives at external/GdAndroidBLE
+/GdAndroidBLE/
