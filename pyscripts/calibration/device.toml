@@ -44,10 +44,10 @@ offset_m = [0.00, 0.01, -0.069]
 
 [cameras]
 # Which section of sterio_calibration.toml describes each camera, in the order
-# rcam enumerates them. That order is stable across boots — rcam sorts sensors
-# by CSI-PHY id, so stream 0 is always the CAM2 connector and stream 1 always
-# CAM3, regardless of probe order or /dev/video numbering. Only physically
-# moving a cable changes it.
+# rcam enumerates them. rcam sorts sensors by CSI-PHY id, so stream 0 should be
+# the CAM2 connector and stream 1 CAM3, regardless of probe order or /dev/video
+# numbering. Even so, the right mapping has changed with no cable touched,
+# apparently at a reboot: an open bug, see docs/camera_stream_swap.md.
 #
 # The stereo calibration labels its own cam0/cam1, and they need not match
 # rcam's order. Getting it wrong is not a small error: the two cameras then
@@ -59,7 +59,7 @@ offset_m = [0.00, 0.01, -0.069]
 #     uv run pyscripts/bench_cameras.py --seconds 20
 # It has flipped on this rig: until 2026-09 the reverse (cam1, cam0) measured
 # 3.1 mm against 140.9 mm; on 2026-10-08 this mapping measured 2.1 mm and the
-# reverse 137.5 mm (cameras unplugged/swapped at the connectors in between?).
+# reverse 137.5 mm.
 # On 2026-10-14 it was back the other way: (cam0, cam1) 136.4 mm, the reverse
 # 2.7 mm, measured offline on a session recording (stereo noise 26 mm against
 # 0.6-0.7 mm per camera alone).

@@ -184,11 +184,11 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
   `tracker_camera` is `both`, `cam0` or `cam1`. `device.toml` describes the rig;
   settings.json says how to use it and wins where both speak.
 - The stereo calibration's cam0/cam1 labels need not match rcam's enumeration;
-  `device.toml [cameras]` maps them. rcam's order is stable across boots (sorted
-  by CSI-PHY id), but it flipped on this rig between 2026-09 and 2026-10-08
-  (cables reseated?) — a wrong mapping costs ~140 mm of camera-to-camera
-  disagreement and tens of mm of stereo jitter, so re-run the bench after any
-  hardware handling.
+  `device.toml [cameras]` maps them. rcam sorts by CSI-PHY id, yet the right mapping has
+  changed with no cable touched, apparently at a reboot: an open bug, see
+  `docs/camera_stream_swap.md`. A wrong mapping costs ~150 mm of camera-to-camera
+  disagreement and tens of mm of stereo jitter, so re-run the bench if tracking looks wrong
+  after a reboot.
   `pyscripts/bench_cameras.py` scores both mappings on one take;
   `pyscripts/bench_solvers.py` does the same for the two solvers.
 
