@@ -101,7 +101,7 @@ says the job was taken; each finished job answers with a `STORAGE_LIST`.
 CONFIG keys (tracker.py `_apply_setting`): `track` (off/position/rotation: the
 app wants tracking now, and which of POSITION or ROTATION to send — a game uses
 one, never both; not a setting, never in settings.json), `solver` (joint/ransac), `refine`
-(crop/contour/subpix/none), `camera` (both/cam0/cam1), `deadband` (px),
+(crop/contour/subpix/multistage/none), `camera` (both/cam0/cam1), `deadband` (px),
 `trunk` (on/off), `trunk_method` (icp/msam_r18/msam_v3rot), `trunk_reference`
 (neutral/model), `exposure` (µs, above 0; the sensor caps it at the frame period)
 and `gain` (1–16) — on the running cameras at once, otherwise when they next

@@ -410,7 +410,7 @@ wheels = [
 
 [[package]]
 name = "rapidtag"
-version = "0.1.11"
+version = "0.1.12"
 source = { editable = "external/rapidtag" }
 
 [package.metadata]

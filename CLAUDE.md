@@ -192,6 +192,14 @@ one joint PnP over every visible corner, rather than averaging a pose per tag.
   `pyscripts/bench_cameras.py` scores both mappings on one take;
   `pyscripts/bench_solvers.py` does the same for the two solvers.
 
+**Following the body (`tracker_refine` = `multistage`, `pyscripts/body_search.py`):** instead of
+searching the whole frame, each camera searches one window around the whole rigid body: every tag projected
+through the last pose, joined with the corners that camera last saw, moved on by the window's last step. Then
+rapidtag's `MultiStageRefiner` (0.1.12) sharpens the corners and re-finds a missed tag from its track. A camera
+gets a full search every 60 frames; with nothing to follow, both search in full every frame. A calibration take
+always searches in full. `[SEARCH]` in the journal says how much of the frame was searched. Not per-tag crops, by choice.
+Tested on recordings and synthetic tags, not yet live on this rig. Calibrate in the same mode you track in.
+
 **From the app (Settings > Calibration, `calibration_tab.gd`):** after a tag is moved, swapped or
 added, no terminal needed. **One tag stays fixed** (`[tip] tag` in device.toml, tag 1 unless changed): the tracked point's
 offset is measured from it and is kept, and "moved" means relative to it. The tab's Tracked point card picks that tag and

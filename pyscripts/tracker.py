@@ -32,6 +32,7 @@ from link import Link
 from picture_link import PictureLink
 from storage import Storage
 from rigid_body import RigidBody, load_cameras, load_device, stereo_extrinsic
+from body_search import BodySearch
 from stereo_capture import StereoCapture
 from trunk.snapshot_packet import encode_snapshot
 from trunk.tracker import TrunkProcess
@@ -81,11 +82,13 @@ def _set_detector_refine(mode: str) -> None:
     """Point the shared detector at one refinement: crop (rapidtag's border
     refit), contour (lines fitted to the tag's threshold contour, in rapidtag),
     or neither — subpix and none leave the detector alone; subpix runs
-    cornerSubPix afterwards."""
+    cornerSubPix afterwards. multistage takes contour corners as its seed
+    (body_search.py)."""
     if _CROP_REFINE:
         _DETECTOR_PARAMS.april_tag_refine_full_resolution = mode == "crop"
     _DETECTOR_PARAMS.corner_refinement_method = (
-        rapidtag.CORNER_REFINE_CONTOUR if mode == "contour" else rapidtag.CORNER_REFINE_NONE
+        rapidtag.CORNER_REFINE_CONTOUR if mode in ("contour", "multistage")
+        else rapidtag.CORNER_REFINE_NONE
     )
 
 
@@ -463,9 +466,15 @@ class TrackerClass:
         want = (settings.get("tracker_refine") or "contour").strip().lower()
         if want == "crop" and _CROP_REFINE:
             self.refine_mode = "crop"
+        elif want == "multistage":
+            self.refine_mode = "multistage"
         else:
             self.refine_mode = "subpix" if want == "subpix" else "contour"
         _set_detector_refine(self.refine_mode)
+        self.body_search = BodySearch(
+            _APRILTAG_DICT, _DETECTOR_PARAMS, self.frame_size,
+            ((self.K0, self.D0), (self.K1, self.D1)),
+        )
 
         self.cam0     = None   # primary (tracking + display)
         self.cam1     = None   # stereo second view
@@ -690,6 +699,7 @@ class TrackerClass:
             if isinstance(result, StereoCapture):
                 self.capture = result
                 self.cam0, self.cam1 = result.cam0, result.cam1
+                self.body_search.reset()
                 # A change that arrived while they were coming up.
                 if (result.exposure_us, result.gain) != (self._exposure_us, self._gain):
                     result.set_exposure(self._exposure_us, self._gain)
@@ -901,7 +911,7 @@ class TrackerClass:
     def _apply_setting(self, key: str, value: str) -> None:
         """One live setting (docs/PROTOCOL.md, CONFIG). ValueError if refused.
 
-        Keys: solver (joint|ransac), refine (crop|contour|subpix|none),
+        Keys: solver (joint|ransac), refine (crop|contour|subpix|multistage|none),
         camera (both|cam0|cam1), deadband (px; 0 = stabilizer off),
         trunk (on|off), trunk_method (icp|msam_r18|msam_v3rot),
         trunk_reference (neutral|model),
@@ -913,11 +923,12 @@ class TrackerClass:
         """
         if key == "solver" and value in RigidBody.POSE_SOLVERS:
             self.solver = value
-        elif key == "refine" and value in ("crop", "contour", "subpix", "none"):
+        elif key == "refine" and value in ("crop", "contour", "subpix", "multistage", "none"):
             if value == "crop" and not _CROP_REFINE:
                 raise ValueError("rapidtag build has no crop refine")
             self.refine_mode = value
             _set_detector_refine(value)
+            self.body_search.reset()
         elif key == "camera" and value in _CAMERA_CHOICES:
             self.camera_choice = value
             self.stereo_refine = value == "both"
@@ -1333,13 +1344,25 @@ class TrackerClass:
         # batch API applies flat (frame x scale) parallelism across cores when
         # given every camera's frame at once — faster than a detector call per
         # camera (see rcam/bench_rapidtag.py).
-        (corners0, ids0), (corners1, ids1) = rapidtag.detect_markers_batch(
-            [raw0, raw1], _APRILTAG_DICT, _DETECTOR_PARAMS
-        )
-        ids0 = np.array(ids0, dtype=int).reshape(-1, 1) if ids0 else None
-        ids1 = np.array(ids1, dtype=int).reshape(-1, 1) if ids1 else None
+        multistage = self.refine_mode == "multistage"
+        if multistage:
+            # A take's tags may be the ones that moved, and a mirrored frame is not
+            # what the calibration projects into: both search the whole frame.
+            searched = self.body_search.find(
+                (raw0, raw1), full=self._body_take.capturing or self.flip_frames
+            )
+        else:
+            (corners0, ids0), (corners1, ids1) = rapidtag.detect_markers_batch(
+                [raw0, raw1], _APRILTAG_DICT, _DETECTOR_PARAMS
+            )
         t2 = time.perf_counter()
         self._stage_time["detect"] += t2 - t1
+
+        if multistage:
+            body_found = self.body_search.refine(searched)
+            (corners0, ids0), (corners1, ids1) = body_found
+        ids0 = np.array(ids0, dtype=int).reshape(-1, 1) if len(ids0) else None
+        ids1 = np.array(ids1, dtype=int).reshape(-1, 1) if len(ids1) else None
 
         if self.refine_mode == "subpix":
             if ids0 is not None:
@@ -1381,6 +1404,13 @@ class TrackerClass:
             )
             have_pose = bool(ids)
         self._stage_time["pose"] += time.perf_counter() - t3
+
+        if multistage:
+            if self.rig is not None and have_pose:
+                self.body_search.follow(body_found, self.rig, board_rvec, board_tvec,
+                                        (self.R_st, self.T_st))
+            else:
+                self.body_search.follow(body_found)
 
         if have_pose:
             if self.rig is not None:
@@ -1497,6 +1527,8 @@ class TrackerClass:
                           f"detect: {stage_ms['detect']:.2f}  "
                           f"refine: {stage_ms['refine']:.2f}  "
                           f"pose: {stage_ms['pose']:.2f}")
+                    if self.refine_mode == "multistage":
+                        print(f"[SEARCH] {self.body_search.report()}")
                     self._frame_count = 0
                     self._send_count  = 0
                     self.capture.reset_counters()
