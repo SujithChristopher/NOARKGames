@@ -7,15 +7,17 @@ with. The solve takes minutes, so it runs as its own process (body_solve.py) and
 link keeps answering. Nothing replaces rigidbody.toml until the app says save, and
 what it replaced can be put back.
 
-One tag is fixed: `[tip] tag` in device.toml. The tracked point is measured from it,
-so it is what keeps that point valid while everything else moves. It is also the frame
-the geometry is solved in, so "moved" below always means relative to that tag.
+One tag is fixed: `[tip] tag` in device.toml, tag 1 unless the app has picked another
+(`tip`, below). The tracked point is measured from it, so it is what keeps that point
+valid while everything else moves. It is also the frame the geometry is solved in, so
+"moved" below always means relative to that tag.
 
     idle -> capturing -> solving -> review -> idle
                                  -> failed
 """
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -30,7 +32,7 @@ import numpy as np
 import toml
 
 import protocol
-from rigid_body import CornerCollector, RigidBody, load_device
+from rigid_body import CornerCollector, RigidBody, load_device, record_tip, retip
 
 IDLE, CAPTURING, SOLVING, REVIEW, FAILED = "idle", "capturing", "solving", "review", "failed"
 
@@ -46,6 +48,10 @@ SOLVE_TIMEOUT_S = 600.0
 JOINED_PAIRS = 60
 # A false detection turns up for a frame or two: not worth a row in the list.
 SEEN_TO_LIST = 5
+# tag36h11 has ids 0 to 586.
+TAG_ID_MAX = 586
+# The device is about 30 cm long, so past this it is a typing mistake.
+TIP_MAX_M = 1.0
 
 _SOLVER = Path(__file__).with_name("body_solve.py")
 
@@ -68,6 +74,7 @@ class BodyTake:
         self._python = python
         device = load_device(self.device_path)
         self.anchor = device["tip_tag"] if device["tip_tag"] is not None else (device["reference_id"] or 1)
+        self.tip = device["tip"]
 
         self.state = IDLE
         self.reason = ""
@@ -91,6 +98,8 @@ class BodyTake:
     def command(self, text: str, now: Optional[float] = None) -> tuple[bool, str]:
         """One BODY command -> (ok, detail) for its ACK."""
         now = time.time() if now is None else now
+        if text.startswith("tip "):
+            return self._set_tip(text.split()[1:])
         actions = {"status": self._ask_status, "start": self._start, "finish": self._finish,
                    "cancel": self._cancel, "save": self._save, "restore": self._restore}
         if text not in actions:
@@ -167,10 +176,55 @@ class BodyTake:
             return False, "nothing to restore"
         try:
             os.replace(backups[-1], self.rig_path)
+            self._keep_tip()
         except OSError as exc:
             return False, f"could not restore: {exc}"
         self._new_rig()
         return True, "restored"
+
+    def _set_tip(self, words: list) -> tuple[bool, str]:
+        """`tip <tag> <x> <y> <z>`, metres in that tag's frame. The tip is no part of the
+        solve, so the calibration in use takes it at once. A tag it does not have (one just
+        put on, say) still becomes the fixed tag, and the tracked point changes with the
+        first take that includes it. Not during a take or with a result waiting: those
+        were made against the fixed tag they started with."""
+        if self.state not in (IDLE, FAILED):
+            return False, f"not while {self.state}"
+        try:
+            tag, *offset = int(words[0]), *map(float, words[1:])
+        except (ValueError, IndexError):
+            return False, "tip needs a tag and x y z in metres"
+        if len(offset) != 3 or not all(map(math.isfinite, offset)):
+            return False, "tip needs a tag and x y z in metres"
+        if not 0 <= tag <= TAG_ID_MAX:
+            return False, f"tag ids go from 0 to {TAG_ID_MAX}"
+        if max(map(abs, offset)) > TIP_MAX_M:
+            return False, f"an offset of over {TIP_MAX_M * 1000:.0f} mm cannot be on the device"
+        body = RigidBody.load(self.rig_path)
+        in_body = body is not None and tag in body.transforms
+        try:
+            record_tip(self.device_path, offset, tag)
+            if in_body:
+                retip(self.rig_path, offset, tag)
+        except (OSError, ValueError, KeyError) as exc:
+            return False, f"could not save: {exc}"
+        self.anchor = tag
+        self.tip = np.asarray(offset, dtype=np.float64)
+        if in_body:
+            self._new_rig()
+            return True, "tip set"
+        self._changed = True
+        return True, "tip waits"
+
+    def _keep_tip(self) -> None:
+        """A calibration put back carries the tip of its day. device.toml says where the
+        tip is now."""
+        body = RigidBody.load(self.rig_path)
+        if body is None or self.anchor not in body.transforms:
+            return
+        R, t = body.transforms[self.anchor]
+        if not np.allclose(R @ self.tip + t, body.tip_ref, atol=1e-6):
+            retip(self.rig_path, self.tip, self.anchor)
 
     def _new_rig(self) -> None:
         self._current = self._read_current()
@@ -241,7 +295,7 @@ class BodyTake:
         return joined
 
     def _status(self, now: float) -> dict:
-        status = {"state": self.state, "anchor": self.anchor, "current": self._current}
+        status = {"state": self.state, "anchor": self.anchor, "tip_m": self.tip.tolist(), "current": self._current}
         if self.state == CAPTURING:
             joined = self._joined()
             listed = {self.anchor, *self._current["tags"]}

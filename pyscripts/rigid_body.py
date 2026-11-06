@@ -16,6 +16,7 @@ Lives in its own module so `tracker.py` (which consumes a calibration) and
 other.
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -101,6 +102,115 @@ def load_device(path: Path) -> dict:
         "tip_tag": tip.get("tag"),
         "tip": np.asarray(tip.get("offset_m", [0.0, 0.0, 0.0]), dtype=np.float64),
     }
+
+
+def tip_offsets(transforms, tip_ref) -> dict:
+    """The tip in each tag's own frame — a drop-in MARKER_OFFSETS table.
+
+    The tip is known in the reference tag's frame; a point there maps into tag
+    i's frame by inverting that tag's transform, so one measured number spreads
+    to every tag through the solved geometry.
+    """
+    tip_ref = np.asarray(tip_ref, dtype=np.float64).reshape(3)
+    return {
+        mid: item["R"].T @ (tip_ref - item["t"]) for mid, item in transforms.items()
+    }
+
+
+def tip_in_reference(transforms, tip_tag: int, tip) -> np.ndarray:
+    """Carry a tip measured in one tag's frame into the reference frame.
+
+    The tracked point is a physical spot on the device — where the patient's
+    hand sits — so it is measured against whichever tag is convenient. Keeping
+    that tag explicit means the measurement survives re-solving against a
+    different reference, instead of silently becoming a number in the wrong
+    frame.
+    """
+    if tip_tag not in transforms:
+        raise SystemExit(
+            f"[CALIB] Tip is measured against tag {tip_tag}, which this "
+            f"calibration does not contain (it has {sorted(transforms)})."
+        )
+    item = transforms[tip_tag]
+    return item["R"] @ np.asarray(tip, dtype=np.float64).reshape(3) + item["t"]
+
+
+def record_tip(path: Path, tip, tip_tag: Optional[int]) -> None:
+    """Write the measured tip back into the hand-authored device file.
+
+    Edited as text rather than re-dumped, so the comments explaining what the
+    numbers mean — which are most of that file's value — survive.
+    """
+    lines = path.read_text().splitlines()
+    in_tip = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_tip = stripped == "[tip]"
+            continue
+        if not in_tip:
+            continue
+        if stripped.startswith("offset_m"):
+            lines[index] = (
+                "offset_m = ["
+                + ", ".join(f"{float(v):.6f}" for v in tip)   # always a float: toml refuses a mixed array
+                + "]"
+            )
+        elif stripped.startswith("tag ") or stripped.startswith("tag="):
+            if tip_tag is not None:
+                lines[index] = f"tag = {int(tip_tag)}"
+    text = "\n".join(lines) + "\n"
+    written = toml.loads(text).get("tip", {})
+    if not np.allclose(written.get("offset_m", []), tip) or (tip_tag is not None and written.get("tag") != tip_tag):
+        raise ValueError(f"{path} has no one-line [tip] tag and offset_m to edit")
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
+    print(f"[CALIB] Recorded the tip in {path}")
+
+
+def retip(path: Path, tip, tip_tag: Optional[int]) -> None:
+    """Point an existing calibration at a different tip, in place.
+
+    The tip never enters the solve — it only converts the solved geometry into
+    the per-tag offsets the tracker consumes — so moving it is arithmetic on a
+    finished calibration rather than a reason to recapture.
+    """
+    data = toml.load(path)
+    transforms = {
+        int(mid): {
+            "R": np.asarray(item["rotation_marker_to_reference"], dtype=np.float64),
+            "t": np.asarray(item["translation_marker_to_reference_m"], dtype=np.float64),
+        }
+        for mid, item in data["markers"].items()
+    }
+    reference_id = int(data["meta"]["reference_id"])
+    if tip_tag is None:
+        tip_tag = reference_id
+    tip_ref = tip_in_reference(transforms, tip_tag, tip)
+    if tip_tag != reference_id:
+        print(
+            f"[CALIB] Tip measured in tag {tip_tag}'s frame "
+            f"({np.round(1000 * np.asarray(tip), 1)} mm) -> tag {reference_id}'s "
+            f"frame ({np.round(1000 * tip_ref, 1)} mm)"
+        )
+    data["meta"]["tip_in_reference_m"] = list(map(float, tip_ref))
+    data["meta"]["tip_measured_in_tag"] = int(tip_tag)
+    data["meta"]["tip_measured_m"] = list(map(float, np.asarray(tip, dtype=float)))
+    data["offsets"] = {
+        str(mid): offset.tolist()
+        for mid, offset in tip_offsets(transforms, tip_ref).items()
+    }
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        toml.dump(data, stream)
+    os.replace(temporary, path)
+    print(
+        f"[CALIB] Tip set to {np.round(1000 * tip_ref, 1)} mm in tag "
+        f"{data['meta']['reference_id']}'s frame"
+    )
+    for mid, offset in sorted(data["offsets"].items(), key=lambda kv: int(kv[0])):
+        print(f"  tag {int(mid):2d}: {np.round(1000 * np.asarray(offset), 1)} mm")
 
 
 def load_cameras(path: Path, order=("cam0", "cam1")) -> tuple[dict, tuple]:

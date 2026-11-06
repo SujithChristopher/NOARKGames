@@ -43,7 +43,6 @@ var aim_deg := 0.0            # set by the game every frame
 var aim_live := true          # the aim is the hand's now (false: handle not seen, nothing locks)
 var show_aim := true
 var level := 1
-var hold := -1.0              # calibration: a pose being held, 0..1 (ring round the cannon); <0 none
 var arrow := 0                # calibration: the way to turn, -1 left, 1 right, 0 none
 
 var _meteors: Array = []
@@ -428,10 +427,6 @@ func _draw_meteor(m: Dictionary) -> void:
 
 
 func _draw_calibration() -> void:
-	if hold >= 0.0:
-		draw_arc(PIVOT, 84.0, 0.0, TAU, 48, Color(GOLD, 0.2), 10.0)
-		if hold > 0.0:
-			draw_arc(PIVOT, 84.0, -PI / 2.0, -PI / 2.0 + TAU * hold, 48, GOLD, 10.0)
 	if arrow != 0:
 		# A curved arrow over the cannon, the way to turn.
 		var r := 330.0

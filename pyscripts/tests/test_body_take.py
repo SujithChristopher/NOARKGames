@@ -404,6 +404,83 @@ def test_a_solve_can_be_cancelled_or_fail():
     print("  a solve: cancelled, dead or stuck, each reported")
 
 
+def test_the_tracked_point_can_be_measured_from_another_tag():
+    bench = Bench()
+    try:
+        status = bench.status()
+        assert status["anchor"] == 1 and np.allclose(status["tip_m"], TIP), "tag 1 and the offset by default"
+
+        # Tag 3's frame: the point moves to where these numbers say, at once.
+        assert bench.command("tip 3 0.01 0.02 -0.03") == (True, "tip set")
+        assert bench.changes == 1, "the tracker should be told to use it"
+        R, t = BODY[3]
+        body = RigidBody.load(bench.rig)
+        assert np.allclose(body.tip_ref, R @ [0.01, 0.02, -0.03] + t), body.tip_ref
+        assert body.reference_id == 1 and list(body.marker_ids) == [1, 2, 3, 4, 5], "only the tip changes"
+        device = bench.device.read_text()
+        assert toml.loads(device)["tip"] == {"tag": 3, "offset_m": [0.01, 0.02, -0.03]}, device
+        assert "Only comment that must survive." in device
+        status = bench.status()
+        assert status["anchor"] == 3 and status["tip_m"] == [0.01, 0.02, -0.03], status
+
+        # And a new tracker reads the same.
+        assert BodyTake(bench.rig, bench.device, STEREO, takes_dir=bench.dir / "takes").anchor == 3
+
+        # What cannot be: refused, nothing written.
+        rig, device = bench.rig.read_text(), bench.device.read_text()
+        for bad in ("tip", "tip 3", "tip 3 0 0", "tip x 0 0 0", "tip 3 a 0 0", "tip 3 nan 0 0", "tip 3 0 0 0 0",
+                    "tip 999 0 0 0", "tip -1 0 0 0", "tip 3 2 0 0"):
+            assert not bench.command(bad)[0], bad
+        assert bench.rig.read_text() == rig and bench.device.read_text() == device
+
+        # A tag the calibration lacks is the fixed tag from now on; tracking waits for a take.
+        assert bench.command("tip 9 0 0 -0.05") == (True, "tip waits")
+        assert bench.changes == 1 and bench.rig.read_text() == rig, "the point in use stays until a take has the tag"
+        status = bench.status()
+        assert status["anchor"] == 9 and status["tip_m"] == [0.0, 0.0, -0.05], status
+        assert bench.command("tip 3 0.01 0.02 -0.03")[0]
+
+        # A take is against the fixed tag it started with.
+        assert bench.command("start")[0]
+        assert not bench.command("tip 1 0 0 0")[0], "not during a take"
+        assert toml.loads(bench.device.read_text())["tip"]["tag"] == 3
+        bench.command("cancel")
+    finally:
+        bench.done()
+    print("  the tracked point: another tag and offset, at once or with the next take")
+
+
+def test_a_take_is_solved_against_the_tag_picked_and_keeps_the_point():
+    bench = Bench(take_s=1000)
+    try:
+        assert bench.command("tip 3 0.01 0.02 -0.03")[0]
+        R, t = BODY[3]
+        point_from_1 = R @ [0.01, 0.02, -0.03] + t
+        bench.command("start")
+        bench.feed(frames(BODY))
+        bench.command("finish")
+        status = bench.solved()
+        assert status["state"] == "review" and status["result"]["ok"], status
+        assert all(row["state"] == "same" for row in status["result"]["tags"]), "compared relative to tag 3"
+        assert not bench.command("tip 1 0 0 0")[0], "not with a result waiting"
+        assert bench.command("save")[0]
+        body = RigidBody.load(bench.rig)
+        assert body.reference_id == 3
+        assert np.allclose(body.tip_ref, [0.01, 0.02, -0.03]), body.tip_ref
+        R1, t1 = body.transforms[1]
+        error_mm = 1000 * np.linalg.norm(R1 @ point_from_1 + t1 - body.tip_ref)
+        assert error_mm < 2.0, f"the point is {error_mm:.2f} mm from where it was"
+
+        # Putting back the older calibration keeps the point that was entered, not its own.
+        assert bench.command("restore")[0]
+        body = RigidBody.load(bench.rig)
+        assert body.reference_id == 1 and np.allclose(body.tip_ref, point_from_1), body.tip_ref
+        assert bench.changes == 3   # tip, save, restore
+    finally:
+        bench.done()
+    print("  a take against another tag: same places, same point, and restore keeps it")
+
+
 def test_the_tracker_takes_a_new_body_at_once():
     import tracker
     from corner_stabilizer import CornerStabilizer
@@ -426,6 +503,8 @@ if __name__ == '__main__':
     test_while_capturing_it_says_what_the_take_still_needs()
     test_a_take_without_tag_1_needs_no_solve()
     test_a_solve_can_be_cancelled_or_fail()
+    test_the_tracked_point_can_be_measured_from_another_tag()
+    test_a_take_is_solved_against_the_tag_picked_and_keeps_the_point()
     test_a_changed_body_is_measured_saved_and_can_be_put_back()
     test_a_tag_fixed_in_the_room_is_left_out()
     test_a_device_that_hardly_turned_is_refused()

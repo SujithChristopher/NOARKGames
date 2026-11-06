@@ -32,7 +32,8 @@ reference_id = 1
 #
 # Keeping the tag explicit means the measurement stays valid if the body is
 # ever re-solved against a different reference_id. The app's Settings > Calibration keeps
-# this tag fixed and these numbers as they are: move every other tag, not this one.
+# this tag fixed while the others are measured (move every other tag, not this one), and
+# is where to pick another tag or enter new numbers.
 #
 # All zeros means "the centre of `tag`" — a real, usable point, and what the
 # tracker reports until the hand position has actually been measured. Replace
@@ -63,8 +64,9 @@ offset_m = [0.00, 0.01, -0.069]
 # 2.7 mm, measured offline on a session recording (stereo noise 26 mm against
 # 0.6-0.7 mm per camera alone).
 # On 2026-10-29 it had flipped again: (cam0, cam1) 5.4 mm, the reverse 145.5 mm.
-stream0 = "cam0"
-stream1 = "cam1"
+# On 2026-11-05 it had flipped again: (cam0, cam1) 146.2 mm, the reverse 7.4 mm (stereo noise 72.7 mm against 2 mm per camera alone).
+stream0 = "cam1"
+stream1 = "cam0"
 
 # Exposure and gain for both cameras.
 #

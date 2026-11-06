@@ -5,7 +5,8 @@ extends VBoxContainer
 ## back. All of it runs in the tracker (BODY, BODY_STATUS, docs/PROTOCOL.md; body_take.py).
 ##
 ## One tag stays fixed: the hand position is measured from it, so it keeps that position
-## valid while everything else moves. The tracker says which.
+## valid while everything else moves. The tracker says which, and where from it the hand
+## position is; the Tracked point card changes both (BODY `tip`).
 ##
 ## While a take can start or is running it keeps the cameras on and, over UDP, shows them
 ## with the tags outlined. Over BLE the picture needs the hotspot the Camera tab joins, so
@@ -23,6 +24,9 @@ const WARN := Style.WARN
 const MUTED := Style.MUTED
 const ROW_COLUMNS := 3
 const ROWS_MAX_HEIGHT := 270   # about 9 tags; past that the list scrolls, and the picture keeps its room
+const TIP_FIELD_WIDTH := 84
+const TAG_ID_MAX := 586        # tag36h11; the tracker refuses past these as well (body_take.py)
+const TIP_MAX_MM := 1000.0
 
 var _active := false
 var _hold: Node             # in the tree while this tab keeps the cameras on
@@ -41,6 +45,13 @@ var _finish: Button
 var _cancel: Button
 var _save: Button
 var _restore: Button
+var _tip_card: Control
+var _tip_tag: LineEdit
+var _tip_tag_pick: MenuButton
+var _tip_fields: Array[LineEdit] = []   # x, y, z in mm
+var _tip_apply: Button
+var _tip_help: Label
+var _tip_shown := PackedStringArray()   # what the tracker last said, as the fields would show it
 
 
 func _ready() -> void:
@@ -67,6 +78,9 @@ func _ready() -> void:
 	_cancel = _button(_actions, "cancel")
 	_restore = _button(_actions, "restore")
 	_restore.text = "Put the previous one back"
+
+	_tip_card = _tip_section()
+	add_child(_tip_card)
 
 	_picture = TextureRect.new()
 	_picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -106,6 +120,118 @@ func _button(parent: Container, command: String, variation: String = "") -> Butt
 	return button
 
 
+# Which tag the hand position is measured from, and how far from it. Never rebuilt, since
+# someone may be typing in it when a status arrives.
+func _tip_section() -> Control:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	col.add_child(Style.label("Tracked point: where the hand holds the device"))
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 8)
+	col.add_child(line)
+	line.add_child(Style.label("From tag"))
+	_tip_tag = _tip_field(line, LineEdit.KEYBOARD_TYPE_NUMBER)
+	_tip_tag_pick = MenuButton.new()
+	_tip_tag_pick.text = "Pick"
+	_tip_tag_pick.flat = false
+	_tip_tag_pick.focus_mode = Control.FOCUS_NONE
+	_tip_tag_pick.about_to_popup.connect(_fill_tag_pick)
+	_tip_tag_pick.get_popup().id_pressed.connect(func(id: int):
+		_tip_tag.text = str(id)
+		_update_tip_apply())
+	line.add_child(_tip_tag_pick)
+	for axis in ["X", "Y", "Z"]:
+		var name_label := Style.label(axis)
+		name_label.custom_minimum_size.x = 24
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		line.add_child(name_label)
+		_tip_fields.append(_tip_field(line, LineEdit.KEYBOARD_TYPE_NUMBER_DECIMAL))
+	line.add_child(Style.label("mm"))
+	_tip_apply = Button.new()
+	_tip_apply.text = "Apply"
+	_tip_apply.theme_type_variation = "PrimaryButton"
+	_tip_apply.focus_mode = Control.FOCUS_NONE
+	_tip_apply.pressed.connect(_apply_tip)
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.add_child(gap)
+	line.add_child(_tip_apply)
+	_tip_help = Style.wrapped("", "Helper")
+	col.add_child(_tip_help)
+	return Style.card(col)
+
+
+func _tip_field(parent: Container, keyboard: int) -> LineEdit:
+	var field := LineEdit.new()
+	field.custom_minimum_size.x = TIP_FIELD_WIDTH
+	field.virtual_keyboard_type = keyboard
+	field.text_changed.connect(func(_text: String): _update_tip_apply())
+	parent.add_child(field)
+	return field
+
+
+func _fill_tag_pick() -> void:
+	var popup := _tip_tag_pick.get_popup()
+	popup.clear()
+	for id in _info.get("current", {}).get("tags", []):
+		popup.add_item("Tag %d" % int(id), int(id))
+
+
+func _tip_texts() -> PackedStringArray:
+	var texts := PackedStringArray([_tip_tag.text.strip_edges()])
+	for field in _tip_fields:
+		texts.append(field.text.strip_edges())
+	return texts
+
+
+func _tip_valid() -> bool:
+	var texts := _tip_texts()
+	if not texts[0].is_valid_int() or not int(texts[0]) in range(0, TAG_ID_MAX + 1):
+		return false
+	for i in range(1, texts.size()):
+		if not texts[i].is_valid_float() or absf(float(texts[i])) > TIP_MAX_MM:
+			return false
+	return true
+
+
+func _update_tip_apply() -> void:
+	_tip_apply.disabled = _tip_texts() == _tip_shown or not _tip_valid()
+
+
+func _apply_tip() -> void:
+	var texts := _tip_texts()
+	_note = ""
+	GlobalScript.send_body_command("tip %d %.6f %.6f %.6f" % [int(texts[0]),
+		float(texts[1]) / 1000.0, float(texts[2]) / 1000.0, float(texts[3]) / 1000.0])
+
+
+# The fields follow the tracker only when what it says changes, so a status cannot wipe
+# out something half typed.
+func _sync_tip() -> void:
+	var tip = _info.get("tip_m")
+	if tip == null:
+		return
+	var said := PackedStringArray([str(_anchor())])
+	for value in tip:
+		said.append(String.num(float(value) * 1000.0, 2))
+	if said == _tip_shown:
+		return
+	_tip_shown = said
+	_tip_tag.text = said[0]
+	for i in _tip_fields.size():
+		_tip_fields[i].text = said[i + 1]
+
+
+func _show_tip(connected: bool) -> void:
+	_tip_card.visible = connected and _info.has("tip_m") and _state_name() in ["idle", "failed"]
+	var tags: Array = _info.get("current", {}).get("tags", [])
+	_tip_tag_pick.disabled = tags.is_empty()
+	_tip_help.text = "Measured in the tag's own frame: X right along its top edge, Y up along its left edge, Z out of the printed face (so usually negative)."
+	if not tags.is_empty() and not float(_anchor()) in tags.map(func(id): return float(id)):
+		_tip_help.text += " Tag %d is not in the measurement in use, so tracking keeps the old point until a take includes it." % _anchor()
+	_update_tip_apply()
+
+
 func _exit_tree() -> void:
 	if _active:
 		set_active(false)
@@ -120,6 +246,7 @@ func set_active(on: bool) -> void:
 	if on:
 		_info = {}
 		_note = ""
+		_tip_shown = PackedStringArray()
 		GlobalScript.send_body_command("status")
 	elif _state_name() == "capturing":
 		GlobalScript.send_body_command("cancel")
@@ -156,6 +283,7 @@ func _on_status(info: Dictionary) -> void:
 	if not _active:
 		return
 	_info = info
+	_sync_tip()
 	_update_cameras()
 	_show()
 
@@ -195,6 +323,10 @@ func _on_command_done(kind: int, ok: bool, detail: String) -> void:
 		_note = "Saved. The tracker is using the new measurement."
 	elif detail == "restored":
 		_note = "The previous measurement is back in use."
+	elif detail == "tip set":
+		_note = "Saved. The tracker is using the new tracked point."
+	elif detail == "tip waits":
+		_note = "Saved. The tracked point changes with the first take that includes this tag, and that tag then stays fixed."
 	_show()
 
 
@@ -240,6 +372,7 @@ func _show(connected: bool = GlobalScript.link.connected) -> void:
 	_actions.visible = [_start, _finish, _cancel, _save, _restore].any(func(b: Button): return b.visible)
 	# As tall as its rows, so the picture takes the rest. A scroll has no height of its own.
 	_rows_card.visible = _rows.get_child_count() > 0
+	_show_tip(connected)
 	_rows_scroll.custom_minimum_size.y = minf(_rows.get_combined_minimum_size().y, ROWS_MAX_HEIGHT)
 
 

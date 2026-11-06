@@ -89,7 +89,7 @@ again and is not applied twice.
 | `0x06` | `TRUNK` | `neutral` (model frame: set zero) \| `zero_clear` \| `snapshot` \| `select=<n>` | the command, or why refused |
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
 | `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
-| `0x0A` | `BODY` | `status` \| `start` \| `finish` \| `cancel` \| `save` \| `restore` | below, or why refused |
+| `0x0A` | `BODY` | `status` \| `start` \| `finish` \| `cancel` \| `save` \| `restore` \| `tip <tag> <x> <y> <z>` | below, or why refused |
 
 STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
 board's camera recordings: `<patient>/<session>/Video/rec_*` and
@@ -215,10 +215,11 @@ the normal Wi-Fi, 5.3 ms, no loss at 40 kB five times a second. Without the hots
 | `finish` | during a take; it also ends by itself | `solving`, or `failed` if the fixed tag was never seen |
 | `cancel` | any time | `cancelled`: ends a take or a solve, drops a result |
 | `save` | a result with `ok` | `saved`: the tracker uses it from the next frame, with no restart |
-| `restore` | idle or failed | `restored`: the newest calibration replaced goes back in use |
+| `restore` | idle or failed | `restored`: the newest calibration replaced goes back in use, with the tracked point as `[tip]` says now if it has that tag |
+| `tip <tag> <x> <y> <z>` | idle or failed | The tracked point, metres in that tag's frame; the tag becomes the fixed tag. Saved in `[tip]`. `tip set`: in use from the next frame. `tip waits`: the calibration in use lacks that tag, so the tracked point changes with the first take that includes it |
 
 `BODY_STATUS` always has `state` (`idle`, `capturing`, `solving`, `review`, `failed`),
-`anchor` (the fixed tag: `[tip] tag` in device.toml) and
+`anchor` (the fixed tag: `[tip] tag` in device.toml), `tip_m` (`[tip] offset_m`) and
 `current` (`{"tags", "created", "agreement_mm", "can_restore"}`: what is in use). Then:
 
 - `capturing`: `capture`, `{"left": s or null before the first frame, "frames", "level", "tag_px",
