@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import msgpack
+import msgpack_numpy as mpn
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -53,7 +54,8 @@ class Rig:
         self.exp = Experiments(
             root / "experiments",
             lambda: {"solver": "joint"},
-            lambda out, meta, fps=0: FrameRecorder(out, metadata=meta, target_hz=fps, chunk_frames=10),
+            lambda out, meta, fps=0, scale=1.0: FrameRecorder(
+                out, metadata=meta, target_hz=fps, chunk_frames=10, scale=scale),
             lambda: 2 * FRAME.size,
             lambda: [self.rigid, root / "not_there.toml"],
             lambda: (self.phase, self.nudges),
@@ -362,6 +364,52 @@ def test_continuous_record(rig: Rig) -> None:
     print("  continuous raw        both feeds only, until stop or a full disk, at its rate")
 
 
+def test_play_record(rig: Rig) -> None:
+    """A game played as an experiment: tracking goes on, each pair saved has its pose row,
+    at the run's rate and image size."""
+    assert not rig.exp.command("start grid 30 g1 grid 25")[0], "a grid keeps every frame"
+    assert not rig.exp.command("start reach_play 1000 p0 play 25 0")[0], "no size"
+    assert not rig.exp.command("start reach_play 1000 p0 play 25 1.5")[0], "no bigger than the sensor"
+    assert not rig.exp.command("start reach_play 1000 p0 game")[0], "an unknown kind"
+
+    ok, path = rig.exp.command("start reach_play 1000 p1 play 25 0.5")
+    assert ok, path
+    run = Path(path)
+    assert not rig.exp.images_only, "the game needs the hand: tracking goes on"
+    assert not rig.exp.command("capture 1 1 1 0 0 30 5")[0], "a play run does not capture points"
+    assert rig.exp.command("meta table_frame " + json.dumps(TABLE))[0]
+    for _ in range(4):                              # before record: nothing saved
+        rig.tick(rig.still())
+    assert rig.exp.command("record")[0]
+    for i in range(40):                             # 100 Hz in, 25 Hz kept: 10 pairs
+        rig.tick(None if i == 4 else rig.still())
+    status = json.loads(rig.exp.poll(rig.now + 1)[1:])
+    assert status["capture"]["frames"] == 10, status
+    assert rig.exp.command("stop complete")[0]
+
+    meta = json.loads((run / "metadata.json").read_text())
+    assert meta["kind"] == "play" and not meta["raw"], meta
+    assert meta["recording_fps"] == 25.0 and meta["recording_scale"] == 0.5, meta
+    assert meta["columns"] == {"poses.csv": POSE_COLUMNS}, meta["columns"]
+    cap = meta["capture"]
+    assert cap["frames"] == 10 and cap["frames_ok"] == 9 and cap["frames_failed"] == 1, cap
+    assert not (run / "targets.csv").exists(), "the game keeps its own targets"
+    poses = rows(run / "poses.csv")
+    assert len(poses) == 10 and [int(r["frame"]) for r in poses] == list(range(10)), poses
+    assert sum(r["pose_ok"] == "1" for r in poses) == 9
+    ok_row = next(r for r in poses if r["pose_ok"] == "1")
+    assert abs(float(ok_row["table_x_mm"]) - 100.0) < 1e-6, ok_row
+    stamps, shapes = [], set()
+    for f in sorted((run / "recording").glob("cam0_timestamp*.msgpack")):
+        stamps += [r[3] for r in unpack(f)]
+    for f in sorted((run / "recording").glob("cam0_frame*.msgpack")):
+        with open(f, "rb") as fh:
+            shapes |= {x.shape for x in msgpack.Unpacker(fh, raw=False, object_hook=mpn.decode)}
+    assert [int(r["sensor_ns0"]) for r in poses] == stamps, "one pose row per pair of images"
+    assert shapes == {(4, 8)}, f"half the width and height: {shapes}"
+    print("  play                  tracking on, a pose per pair saved, at its rate and size")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         rig = Rig(Path(tmp))
@@ -373,6 +421,7 @@ def main() -> None:
         test_status_repeats(rig)
         test_watching_the_trigger(rig)
         test_continuous_record(rig)
+        test_play_record(rig)
     print("OK")
 
 

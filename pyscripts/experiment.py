@@ -23,13 +23,16 @@ are all CLOCK_MONOTONIC, so a pulse is placed against a frame or a capture by co
     idle -> ready <-> capturing
               `-> idle (stop, a link lost, a new HELLO)
 
-Two kinds of run. A run of held points (static grid): each `capture` saves frames until
+Three kinds of run. A run of held points (static grid): each `capture` saves frames until
 enough have a pose, judged still or moved. A raw run (`start ... raw`, continuous raw
 capture): `record` saves the two camera feeds at the run's rate until `stop`, and nothing of
 the tracker's: no tag detection or pose is worked out while it runs (`images_only`), and
 there is no poses.csv or targets.csv; metadata.json's `capture` sums it up. Its folder is
 metadata.json, recording/ and calibration/. No time limit: only `stop` ends it, or the disk
-getting down to MIN_FREE_BYTES, which would otherwise end the tracker too.
+getting down to MIN_FREE_BYTES, which would otherwise end the tracker too. A play run
+(`start ... play`, a game played as an experiment): `record` as for a raw run, at the run's
+rate and image size, but tracking goes on (the game needs the hand) and every pair saved has
+its row in poses.csv (target 1, no row or column); no targets.csv, the game keeps its own.
 
 The mocap trigger is shown on every experiment screen: `watch on` opens the sync line on its
 own while no run holds it (a run's recorder has it then), and every EXPERIMENT_STATUS
@@ -53,6 +56,7 @@ import numpy as np
 import protocol
 
 IDLE, READY, CAPTURING = "idle", "ready", "capturing"
+GRID, RAW, PLAY = "grid", "raw", "play"   # the kinds of run (`start`'s fifth word)
 
 FORMAT_VERSION = 1
 # Nothing but failed frames for this long: the device is out of view, stop filling the disk.
@@ -61,7 +65,7 @@ STATUS_EVERY_S = 0.25
 PHASE_EVERY_S = 1.0
 # The disk a run needs is worked out at start; a margin for the rest of its files.
 DISK_MARGIN = 1.2
-# A raw recording has no length: it ends itself when the disk is down to this (25 s of
+# A raw or play recording has no length: it ends itself when the disk is down to this (25 s of
 # every frame at 100 fps), checked once a second.
 MIN_FREE_BYTES = 5_000_000_000
 DISK_EVERY_S = 1.0
@@ -116,7 +120,7 @@ class Experiments:
         self._next_phase = 0.0
         self._nudges = 0
         self._state = IDLE
-        self._raw = False
+        self._kind = GRID                   # GRID, RAW or PLAY: what this run is
         self.min_free_bytes = MIN_FREE_BYTES
         self._next_disk = 0.0
         self._dir: Optional[Path] = None
@@ -140,7 +144,7 @@ class Experiments:
     @property
     def images_only(self) -> bool:
         """A raw run is going: the tracker saves the frames and works nothing out."""
-        return self._raw and self._state != IDLE
+        return self._kind == RAW and self._state != IDLE
 
     # ── Commands ──────────────────────────────────────────────────────────────
 
@@ -157,9 +161,10 @@ class Experiments:
             if parts[0] == "record":
                 return self._start_record()
             if parts[0] == "start":
-                raw = len(parts) > 4 and parts[4] == "raw"
-                fps = float(parts[5]) if raw and len(parts) > 5 else 0.0
-                return self._start(parts[1], int(parts[2]), parts[3], raw, fps)
+                kind = parts[4] if len(parts) > 4 else GRID
+                fps = float(parts[5]) if len(parts) > 5 else 0.0
+                scale = float(parts[6]) if len(parts) > 6 else 1.0
+                return self._start(parts[1], int(parts[2]), parts[3], kind, fps, scale)
             if parts[0] == "meta":
                 return self._set_meta(parts[1], json.loads(text.split(" ", 2)[2]))
             if parts[0] == "capture":
@@ -172,22 +177,32 @@ class Experiments:
             return False, str(e)
         return False, f"unknown: {parts[0]}"
 
-    def _start(self, name: str, frames_total: int, label: str, raw: bool = False,
-               fps: float = 0.0) -> tuple[bool, str]:
-        """`fps`: a raw run's recording rate, frames kept on sensor time as for a session
-        recording (settings.json recording_fps); 0 keeps every frame. A grid keeps every one."""
+    def _start(self, name: str, frames_total: int, label: str, kind: str = GRID,
+               fps: float = 0.0, scale: float = 1.0) -> tuple[bool, str]:
+        """`fps`: a raw or play run's recording rate, frames kept on sensor time as for a
+        session recording (settings.json recording_fps); 0 keeps every frame. `scale`: the
+        size its images are saved at (1 full, 0.5 half, 0.25 a quarter of the width and
+        height); the tracker always works on the full frame. A grid keeps every frame, full size."""
         if self._state != IDLE:
             return False, "a run is already going"
+        if kind not in (GRID, RAW, PLAY):
+            return False, f"unknown kind of run: {kind}"
+        if kind == GRID and (fps or scale != 1.0):
+            return False, "a grid keeps every frame at full size"
         if not fps >= 0:
             return False, "bad frame rate"
+        if not 0 < scale <= 1:
+            return False, "bad image size"
+        raw = kind == RAW
+        continuous = kind != GRID
         if not re.fullmatch(r"[a-z0-9_]+", name):
             return False, "bad experiment name"
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", label):
             return False, "bad run name"
         self.root.mkdir(parents=True, exist_ok=True)
-        need = frames_total * self._frame_bytes() * DISK_MARGIN
-        if raw:
-            need += self.min_free_bytes   # where a raw recording stops itself
+        need = frames_total * self._frame_bytes() * scale * scale * DISK_MARGIN
+        if continuous:
+            need += self.min_free_bytes   # where a continuous recording stops itself
         free = shutil.disk_usage(self.root).free
         if free < need:
             return False, f"needs {need / 1e9:.1f} GB, {free / 1e9:.1f} GB free"
@@ -215,24 +230,29 @@ class Experiments:
             "code_version": _commit(),
             "tracker": self._describe(),
             "raw": raw,
+            "kind": kind,
         }
-        if raw:
+        if continuous:
             self._meta["recording_fps"] = fps   # 0: every frame
+            self._meta["recording_scale"] = scale
         if not raw:
             self._meta["units"] = {
                 "tip, tvec": "metres, camera frame", "rvec": "Rodrigues, camera frame",
                 "table_*": "mm from the table centre, x right and y down as on screen"}
-            self._meta["columns"] = {"targets.csv": TARGET_COLUMNS, "poses.csv": POSE_COLUMNS}
+            self._meta["columns"] = {"poses.csv": POSE_COLUMNS}
+            if kind == GRID:
+                self._meta["columns"]["targets.csv"] = TARGET_COLUMNS
         self._write_meta()
         self._close_monitor()   # the run's recorder takes the line
         self._recorder = self._open_recorder(
-            self._dir / "recording", {"experiment": name, "run": self._dir.name}, fps)
-        self._raw = raw
+            self._dir / "recording", {"experiment": name, "run": self._dir.name}, fps, scale)
+        self._kind = kind
         self._poses_file = self._targets_file = None
         if not raw:
             self._poses_file = open(self._dir / "poses.csv", "w", newline="", buffering=1)
             self._poses = csv.writer(self._poses_file)
             self._poses.writerow(POSE_COLUMNS)
+        if kind == GRID:
             self._targets_file = open(self._dir / "targets.csv", "w", newline="", buffering=1)
             self._targets = csv.writer(self._targets_file)
             self._targets.writerow(TARGET_COLUMNS)
@@ -258,28 +278,28 @@ class Experiments:
     def _start_capture(self, args: list) -> tuple[bool, str]:
         if self._state != READY:
             return False, f"{self._state}, not ready"
-        if self._raw:
-            return False, "a raw run records, it does not capture points"
+        if self._kind != GRID:
+            return False, "a raw or play run records, it does not capture points"
         target, row, col = int(args[0]), int(args[1]), int(args[2])
         expected = (float(args[3]), float(args[4]))
         self._begin_capture(target, row, col, expected, int(args[5]), float(args[6]), None)
         return True, ""
 
     def _start_record(self) -> tuple[bool, str]:
-        """A continuous raw capture: the run's frames until stop (or a full disk)."""
+        """A continuous recording (raw or play): the run's frames until stop (or a full disk)."""
         if self._state != READY:
             return False, f"{self._state}, not ready"
-        if not self._raw:
-            return False, "only a raw run records"
-        self._begin_capture(1, "", "", None, 0, None, raw=True)
+        if self._kind == GRID:
+            return False, "only a raw or play run records"
+        self._begin_capture(1, "", "", None, 0, None, continuous=True)
         return True, ""
 
-    def _begin_capture(self, target, row, col, expected, frames, still_mm, raw=False) -> None:
+    def _begin_capture(self, target, row, col, expected, frames, still_mm, continuous=False) -> None:
         attempt = self._attempts.get(target, 0) + 1
         self._attempts[target] = attempt
         self._capture = {
             "target": target, "attempt": attempt, "row": row, "col": col, "expected": expected,
-            "frames": frames, "still_mm": still_mm, "raw": raw,
+            "frames": frames, "still_mm": still_mm, "continuous": continuous,
             "ok": 0, "failed": 0, "tips": [], "table": [], "sensor_ns": [],
             "started": None, "deadline": None, "first_ns": None, "last_ns": None,
         }
@@ -293,7 +313,7 @@ class Experiments:
             self._finish_capture("stopped")
         self._pending = None
         self._state = IDLE
-        self._raw = False
+        self._kind = GRID
         recorder, self._recorder = self._recorder, None
         recorder.close()
         for fh in (self._poses_file, self._targets_file, self._phase_file):
@@ -369,7 +389,7 @@ class Experiments:
         """Before the frame is worked on. A capture that begins later in this frame (the
         link is polled there) begins with the next, so every row has its images."""
         if self.capturing:
-            # None: the recording rate skipped this pair (a raw run below every frame).
+            # None: the recording rate skipped this pair (a raw or play run below every frame).
             sync = self._recorder.add(raw0, raw1, ts0, ts1, sequences)
             self._pending = (ts0, ts1, sequences, sync)
 
@@ -384,11 +404,16 @@ class Experiments:
         if c["started"] is None:
             c["started"] = now
             c["deadline"] = now + CAPTURE_TIMEOUT_S
-        if c["raw"]:
-            # A raw recording: the images went to the recorder, nothing else to keep.
-            if sync is not None:
-                c["frames"] += 1
-            if sync is not None and ts0 is not None:
+        if c["continuous"]:
+            # The images went to the recorder. A raw run keeps nothing else; a play run
+            # keeps the pose of each pair it saved.
+            if sync is None:
+                return
+            if self._kind == PLAY:
+                c["ok" if pose is not None else "failed"] += 1
+                self._pose_row(c, c["frames"], now, ts0, ts1, sequences, sync, pose, ids0, ids1)
+            c["frames"] += 1
+            if ts0 is not None:
                 c["first_ns"] = c["first_ns"] or ts0
                 c["last_ns"] = ts0
             self._changed = self._changed or c["frames"] % 25 == 0
@@ -399,14 +424,27 @@ class Experiments:
 
         if pose is None:
             c["failed"] += 1
-            values = [""] * 11
         else:
-            tip, rvec, tvec = (np.ravel(v) for v in pose)
-            table = self._to_table(tip)
             c["ok"] += 1
+        tip, table = self._pose_row(c, number, now, ts0, ts1, sequences, sync, pose, ids0, ids1)
+        if tip is not None:
             c["tips"].append(tip.copy())
             if table is not None:
                 c["table"].append(table)
+        self._changed = self._changed or number % 5 == 0
+
+        if c["ok"] >= c["frames"]:
+            self._finish_capture("")
+        elif now >= c["deadline"] and c["ok"] == 0:
+            self._finish_capture("no_pose")
+
+    def _pose_row(self, c, number, now, ts0, ts1, sequences, sync, pose, ids0, ids1):
+        """One frame's row in poses.csv -> (tip, table mm), both None without a pose."""
+        tip = table = None
+        values = [""] * 11
+        if pose is not None:
+            tip, rvec, tvec = (np.ravel(v) for v in pose)
+            table = self._to_table(tip)
             values = [*(f"{v:.6f}" for v in (*tip, *rvec, *tvec)),
                       *(f"{v:.3f}" for v in (table if table is not None else ())),
                       *([""] * (2 if table is None else 0))]
@@ -414,12 +452,7 @@ class Experiments:
             c["target"], c["attempt"], c["row"], c["col"], number, int(pose is not None),
             f"{now:.6f}", ts0, ts1, *sequences, sync, *values, _tags(ids0), _tags(ids1),
         ])
-        self._changed = self._changed or number % 5 == 0
-
-        if c["ok"] >= c["frames"]:
-            self._finish_capture("")
-        elif now >= c["deadline"] and c["ok"] == 0:
-            self._finish_capture("no_pose")
+        return tip, table
 
     def _to_table(self, tip):
         """Camera frame -> mm on the table, as GlobalScript._apply_position does it."""
@@ -432,7 +465,7 @@ class Experiments:
         return ((a * dx + c * dz) * 1000.0, (b * dx + d * dz) * 1000.0)
 
     def _finish_capture(self, reason: str) -> None:
-        if self._capture["raw"]:
+        if self._capture["continuous"]:
             return self._finish_record(reason)
         c, self._capture = self._capture, None
         self._state = READY
@@ -479,7 +512,7 @@ class Experiments:
         self._changed = True
 
     def _finish_record(self, reason: str) -> None:
-        """A raw recording's end: what it holds, in metadata.json."""
+        """A continuous recording's end: what it holds, in metadata.json."""
         c, self._capture = self._capture, None
         self._state = READY
         first, last = c["first_ns"], c["last_ns"]
@@ -493,6 +526,8 @@ class Experiments:
             "sensor_ns_start": first, "sensor_ns_end": last, "sync_edges": len(edges),
             "sync_first_rise_ns": next((e[0] for e in edges if e[1]), None),
         }
+        if self._kind == PLAY:
+            self._meta["capture"].update(frames_ok=c["ok"], frames_failed=c["failed"])
         self._write_meta()
         self._last = {"target": c["target"], "attempt": c["attempt"], "accepted": accepted,
                       "reason": reason, "frames": c["frames"], "fps": round(fps, 1)}
@@ -507,7 +542,7 @@ class Experiments:
         if running and now >= self._next_phase:
             self._next_phase = now + PHASE_EVERY_S
             self._log_phase()
-        if self._capture is not None and self._capture["raw"] and now >= self._next_disk:
+        if self._capture is not None and self._capture["continuous"] and now >= self._next_disk:
             self._next_disk = now + DISK_EVERY_S
             if shutil.disk_usage(self._dir).free < self.min_free_bytes:
                 print(f"[EXPERIMENT] Disk nearly full: recording stopped in {self._dir}", flush=True)
@@ -528,7 +563,7 @@ class Experiments:
             c = self._capture
             status["capture"] = {"target": c["target"], "attempt": c["attempt"],
                                  "frames": c["frames"], "ok": c["ok"], "failed": c["failed"]}
-            if c["raw"]:
+            if c["continuous"]:
                 status["capture"]["elapsed_s"] = round(now - c["started"], 2) if c["started"] else 0.0
         return protocol.encode(protocol.EXPERIMENT_STATUS, json.dumps(status))
 

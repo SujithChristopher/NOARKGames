@@ -1318,10 +1318,12 @@ class TrackerClass:
             scale=self.recording_scale,
         )
 
-    def _experiment_recorder(self, out_dir: Path, metadata: dict, fps: float = 0.0) -> FrameRecorder:
-        """An experiment keeps its frames at full size, whatever the session's recording
-        is set to: settings.json's recording_fps and recording_scale do not apply. `fps` is
-        the run's own rate (raw capture's choice), 0 every frame."""
+    def _experiment_recorder(self, out_dir: Path, metadata: dict, fps: float = 0.0,
+                             scale: float = 1.0) -> FrameRecorder:
+        """An experiment's frames, whatever the session's recording is set to: settings.json's
+        recording_fps and recording_scale do not apply. `fps` and `scale` are the run's own
+        (raw capture's or the game's choice; a grid keeps every frame at full size), fps 0
+        every frame. Tracking always works on the full frame; the writer shrinks its copy."""
         return FrameRecorder(
             out_dir,
             metadata={
@@ -1337,7 +1339,7 @@ class TrackerClass:
             sync_pin=self._sync_pin,
             target_hz=fps,
             chunk_frames=self.recording_chunk,
-            scale=1.0,
+            scale=scale,
         )
 
     def _experiment_setup(self) -> dict:

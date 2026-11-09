@@ -90,7 +90,7 @@ again and is not applied twice.
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
 | `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
 | `0x0A` | `BODY` | `status` \| `start` \| `finish` \| `cancel` \| `save` \| `restore` \| `tip <tag> <x> <y> <z>` | below, or why refused |
-| `0x0B` | `EXPERIMENT` | `status` \| `watch on\|off` \| `start <name> <frames> <label> [raw [<fps>]]` \| `meta <key> <json>` \| `capture <target> <row> <col> <x_mm> <y_mm> <frames> <still_mm>` \| `record` \| `stop <why>` | below, or why refused |
+| `0x0B` | `EXPERIMENT` | `status` \| `watch on\|off` \| `start <name> <frames> <label> [raw\|play [<fps> [<scale>]]]` \| `meta <key> <json>` \| `capture <target> <row> <col> <x_mm> <y_mm> <frames> <still_mm>` \| `record` \| `stop <why>` | below, or why refused |
 
 STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
 board's camera recordings: `<patient>/<session>/Video/rec_*` and
@@ -244,12 +244,14 @@ on the board. `start` opens the run folder and answers its path, or why not (one
 time, not enough disk); `<frames>` is what the disk check is for, `<label>` (the name or number typed for the run: letters, digits, `_`, `-`) starts the folder's name. `meta` adds a key to its
 metadata.json, in pieces because one BLE write holds about 240 bytes; `table_frame`
 (`centre`, `basis`) also gives poses.csv its table columns. `capture` saves frames until
-`<frames>` have a pose, or gives up after 5 s with none. `<fps>` is a raw run's recording rate, frames
-kept on sensor time as for a session recording (0 or none: every frame). `record` is only for a run started
-with `raw`, and `capture` only for one without: a raw run saves the two camera feeds at its
+`<frames>` have a pose, or gives up after 5 s with none. `<fps>` is a raw or play run's recording rate, frames
+kept on sensor time as for a session recording (0 or none: every frame), and `<scale>` the size its images
+are saved at, of each side (1 full, as for none; 0.5 half; 0.25 a quarter; the tracker always works on the
+full frame). `record` is only for a run started with `raw` or `play`, and `capture` only for one without: a raw run saves the two camera feeds at its
 rate until `stop`. It has no time limit: the tracker ends it itself only when the disk is
 down to 5 GB (`last` then comes with `reason` `disk_full` and `frames`, and the app sends
-`stop`). A raw `start` needs room for `<frames>` plus those 5 GB. While a raw run is open the tracker
+`stop`). A raw or play `start` needs room for `<frames>` (at `<scale>`) plus those 5 GB. A play run (a game played as an
+experiment) records as a raw one but keeps tracking and sending POSITION, and each pair saved gets a poses.csv row. While a raw run is open the tracker
 detects no tags and sends no POSITION; with `preview=on` it still sends CAMERA_STATUS and
 PREVIEW (no tags outlined), which the raw capture screen shows. `watch on` shows the mocap trigger
 on an experiment screen: the tracker opens the line itself while no run holds it, and

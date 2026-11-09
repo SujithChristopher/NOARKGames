@@ -467,7 +467,7 @@ Written by the tracker on the board (`pyscripts/experiment.py`), never by the ap
 outside `data/`: no patient, no upload, not listed in Settings > Storage.
 
 ```text
-NOARK_demo/experiments/{static_grid|continuous_raw}/{label}_{YYYY-MM-DD}_{HH-MM-SS}/
+NOARK_demo/experiments/{static_grid|continuous_raw|reach_play}/{label}_{YYYY-MM-DD}_{HH-MM-SS}/
     metadata.json   label (the name or number typed at the start), status (running, complete, stopped, link_lost, tracker_stopped),
                     times, code version, tracker setup, table, grid and dwell (static grid),
                     recording {kind, fps} and capture (continuous raw), notes,
@@ -521,3 +521,23 @@ or targets.csv: the tracker detects no tags and solves no pose while it records.
 board's disk down to 5 GB, the only way it ends itself), `frames`, `fps` (sensor time), `wall_start_unix`,
 `wall_end_unix`, `sensor_ns_start`, `sensor_ns_end` (cam0), `sync_edges`,
 `sync_first_rise_ns` (edges between those two).
+
+**Random Reach** (`reach_play`): Random Reach (2D) played as an experiment, after a workspace
+scan, for the time set on its screen. Only the game is recorded, from play to game over (or
+leaving early, `status` `stopped`). `metadata.json`: `kind: play`, `recording_fps` (0 every
+frame), `recording_scale` (1, 0.5 or 0.25 of each side), `game` {name, mode, seconds},
+`table_frame`, `capture` as for continuous raw plus `frames_ok` / `frames_failed`, and `game_end`
+{`score`, `apples_outside_outline` (apples with no room in the scan's outline, placed anywhere in the game's box), `sync_waited`, and either `sync_at_end` (the line when the time ran out: 0, or -1 no line)
+or `how` (`mocap_stopped`, `skipped`, `recording_ended`), `wait_s`, `tail_s`}. If the trigger was HIGH
+when the time ran out, recording goes on until it is LOW plus 0.5 s, so the recording spans the
+mocap's take; the game's rows from then have status `waiting_sync`.
+`recording/` holds the frames kept at that rate, at that size (the tracker ran at the cameras'
+full rate on full frames; nothing is interpolated). `poses.csv` has one row per pair saved,
+columns as above with `target` 1, `attempt` 1, `row` / `col` empty, `frame` counting the pairs
+saved; join to images on `sensor_ns0`. No targets.csv. The app writes the game's own files into
+the folder of the same name under *its* `experiments/reach_play/` (the same folder when the app
+runs on the board; on a tablet, the tablet's):
+`reach_boundary.json` (the scan's outline, table mm, as `reach_store.gd`) and `random_reach.csv`
+(Random Reach's raw columns at 50 Hz, then `Final Score: n`). No patient: nothing in
+sessions.csv, scores or an upload. Game rows and poses share the wall clock (`epochtime`,
+`wall_time_unix`).

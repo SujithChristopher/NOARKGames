@@ -84,7 +84,24 @@ var rom_y_bot: int
 # Preloaded resources
 var apple = preload("res://Games/random_reach/scenes/apple.tscn")
 const GameFx := preload("res://Main_screen/Scripts/game_fx.gd")
+const ReachPlayRun := preload("res://Experiments/reach_play_run.gd")
+const ReachArea := preload("res://Games/random_reach/Scripts/reach_area.gd")
+const ReachStore := preload("res://Games/firefly_reach/reach_store.gd")
+const APPLE_BOX_LO := Vector2i(200, 200)   # where apples go, clear of the HUD
+const APPLE_BOX_HI := Vector2i(900, 600)
+## Apples placed with no room in the reach outline (none, or too small): in the box as before.
+var apples_outside_outline := 0
+var _outline_px := PackedVector2Array()   # the reach outline as drawn (display pixels)
+var _outline_for := Vector2(INF, INF)      # the Zero offset the outline was turned into pixels for
+## Real game pixels -> drawn pixels: the workspace scaled to the apple area, for the eye only
+## (reach_area.gd view_fit). Every logged position goes back through _view_inv.
+var _view := Transform2D.IDENTITY
+var _view_inv := Transform2D.IDENTITY
+const ReachPlayGame := preload("res://Experiments/reach_play_game.gd")
 var _flock: Node2D
+## Played as an experiment (Experiments/reach_play_*.gd): 2D, the tracker even in debug, the
+## run's time with no selector, the rows in the run's folder, no patient scores or session.
+var _exp: Node = null
 
 # Trunk compensation (TrunkMonitor): play pauses while the trunk is past the
 # compensation threshold and resumes once it has been back under the warning
@@ -97,6 +114,11 @@ var _trunk_feedback: CanvasLayer
 
 func _ready() -> void:
 	z_index = 2
+	if ReachPlayRun.playing():
+		_exp = ReachPlayGame.new(self)
+		add_child(_exp)
+		debug_mode = false
+		_panel_hide_restart()
 	get_parent().add_child.call_deferred(preload("res://Games/random_reach/Scripts/tuning_panel.gd").new())
 	_setup_training_hand()
 	_setup_timers()
@@ -119,16 +141,19 @@ func _ready() -> void:
 	get_parent().add_child.call_deferred(_trunk_feedback)
 
 func _setup_global_timer() -> void:
-	# Add the global timer selector to this game
-	GlobalTimerManager.add_timer_selector_to_game(self)
-
 	# Connect to global timer signals
 	GlobalTimerManager.countdown_finished.connect(_on_global_countdown_finished)
 	GlobalTimerManager.countdown_updated.connect(_on_global_countdown_updated)
+	if _exp:
+		# The experiment's time was set on its setup screen: play at once.
+		_on_global_timer_play_pressed.call_deferred(ReachPlayRun.seconds)
+		return
+	# Add the global timer selector to this game
+	GlobalTimerManager.add_timer_selector_to_game(self)
 
 func _auto_select_mode() -> void:
 	# Automatically set mode based on GlobalSignals
-	if GlobalSignals.selected_game_mode == "3D":
+	if GlobalSignals.selected_game_mode == "3D" and not _exp:
 		_set_3d_mode()
 	else:
 		_set_2d_mode()
@@ -160,6 +185,9 @@ func _initialize_game_state() -> void:
 	network_position = Vector2.ZERO
 
 func _update_top_score_display() -> void:
+	if _exp:
+		_ui_nodes.top_score_label.text = "-"   # no patient
+		return
 	var top_score = ScoreManager.get_top_score(patient_id, game_name)
 	_ui_nodes.top_score_label.text = str(top_score)
 
@@ -216,8 +244,11 @@ func _update_player_position() -> void:
 	else:
 		network_position = GlobalScript.network_position3D if is_3d_mode else GlobalScript.network_position
 	if network_position != Vector2.ZERO:
+		_reach_outline()   # the view follows today's outline
+		# The mouse is already where it is drawn; the tracker's hand is real, drawn scaled.
+		var drawn: Vector2 = network_position if debug_mode else _view * (network_position - zero_offset)
 		network_position = network_position - zero_offset
-		position = position.lerp(network_position, 0.8)
+		position = position.lerp(drawn, 0.8)
 		position.x = clamp(position.x, MIN_BOUNDS.x, MAX_BOUNDS.x)
 		position.y = clamp(position.y, MIN_BOUNDS.y, MAX_BOUNDS.y)
 
@@ -228,16 +259,18 @@ func _update_position_tracking() -> void:
 	pos_y = GlobalScript.raw_y
 	pos_z = GlobalScript.raw_z
 
-	game_x = (position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
+	# Logged in real units: the drawn position taken back through the display scaling.
+	var real: Vector2 = _view_inv * position
+	game_x = (real.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
 
 	if is_3d_mode:
 		# 3D mode: calculate game_y from screen Y position
-		game_y = (position.y - GlobalScript.Y_SCREEN_OFFSET3D) / GlobalScript.PLAYER3D_POS_SCALER_Y
+		game_y = (real.y - GlobalScript.Y_SCREEN_OFFSET3D) / GlobalScript.PLAYER3D_POS_SCALER_Y
 		game_z = 0.0  # Z not used in 3D screen mapping
 	else:
 		# 2D mode: Y is always 0, Z calculated from screen Y position
 		game_y = 0.0
-		game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
+		game_z = (real.y - GlobalScript.Y_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_Z
 
 
 func _update_pps_display() -> void:
@@ -272,11 +305,48 @@ func _spawn_new_apple() -> void:
 	_flock.watch_apple(current_apple)
 
 func _set_apple_position() -> void:
-	var apple_position := Vector2(randi_range(200, 900), randi_range(200, 600))
+	var apple_position: Vector2
+	var spot = ReachArea.pick(_reach_outline(), _apple_radius(), APPLE_BOX_LO, APPLE_BOX_HI)
+	if spot != null:
+		apple_position = spot
+	else:
+		if apples_outside_outline == 0 and not is_3d_mode:
+			push_warning("[RandomReach] No room in the reach outline: apples anywhere in the box")
+		apples_outside_outline += 1
+		apple_position = Vector2(randi_range(APPLE_BOX_LO.x, APPLE_BOX_HI.x), randi_range(APPLE_BOX_LO.y, APPLE_BOX_HI.y))
 	_update_target_position(apple_position)
 	current_apple.position = apple_position
 
-func _update_target_position(apple_position: Vector2) -> void:
+## Today's reach outline as drawn: the experiment's own scan, or the patient's (the daily
+## assessment, assessment_gate.gd), scaled onto the apple area (_view). Empty in 3D (the
+## screen's y is height there), or with no outline. Worked out again if Zero moves the hand.
+func _reach_outline() -> PackedVector2Array:
+	if is_3d_mode:
+		return PackedVector2Array()
+	if zero_offset != _outline_for:
+		var mm: Array = ReachPlayRun.boundary if _exp else ReachStore.load_boundary(patient_id)
+		var real := ReachArea.outline_px(mm, zero_offset)
+		_view = ReachArea.view_fit(real, APPLE_BOX_LO, APPLE_BOX_HI)
+		_view_inv = _view.affine_inverse()
+		_outline_px = _view * real
+		_outline_for = zero_offset
+	return _outline_px
+
+## The display gain (1 when the workspace is drawn at its real size).
+func view_gain() -> float:
+	return _view.get_scale().x
+
+## The apple's catch circle, in the game's pixels.
+func _apple_radius() -> float:
+	var shape := current_apple.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if shape and shape.shape is CircleShape2D:
+		var s: Vector2 = shape.global_scale
+		return (shape.shape as CircleShape2D).radius * maxf(absf(s.x), absf(s.y))
+	return 26.0
+
+func _update_target_position(drawn_position: Vector2) -> void:
+	# Logged in real units, as the player's position is.
+	var apple_position: Vector2 = _view_inv * drawn_position
 	target_x = (apple_position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
 
 	if is_3d_mode:
@@ -371,6 +441,13 @@ func _resume_game() -> void:
 func show_game_over() -> void:
 	_freeze_targets(true)
 	MusicManager.play_sound_effect("game_over")
+	if _exp:
+		# The experiment ends the run, after the mocap has stopped if it is still going;
+		# rows go on being logged meanwhile.
+		game_started = false
+		GlobalTimer.stop_timer()
+		_exp.game_over(score)
+		return
 	var top_score = ScoreManager.get_top_score(patient_id, game_name)
 	_ui_nodes.highscore.text = str(top_score)
 	_ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
@@ -382,6 +459,9 @@ func show_game_over() -> void:
 	_ui_nodes.color_rect.visible = true
 
 func _on_logout_button_pressed() -> void:
+	if _exp:
+		_leave_experiment()
+		return
 	GlobalTimerManager.remove_timer_selector_from_game()
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
@@ -409,6 +489,14 @@ func save_final_score_to_log(score: int) -> void:
 		game_log_file.store_line("Final Score: " + str(score))
 		game_log_file.flush()
 
+const LOG_COLUMNS := [
+	'epochtime', 'score', 'status', 'error_status', 'packets',
+	'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
+	'player_x', 'player_y', 'player_z', 'pause_state',
+	'trunk_state', 'trunk_level', 'trunk_flexion', 'trunk_lateral', 'trunk_axial',
+	'trunk_how', 'trunk_rms_mm', 'trunk_frac', 'trunk_pts', 'trunk_mask_px', 'trunk_held', 'trunk_doubt'
+]
+
 func _setup_game_logging() -> void:
 	# Mouse testing must not create or upload a patient therapy session.
 	if debug_mode:
@@ -416,17 +504,16 @@ func _setup_game_logging() -> void:
 	if not log_timer.timeout.is_connected(_on_log_timer_timeout):
 		log_timer.timeout.connect(_on_log_timer_timeout)
 
+	if _exp:
+		# The run's own file, not a patient's; the recording starts with play.
+		game_log_file = _exp.open_log(PackedStringArray(LOG_COLUMNS))
+		_exp.begin()
+		return
 	# Use the updated game_name variable
 	game_log_file = Manager.create_game_log_file(game_name, patient_id)
 	if game_log_file == null:
 		return
-	game_log_file.store_csv_line(PackedStringArray([
-		'epochtime', 'score', 'status', 'error_status', 'packets',
-		'device_x', 'device_y', 'device_z', 'target_x', 'target_y', 'target_z',
-		'player_x', 'player_y', 'player_z', 'pause_state',
-		'trunk_state', 'trunk_level', 'trunk_flexion', 'trunk_lateral', 'trunk_axial',
-		'trunk_how', 'trunk_rms_mm', 'trunk_frac', 'trunk_pts', 'trunk_mask_px', 'trunk_held', 'trunk_doubt'
-	]))
+	game_log_file.store_csv_line(PackedStringArray(LOG_COLUMNS))
 
 func _on_log_timer_timeout() -> void:
 	if game_log_file and not debug_mode:
@@ -474,8 +561,9 @@ func _on_apple_eaten() -> void:
 		if _audio_nodes.apple_sound:
 			_audio_nodes.apple_sound.play()
 
-	ScoreManager.update_top_score(patient_id, game_name, score)
-	_update_top_score_display()
+	if not _exp:
+		ScoreManager.update_top_score(patient_id, game_name, score)
+		_update_top_score_display()
 	status = "captured"
 
 func _notification(what) -> void:
@@ -497,6 +585,9 @@ func _on_button_pressed() -> void:
 	GlobalScript.request_quit()
 
 func _on_logout_pressed() -> void:
+	if _exp:
+		_leave_experiment()
+		return
 	MusicManager.play_music("main")
 	GlobalTimer.stop_timer()
 	GlobalSignals.enable_game_buttons(true)
@@ -538,7 +629,24 @@ func _update_game_name() -> void:
 	game_name = "RandomReach3D" if is_3d_mode else "RandomReach"
 
 
+## Left before the time was up: the experiment's run ends, back to its setup screen.
+func _leave_experiment() -> void:
+	game_started = false
+	GlobalTimer.stop_timer()
+	game_log_file = null
+	get_tree().paused = false
+	_exp.finish(score, "stopped")
+
+## The experiment plays once for its time: no restart from the pause menu.
+func _panel_hide_restart() -> void:
+	var restart := get_node_or_null("../Paused/Restart")
+	if restart:
+		restart.hide()
+
 func _on_home_pressed() -> void:
+	if _exp:
+		_leave_experiment()
+		return
 	get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
 
 func _on_resume_pressed() -> void:

@@ -32,7 +32,8 @@ extends Node2D
 # firefly_main.gd sets `config` before adding it (participant, day, level_index,
 # order_id, quick, show_check, resume; optionally "boundary": a saved reach
 # outline, [[x_mm, y_mm], ...], which skips the reach scan) and saves the score
-# from `finished`; "scan_only": true runs just the reach scan and emits scan_done (also emitted after a normal scan). Keys: Enter / C / S on the calibration check, Enter on the
+# from `finished`; "scan_only": true runs just the reach scan and emits scan_done (also emitted after a normal scan);
+# "tracker": true takes the hand from the tracker even in debug. Keys: Enter / C / S on the calibration check, Enter on the
 # last screen; Esc (firefly_main.gd) stops.
 
 signal calibration_accepted(state: Dictionary)   # frozen calibration, for resuming
@@ -389,7 +390,7 @@ func _now() -> float:
 # Feeds every tracker sample since the last frame to the hold logic and the
 # hand log. input_adapter.gd gives one per frame.
 func _read_hand() -> void:
-	if Settings.is_debug():
+	if _mouse():
 		# The mouse is the hand: one sample per frame, not logged.
 		_on_sample(_now(), _ts.screen_to_mm(get_global_mouse_position()))
 		return
@@ -438,10 +439,16 @@ func _on_sample(t: float, mm: Vector2) -> void:
 		_finish_apple("caught", t)
 
 
+# The mouse is the hand in debug, unless config "tracker" says the tracker always is
+# (an experiment's scan, Experiments/reach_play_scan.gd: it records the tracker).
+func _mouse() -> bool:
+	return Settings.is_debug() and not bool(config.get("tracker", false))
+
+
 # No packets, whether they stopped or never came: freeze the round and drop the
 # apple, or hold the reach scan's quiet timer. Nothing else can move the hand.
 func _update_pause() -> void:
-	var lost: bool = not Settings.is_debug() and not Tracker.is_fresh()
+	var lost: bool = not _mouse() and not Tracker.is_fresh()
 	if lost == _paused:
 		return
 	_paused = lost

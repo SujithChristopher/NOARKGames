@@ -19,6 +19,12 @@ const EXPERIMENTS := [
 			+ "the pose, with the mocap trigger's edges. Move the device however the trial needs.",
 		"scene": "res://Experiments/continuous_raw.tscn",
 	},
+	{
+		"title": "Random Reach",
+		"about": "Assess the workspace, then play Random Reach for a set time. The game is " \
+			+ "recorded: both feeds at the frame rate and image size chosen, and the pose of each frame.",
+		"scene": "res://Experiments/reach_play.tscn",
+	},
 ]
 
 

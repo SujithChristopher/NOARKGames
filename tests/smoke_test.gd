@@ -29,6 +29,10 @@ const STATIC_GRID := "res://Experiments/static_grid.tscn"
 const StaticGrid := preload("res://Experiments/static_grid.gd")
 const CONTINUOUS_RAW := "res://Experiments/continuous_raw.tscn"
 const ContinuousRaw := preload("res://Experiments/continuous_raw.gd")
+const REACH_PLAY := "res://Experiments/reach_play.tscn"
+const ReachPlay := preload("res://Experiments/reach_play.gd")
+const ReachPlayRun := preload("res://Experiments/reach_play_run.gd")
+const ReachArea := preload("res://Games/random_reach/Scripts/reach_area.gd")
 
 ## [scene, mode]. The 2D+3D games run in both modes.
 const SCENES := [
@@ -49,6 +53,7 @@ const SCENES := [
 	["res://Experiments/experiment_menu.tscn", "2D"],
 	[STATIC_GRID, "2D"],
 	[CONTINUOUS_RAW, "2D"],
+	[REACH_PLAY, "2D"],
 ]
 
 
@@ -72,10 +77,28 @@ func _ready() -> void:
 	await _camera_tab()
 	await _calibration_tab()
 	_grid_points()
+	_reach_area()
 	await _static_grid_run()
 	await _continuous_raw_run()
+	await _reach_play_run()
 	print("SMOKE DONE %d scenes" % SCENES.size())
 	get_tree().quit()
+
+
+## Random Reach's apples inside the reach outline: the whole apple, inside the box.
+func _reach_area() -> void:
+	print("SMOKE reach area")
+	var square := PackedVector2Array([Vector2(300, 250), Vector2(500, 250), Vector2(500, 450), Vector2(300, 450)])
+	_check(ReachArea.fits(square, Vector2(400, 350), 26.0), "an apple in the middle fits")
+	_check(not ReachArea.fits(square, Vector2(310, 350), 26.0), "one over the edge does not, though its centre is in")
+	_check(not ReachArea.fits(square, Vector2(700, 350), 26.0), "one outside does not")
+	for i in 50:
+		var c = ReachArea.pick(square, 26.0, Vector2i(200, 200), Vector2i(900, 600))
+		_check(c != null and ReachArea.fits(square, c, 26.0), "picked inside: %s" % str(c))
+	_check(ReachArea.pick(square, 26.0, Vector2i(600, 200), Vector2i(900, 600)) == null, "none outside the box")
+	_check(ReachArea.pick(PackedVector2Array([Vector2(400, 300), Vector2(420, 300), Vector2(400, 320)]),
+		26.0, Vector2i(200, 200), Vector2i(900, 600)) == null, "none in an outline too small")
+	_check(ReachArea.outline_px([[0, 0], [1]]).is_empty(), "no outline from under 3 points")
 
 
 ## The experiment's grid: 4 x 6 inside the margin, snaking, row 1 at the top.
@@ -260,6 +283,151 @@ func _continuous_raw_run() -> void:
 
 	GlobalScript.link._queue.clear()
 	scene.queue_free()
+	await get_tree().process_frame
+
+
+## Random Reach as an experiment, with the tracker's answers fed in: the setup screen's Start
+## opens a play run at the chosen rate and size, the scan's outline goes into the run's folder,
+## the game plays at once for the run's time and records, game over stops the run, and the setup
+## screen says it is saved. Then a scan left with Esc: the run closes, nothing recorded.
+func _reach_play_run() -> void:
+	print("SMOKE scene reach play run")
+	# The game's files go beside the data folder: never the real one.
+	GlobalSignals.data_path = OS.get_user_data_dir().path_join("smoke")
+	var setup: Control = (load(REACH_PLAY) as PackedScene).instantiate()
+	get_tree().root.add_child(setup)
+	get_tree().current_scene = setup
+	await get_tree().process_frame
+	_check(setup._start.disabled, "no start without the experiment's name")
+	setup._label.text = "rr 1"
+	setup._label.text_changed.emit(setup._label.text)
+	setup._fps.select(ReachPlay.FPS_CHOICES.find(60))
+	setup._fps.item_selected.emit(setup._fps.selected)
+	setup._scale.select(ReachPlay.SCALE_CHOICES.find(0.5))
+	setup._scale.item_selected.emit(setup._scale.selected)
+	setup._minutes.value = 1.0
+	_check("60 fps" in setup._info.text and "640 x 400" in setup._info.text, "the estimate: %s" % setup._info.text)
+	_check(not setup._start.disabled, "named, it can start")
+
+	GlobalScript.link.connected = true
+	setup._start.pressed.emit()
+	GlobalScript.link.connected = false
+	_check(setup._state == ReachPlay.State.STARTING, "waits for the tracker")
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "sync")
+	_check(setup._state == ReachPlay.State.STARTING, "the indicator's watch ACK is not the start's")
+	var sent: Array = _experiment_commands()
+	_check(sent[0] == "start reach_play 3600 rr_1 play 60 0.50", "start: %s" % str(sent))
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "/there/reach_play/rr_1_x")
+	_check(ReachPlayRun.phase == ReachPlayRun.Phase.SCAN, "the tracker's yes: the scan")
+	sent = _experiment_commands()
+	_check(sent.any(func(c): return c.begins_with("meta table_frame")), "the table goes with the run")
+	_check(not sent.has("record"), "the scan is not recorded")
+	for command in sent:
+		_check(command.length() < 240, "fits one BLE write: %d: %s" % [command.length(), command])
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var scan = get_tree().current_scene
+	_check(scan != null and scan.scene_file_path == ReachPlayRun.SCAN, "the scan opens: %s" % str(scan))
+	_check(scan.runner.config.get("tracker", false), "the scan takes the tracker's hand, even in debug")
+
+	# The scan's outline: into the run's folder, then the game.
+	GlobalScript.link._queue.clear()
+	scan._on_scan_done([[-100, -100], [150, -100], [-100, 150]])
+	_check(FileAccess.file_exists(ReachPlayRun.local_dir().path_join("reach_boundary.json")), "the outline is saved with the run")
+	# The game opens once its background load is done: the switch never loads it on the main thread.
+	var waited := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - waited < 20000 and (get_tree().current_scene == null \
+			or get_tree().current_scene.scene_file_path != ReachPlayRun.GAME):
+		await get_tree().process_frame
+	for i in 3:
+		await get_tree().process_frame
+	var game = get_tree().current_scene
+	_check(game != null and game.scene_file_path == ReachPlayRun.GAME, "Random Reach opens: %s" % str(game))
+	var player = game.get_node("Player")
+	_check(player._exp != null and not player.is_3d_mode and not player.debug_mode, "the experiment's game: 2D, the tracker")
+	_check(player.game_started and GlobalTimerManager.countdown_total == 60, "plays at once for the run's time")
+	_check(GlobalScript.tracking_mode() == "position", "asks the tracker for the hand in debug too")
+	_check(_experiment_commands().has("record"), "records from play: %s" % str(_experiment_commands()))
+	# Apples only where the run's scan says the hand reaches.
+	var outline: PackedVector2Array = player._reach_outline()
+	_check(outline.size() == 3, "the scan's outline in the game: %s" % str(outline))
+	for i in 20:
+		if player.current_apple != null:
+			player.current_apple.free()
+			player.current_apple = null
+		player._spawn_new_apple()
+		_check(ReachArea.fits(outline, player.current_apple.position, player._apple_radius()),
+			"the apple inside the outline: %s" % str(player.current_apple.position))
+	_check(player.apples_outside_outline == 0, "none had to go outside")
+	_check(not game.get_node("Paused/Restart").visible, "no restart in the experiment")
+	var sync: Array = player._exp.find_children("*", "PanelContainer", true, false) \
+		.filter(func(n): return n.get("edges") != null)
+	_check(sync.size() == 1, "the mocap trigger is shown in the game")
+	_feed_experiment({"state": "capturing", "capture": {"target": 1, "attempt": 1, "frames": 300, "elapsed_s": 5.0},
+		"sync": {"available": true, "level": 1, "edges": 3, "edge_timestamps": true}})
+	_check(player._exp.frames == 300, "counts the frames saved")
+	player.score = 4
+	await get_tree().create_timer(0.1).timeout   # a few of the game's rows
+
+	# The time up with the mocap's line HIGH: frozen, still recording, waiting for it to go LOW.
+	GlobalScript.link._queue.clear()
+	player.show_game_over()
+	_check(player._exp.waiting_sync and not _experiment_commands().any(func(c): return c.begins_with("stop")),
+		"sync HIGH at the time up: waits, still recording: %s" % str(_experiment_commands()))
+	_check(player._exp._dialog != null and player._exp._dialog.visible, "says it waits for the mocap")
+	await get_tree().create_timer(0.1).timeout
+	_check(get_tree().current_scene == game, "still in the game while the mocap runs")
+	_feed_experiment({"state": "capturing", "capture": {"target": 1, "attempt": 1, "frames": 310, "elapsed_s": 5.1},
+		"sync": {"available": true, "level": 0, "edges": 4, "edge_timestamps": true}})
+	await get_tree().create_timer(0.2).timeout
+	_check(not _experiment_commands().any(func(c): return c.begins_with("stop")), "LOW: the half second first")
+	_check(player._exp.waiting_sync and player._exp._low_at_ms >= 0, "LOW seen, the tail running")
+	# The half second gone by, in one step: the link is connected for this call only, so nothing leaves.
+	player._exp._low_at_ms -= 600
+	GlobalScript.link.connected = true
+	player._exp._process(0.0)
+	GlobalScript.link.connected = false
+	var ended: Array = _experiment_commands()
+	_check(ended.back() == "stop complete", "then the run stops: %s" % str(ended))
+	_check(ended.any(func(c): return c.begins_with("meta game_end") and "mocap_stopped" in c), "how it ended, in the metadata: %s" % str(ended))
+	var csv := FileAccess.get_file_as_string(ReachPlayRun.local_dir().path_join("random_reach.csv"))
+	_check(csv.begins_with("epochtime,score,") and csv.strip_edges().ends_with("Final Score: 4"), "the game's rows: %s" % csv.left(80))
+	_check(csv.split("\n").size() > 3, "rows were logged")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	setup = get_tree().current_scene
+	_check(setup != null and setup.scene_file_path == REACH_PLAY, "back to the setup screen")
+	_check(setup._state == ReachPlay.State.SAVING, "waits for the tracker to save")
+	_feed_experiment({"state": "idle", "last": null, "saved": {"path": "/there/reach_play/rr_1_x", "status": "complete", "accepted": 1, "dropped": [0, 0]}})
+	_check(setup._state == ReachPlay.State.IDLE and "Score 4" in setup._saved_label.text \
+		and "310 frames" in setup._saved_label.text, "saved: %s" % setup._saved_label.text)
+	_check(setup._label.text == "rr 1" or setup._label.text == "rr_1", "the choices are kept for the next run")
+
+	# A second run, its scan left with Esc: closed, nothing recorded.
+	GlobalScript.link._queue.clear()
+	GlobalScript.link.connected = true
+	setup._start.pressed.emit()
+	GlobalScript.link.connected = false
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "/there/reach_play/rr_1_y")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	scan = get_tree().current_scene
+	GlobalScript.link.connected = true
+	scan._cancel()
+	GlobalScript.link.connected = false
+	_check(_experiment_commands().back() == "stop stopped", "Esc in the scan closes the run")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	setup = get_tree().current_scene
+	_feed_experiment({"state": "idle", "last": null, "saved": {"path": "/there/reach_play/rr_1_y", "status": "stopped", "accepted": 0, "dropped": [0, 0]}})
+	_check("nothing recorded" in setup._saved_label.text, "says so: %s" % setup._saved_label.text)
+
+	var made := GlobalSignals.data_path.get_base_dir().path_join("experiments")
+	if made.begins_with(OS.get_user_data_dir()):
+		_remove_tree(made)
+	GlobalScript.link._queue.clear()
+	ReachPlayRun.phase = ReachPlayRun.Phase.NONE
+	setup.queue_free()
 	await get_tree().process_frame
 
 
