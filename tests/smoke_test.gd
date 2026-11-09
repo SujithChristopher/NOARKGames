@@ -178,19 +178,24 @@ func _static_grid_run() -> void:
 	GlobalScript._table_centre = table_was[4]
 
 
-## The continuous capture with the tracker's answers fed in: start, record, the mocap
-## trigger shown, the time limit ending it. As the static grid run, nothing leaves the app.
+## The continuous raw capture with the tracker's answers fed in: Start, the feeds counted,
+## Stop, then a second recording ended by the tracker (disk nearly full); the mocap trigger shown throughout.
+## As the static grid run, nothing leaves the app.
 func _continuous_raw_run() -> void:
 	print("SMOKE scene continuous raw run")
 	var scene: Control = (load(CONTINUOUS_RAW) as PackedScene).instantiate()
 	get_tree().root.add_child(scene)
 	get_tree().current_scene = scene
 	await get_tree().process_frame
-	_check(scene._start_button.disabled, "no start without the experiment's name")
+	_check(scene._toggle.disabled and scene._toggle.text == "Start", "no start without the experiment's name")
 	scene._label.text = "rec 1"
 	scene._label.text_changed.emit(scene._label.text)
-	scene._limit.value = 30
-	_check(not scene._start_button.disabled, "named, it can start, table or not")
+	_check(scene._fps.get_item_text(scene._fps.selected) == "%d fps" % int(Settings.get_value("recording_fps", 30)) \
+		or Settings.get_value("recording_fps", 30) == 0, "the session recording's rate to begin with")
+	scene._fps.select(ContinuousRaw.FPS_CHOICES.find(60))
+	scene._fps.item_selected.emit(scene._fps.selected)
+	_check("60 fps" in scene._info.text, "the estimate follows the rate: %s" % scene._info.text)
+	_check(not scene._toggle.disabled, "named, it can start")
 
 	var sync: Control = scene.get_children().filter(func(n): return n.get("edges") != null)[0]
 	_check(sync._state.text == "?", "the trigger unknown until the tracker says: %s" % sync._state.text)
@@ -198,37 +203,60 @@ func _continuous_raw_run() -> void:
 		"sync": {"available": true, "level": 0, "edges": 0, "edge_timestamps": true}})
 	_check(sync._state.text == "LOW", "LOW: %s" % sync._state.text)
 
+	# Both feeds: the tracker's PREVIEW, one picture of the two side by side.
+	_check(scene._picture.texture == null and scene._no_picture.visible, "no picture before one comes")
+	var feeds := Image.create(64, 20, false, Image.FORMAT_RGB8)
+	feeds.fill(Color.GRAY)
+	_feed(LinkProtocol.PREVIEW, feeds.save_jpg_to_buffer())
+	_check(scene._picture.texture != null and not scene._no_picture.visible, "the feeds are shown")
+	_feed(LinkProtocol.CAMERA_STATUS, JSON.stringify({"fps": 98.0, "level": [80, 90], "blown": [0, 0.5]}).to_utf8_buffer())
+	_check("98 fps" in scene._camera_info.text, "camera status: %s" % scene._camera_info.text)
+
 	GlobalScript.link.connected = true
-	scene._start()
+	scene._toggle.pressed.emit()
 	GlobalScript.link.connected = false
 	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "sync")
-	_check(scene._view == ContinuousRaw.View.SETUP, "the indicator's watch ACK is not the start's")
+	_check(scene._state == ContinuousRaw.State.STARTING, "the indicator's watch ACK is not the start's")
 	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "/somewhere")
-	_check(scene._view == ContinuousRaw.View.RUN, "the tracker's yes starts the run")
+	_check(scene._state == ContinuousRaw.State.RECORDING and scene._toggle.text == "Stop",
+		"the tracker's yes: recording, the button says Stop")
+	_check(scene._fps.disabled, "no changing the rate mid-recording")
 	var sent: Array = _experiment_commands()
-	_check(sent[0] == "start continuous_raw 3600 rec_1", "start: %s" % str(sent))
-	_check(sent.back() == "record 30", "then record: %s" % str(sent))
-	_check(sent.any(func(c): return c.begins_with("meta recording")), "the run says what it is")
+	_check(sent[0] == "start continuous_raw 3600 rec_1 raw 60", "start: %s" % str(sent))
+	_check(sent.back() == "record", "then record, with no end: %s" % str(sent))
+	_check(not sent.any(func(c): return c.begins_with("meta table")), "no tracker data asked for")
 	for command in sent:
 		_check(command.length() < 240, "fits one BLE write: %d: %s" % [command.length(), command])
 
 	_feed_experiment({"state": "capturing", "last": null, "saved": null,
-		"capture": {"target": 1, "attempt": 1, "frames": 0, "ok": 40, "failed": 2, "limit_s": 30, "elapsed_s": 0.5},
+		"capture": {"target": 1, "attempt": 1, "frames": 420, "ok": 0, "failed": 0, "elapsed_s": 4.2},
 		"sync": {"available": true, "level": 1, "edges": 1, "edge_timestamps": true}})
-	_check(scene._recording and scene._ok == 40 and scene._failed == 2, "counts the frames")
+	_check(scene._frames == 420 and scene._clock.text == "00:04", "counts: %s" % scene._clock.text)
 	_check(sync._state.text == "HIGH" and sync.edges == 1, "HIGH: %s" % sync._state.text)
-	await get_tree().process_frame
-	_check("00:00 / 00:30" in scene._clock.text, "clock: %s" % scene._clock.text)
 
-	_feed_experiment({"state": "ready", "saved": null,
-		"last": {"target": 1, "attempt": 1, "accepted": true, "reason": "limit", "frames_ok": 2900, "frames_failed": 10}})
-	_check(scene._view == ContinuousRaw.View.DONE, "the limit ends the run")
+	scene._toggle.pressed.emit()
+	_check(scene._state == ContinuousRaw.State.SAVING and scene._toggle.disabled, "Stop: saving")
 	_check(_experiment_commands().back() == "stop complete", "stop: %s" % _experiment_commands().back())
+	_feed_experiment({"state": "capturing", "capture": {"target": 1, "attempt": 1, "frames": 430}})
+	_check(scene._state == ContinuousRaw.State.SAVING, "a status sent before the stop changes nothing")
 	_feed_experiment({"state": "idle", "last": null, "saved": {"path": "/there/rec_1", "status": "complete", "accepted": 1, "dropped": [0, 0]},
 		"sync": {"available": false}})
-	_check("/there/rec_1" in scene._done_text.text and "2910 frames" in scene._done_text.text,
-		"says where and how much: %s" % scene._done_text.text)
+	_check(scene._state == ContinuousRaw.State.IDLE and scene._toggle.text == "Start", "saved: Start again")
+	_check("/there/rec_1" in scene._saved_label.text, "says where: %s" % scene._saved_label.text)
 	_check(sync._state.text == "NO LINE", "no line: %s" % sync._state.text)
+
+	# A second recording, ended by the tracker: the disk nearly full.
+	GlobalScript.link._queue.clear()
+	GlobalScript.link.connected = true
+	scene._toggle.pressed.emit()
+	GlobalScript.link.connected = false
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "/somewhere/else")
+	_feed_experiment({"state": "capturing", "capture": {"target": 1, "attempt": 1, "frames": 10, "elapsed_s": 0.1}})
+	_feed_experiment({"state": "ready", "last": {"target": 1, "attempt": 1, "accepted": true, "reason": "disk_full", "frames": 2990}})
+	_check(scene._state == ContinuousRaw.State.SAVING and scene._frames == 2990, "a full disk ends it")
+	_check(_experiment_commands().back() == "stop complete", "and the app closes the run")
+	_feed_experiment({"state": "idle", "last": null, "saved": {"path": "/there/rec_2", "status": "complete", "accepted": 1, "dropped": [0, 0]}})
+	_check("nearly full" in scene._saved_label.text, "says why it stopped: %s" % scene._saved_label.text)
 
 	GlobalScript.link._queue.clear()
 	scene.queue_free()

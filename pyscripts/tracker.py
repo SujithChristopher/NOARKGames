@@ -1318,9 +1318,10 @@ class TrackerClass:
             scale=self.recording_scale,
         )
 
-    def _experiment_recorder(self, out_dir: Path, metadata: dict) -> FrameRecorder:
-        """An experiment keeps every frame at full size, whatever the session's recording
-        is set to: settings.json's recording_fps and recording_scale do not apply."""
+    def _experiment_recorder(self, out_dir: Path, metadata: dict, fps: float = 0.0) -> FrameRecorder:
+        """An experiment keeps its frames at full size, whatever the session's recording
+        is set to: settings.json's recording_fps and recording_scale do not apply. `fps` is
+        the run's own rate (raw capture's choice), 0 every frame."""
         return FrameRecorder(
             out_dir,
             metadata={
@@ -1334,7 +1335,7 @@ class TrackerClass:
             },
             sync_chip=self._sync_chip,
             sync_pin=self._sync_pin,
-            target_hz=0,
+            target_hz=fps,
             chunk_frames=self.recording_chunk,
             scale=1.0,
         )
@@ -1385,6 +1386,16 @@ class TrackerClass:
             self.recorder.add(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._experiment.images(raw0, raw1, ts0, ts1, self.capture.last_sequence)
         self._frame_count += 1
+        if self._experiment.images_only:
+            # A raw capture: the two camera feeds and the trigger, nothing worked out, so
+            # the board's cores go to writing every frame. No pose goes to the app either.
+            self.link.poll(self._on_message)
+            self.link.tick()
+            self._send_job_updates()
+            self._experiment.frame(None, None, None)
+            # The screen's picture of both feeds (preview=on), the same as the Camera tab's.
+            self._send_camera_view(raw0, raw1, [], [])
+            return
         if self.trunk is not None and self.trunk_on:
             # Before the flip: the stereo calibration describes the sensor image.
             self.trunk.submit(raw0, raw1)
@@ -1489,17 +1500,7 @@ class TrackerClass:
                     )
         self._experiment.frame((centroid, ref_rvec, ref_tvec) if have_pose else None, ids0, ids1)
 
-        if self.link.connected:
-            now = time.time()
-            self._update_pictures(now)
-            for message in self._camera_view.frame(
-                now, raw0, raw1, corners0, corners1,
-                self.capture.sensor_settings, (self._exposure_us, self._gain),
-            ):
-                if message[0] == protocol.PREVIEW and self._picture_link is not None:
-                    self._picture_link.send(message)
-                else:
-                    self.link.send(message)
+        self._send_camera_view(raw0, raw1, corners0, corners1)
 
         if self.display:
             disp0 = cv2.cvtColor(raw0, cv2.COLOR_GRAY2BGR)
@@ -1511,6 +1512,21 @@ class TrackerClass:
             disp0 = cv2.resize(disp0, (350, 200))
             disp1 = cv2.resize(disp1, (350, 200))
             cv2.imshow("frame", np.hstack([disp0, disp1]))
+
+    def _send_camera_view(self, raw0, raw1, corners0, corners1) -> None:
+        """CAMERA_STATUS and PREVIEW while a screen asked for them (preview=on)."""
+        if not self.link.connected:
+            return
+        now = time.time()
+        self._update_pictures(now)
+        for message in self._camera_view.frame(
+            now, raw0, raw1, corners0, corners1,
+            self.capture.sensor_settings, (self._exposure_us, self._gain),
+        ):
+            if message[0] == protocol.PREVIEW and self._picture_link is not None:
+                self._picture_link.send(message)
+            else:
+                self.link.send(message)
 
     def _idle_step(self) -> None:
         """A loop without tracking: the link and storage only. Cameras still

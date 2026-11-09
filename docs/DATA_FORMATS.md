@@ -470,7 +470,7 @@ outside `data/`: no patient, no upload, not listed in Settings > Storage.
 NOARK_demo/experiments/{static_grid|continuous_raw}/{label}_{YYYY-MM-DD}_{HH-MM-SS}/
     metadata.json   label (the name or number typed at the start), status (running, complete, stopped, link_lost, tracker_stopped),
                     times, code version, tracker setup, table, grid and dwell (static grid),
-                    recording {kind, limit_s} (continuous raw), notes,
+                    recording {kind, fps} and capture (continuous raw), notes,
                     units, every column name, images dropped
     targets.csv     one row per capture attempt
     poses.csv       one row per camera frame captured
@@ -513,10 +513,11 @@ The expected positions come from the table's corners as the tracker measured the
 device is steered by the screen. So the data measures precision across the table, not
 absolute accuracy: `offset_*` mostly says where the operator stopped inside the point's radius.
 
-**Continuous raw capture** (`continuous_raw`) is the same folder from one long capture: every
-frame from Start to Stop or the time limit, pose or not, the device moved freely. `poses.csv`
-has `target` 1, `attempt` 1, `row` and `col` empty, and the table columns only if a table was
-defined. `targets.csv` has one row summing it up: `expected_*` and `offset_*` empty,
-`accepted` 1 if any frame was saved, `reason` `limit` (the time ran out) or `stopped`
-(Stop, Esc, the link lost); `sync_edges` counts the edges during the recording.
-`tip_std_*` and `max_dev_mm` are of a moving device, so mean nothing here.
+**Continuous raw capture** (`continuous_raw`): the two camera feeds and the trigger, nothing
+of the tracker's. One folder per Start: `metadata.json` (`raw: true`, `recording_fps`: the rate chosen, 0 every frame), `recording/` (every
+frame of both cameras at full size, sync_events, phase_log) and `calibration/`. No poses.csv
+or targets.csv: the tracker detects no tags and solves no pose while it records.
+`metadata.json` `capture` sums it up: `reason` (`stopped`: Stop, Esc or the link lost; `disk_full`: the
+board's disk down to 5 GB, the only way it ends itself), `frames`, `fps` (sensor time), `wall_start_unix`,
+`wall_end_unix`, `sensor_ns_start`, `sensor_ns_end` (cam0), `sync_edges`,
+`sync_first_rise_ns` (edges between those two).

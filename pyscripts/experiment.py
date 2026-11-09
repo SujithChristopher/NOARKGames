@@ -23,10 +23,13 @@ are all CLOCK_MONOTONIC, so a pulse is placed against a frame or a capture by co
     idle -> ready <-> capturing
               `-> idle (stop, a link lost, a new HELLO)
 
-Two kinds of capture. `capture` is a held point (static grid): frames until enough have a
-pose, judged still or moved. `record <seconds>` is a continuous raw capture: every frame,
-pose or not, until `stop` or the time limit; one targets.csv row sums it up, row and col
-empty.
+Two kinds of run. A run of held points (static grid): each `capture` saves frames until
+enough have a pose, judged still or moved. A raw run (`start ... raw`, continuous raw
+capture): `record` saves the two camera feeds at the run's rate until `stop`, and nothing of
+the tracker's: no tag detection or pose is worked out while it runs (`images_only`), and
+there is no poses.csv or targets.csv; metadata.json's `capture` sums it up. Its folder is
+metadata.json, recording/ and calibration/. No time limit: only `stop` ends it, or the disk
+getting down to MIN_FREE_BYTES, which would otherwise end the tracker too.
 
 The mocap trigger is shown on every experiment screen: `watch on` opens the sync line on its
 own while no run holds it (a run's recorder has it then), and every EXPERIMENT_STATUS
@@ -58,6 +61,10 @@ STATUS_EVERY_S = 0.25
 PHASE_EVERY_S = 1.0
 # The disk a run needs is worked out at start; a margin for the rest of its files.
 DISK_MARGIN = 1.2
+# A raw recording has no length: it ends itself when the disk is down to this (25 s of
+# every frame at 100 fps), checked once a second.
+MIN_FREE_BYTES = 5_000_000_000
+DISK_EVERY_S = 1.0
 
 POSE_COLUMNS = [
     "target", "attempt", "row", "col", "frame", "pose_ok", "wall_time_unix",
@@ -91,13 +98,13 @@ def _commit() -> str:
 
 class Experiments:
     def __init__(self, root: Path, describe: Callable[[], dict],
-                 open_recorder: Callable[[Path, dict], object], frame_bytes: Callable[[], int],
+                 open_recorder: Callable[[Path, dict, float], object], frame_bytes: Callable[[], int],
                  snapshot: Callable[[], list],
                  phase: Callable[[], tuple] = lambda: (None, 0),
                  open_sync: Optional[Callable[[], object]] = None) -> None:
         self.root = Path(root)
         self._describe = describe           # how the tracker is set up now
-        self._open_recorder = open_recorder # out_dir, metadata -> FrameRecorder
+        self._open_recorder = open_recorder # out_dir, metadata, fps (0: every frame) -> FrameRecorder
         self._frame_bytes = frame_bytes     # one pair of images on disk
         self._snapshot = snapshot           # the files that define the rig
         self._phase = phase                 # -> (PhaseReport or None, nudges so far)
@@ -109,6 +116,9 @@ class Experiments:
         self._next_phase = 0.0
         self._nudges = 0
         self._state = IDLE
+        self._raw = False
+        self.min_free_bytes = MIN_FREE_BYTES
+        self._next_disk = 0.0
         self._dir: Optional[Path] = None
         self._meta: dict = {}
         self._recorder = None
@@ -127,6 +137,11 @@ class Experiments:
     def capturing(self) -> bool:
         return self._state == CAPTURING
 
+    @property
+    def images_only(self) -> bool:
+        """A raw run is going: the tracker saves the frames and works nothing out."""
+        return self._raw and self._state != IDLE
+
     # ── Commands ──────────────────────────────────────────────────────────────
 
     def command(self, text: str) -> tuple[bool, str]:
@@ -140,9 +155,11 @@ class Experiments:
                 self._watch(parts[1] == "on")
                 return True, "sync"
             if parts[0] == "record":
-                return self._start_record(float(parts[1]))
+                return self._start_record()
             if parts[0] == "start":
-                return self._start(parts[1], int(parts[2]), parts[3])
+                raw = len(parts) > 4 and parts[4] == "raw"
+                fps = float(parts[5]) if raw and len(parts) > 5 else 0.0
+                return self._start(parts[1], int(parts[2]), parts[3], raw, fps)
             if parts[0] == "meta":
                 return self._set_meta(parts[1], json.loads(text.split(" ", 2)[2]))
             if parts[0] == "capture":
@@ -155,15 +172,22 @@ class Experiments:
             return False, str(e)
         return False, f"unknown: {parts[0]}"
 
-    def _start(self, name: str, frames_total: int, label: str) -> tuple[bool, str]:
+    def _start(self, name: str, frames_total: int, label: str, raw: bool = False,
+               fps: float = 0.0) -> tuple[bool, str]:
+        """`fps`: a raw run's recording rate, frames kept on sensor time as for a session
+        recording (settings.json recording_fps); 0 keeps every frame. A grid keeps every one."""
         if self._state != IDLE:
             return False, "a run is already going"
+        if not fps >= 0:
+            return False, "bad frame rate"
         if not re.fullmatch(r"[a-z0-9_]+", name):
             return False, "bad experiment name"
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", label):
             return False, "bad run name"
         self.root.mkdir(parents=True, exist_ok=True)
         need = frames_total * self._frame_bytes() * DISK_MARGIN
+        if raw:
+            need += self.min_free_bytes   # where a raw recording stops itself
         free = shutil.disk_usage(self.root).free
         if free < need:
             return False, f"needs {need / 1e9:.1f} GB, {free / 1e9:.1f} GB free"
@@ -190,20 +214,28 @@ class Experiments:
             "finished_at": None,
             "code_version": _commit(),
             "tracker": self._describe(),
-            "units": {"tip, tvec": "metres, camera frame", "rvec": "Rodrigues, camera frame",
-                      "table_*": "mm from the table centre, x right and y down as on screen"},
-            "columns": {"targets.csv": TARGET_COLUMNS, "poses.csv": POSE_COLUMNS},
+            "raw": raw,
         }
+        if raw:
+            self._meta["recording_fps"] = fps   # 0: every frame
+        if not raw:
+            self._meta["units"] = {
+                "tip, tvec": "metres, camera frame", "rvec": "Rodrigues, camera frame",
+                "table_*": "mm from the table centre, x right and y down as on screen"}
+            self._meta["columns"] = {"targets.csv": TARGET_COLUMNS, "poses.csv": POSE_COLUMNS}
         self._write_meta()
         self._close_monitor()   # the run's recorder takes the line
         self._recorder = self._open_recorder(
-            self._dir / "recording", {"experiment": name, "run": self._dir.name})
-        self._poses_file = open(self._dir / "poses.csv", "w", newline="", buffering=1)
-        self._poses = csv.writer(self._poses_file)
-        self._poses.writerow(POSE_COLUMNS)
-        self._targets_file = open(self._dir / "targets.csv", "w", newline="", buffering=1)
-        self._targets = csv.writer(self._targets_file)
-        self._targets.writerow(TARGET_COLUMNS)
+            self._dir / "recording", {"experiment": name, "run": self._dir.name}, fps)
+        self._raw = raw
+        self._poses_file = self._targets_file = None
+        if not raw:
+            self._poses_file = open(self._dir / "poses.csv", "w", newline="", buffering=1)
+            self._poses = csv.writer(self._poses_file)
+            self._poses.writerow(POSE_COLUMNS)
+            self._targets_file = open(self._dir / "targets.csv", "w", newline="", buffering=1)
+            self._targets = csv.writer(self._targets_file)
+            self._targets.writerow(TARGET_COLUMNS)
         self._phase_file = open(self._dir / "recording" / "phase_log.msgpack", "wb")
         self._next_phase = 0.0
         self._nudges = self._phase()[1]
@@ -226,28 +258,30 @@ class Experiments:
     def _start_capture(self, args: list) -> tuple[bool, str]:
         if self._state != READY:
             return False, f"{self._state}, not ready"
+        if self._raw:
+            return False, "a raw run records, it does not capture points"
         target, row, col = int(args[0]), int(args[1]), int(args[2])
         expected = (float(args[3]), float(args[4]))
         self._begin_capture(target, row, col, expected, int(args[5]), float(args[6]), None)
         return True, ""
 
-    def _start_record(self, seconds: float) -> tuple[bool, str]:
-        """A continuous raw capture: every frame until stop, or `seconds` after the first."""
+    def _start_record(self) -> tuple[bool, str]:
+        """A continuous raw capture: the run's frames until stop (or a full disk)."""
         if self._state != READY:
             return False, f"{self._state}, not ready"
-        if not seconds > 0:
-            return False, "needs a time limit"
-        self._begin_capture(1, "", "", None, 0, None, seconds)
+        if not self._raw:
+            return False, "only a raw run records"
+        self._begin_capture(1, "", "", None, 0, None, raw=True)
         return True, ""
 
-    def _begin_capture(self, target, row, col, expected, frames, still_mm, limit_s) -> None:
+    def _begin_capture(self, target, row, col, expected, frames, still_mm, raw=False) -> None:
         attempt = self._attempts.get(target, 0) + 1
         self._attempts[target] = attempt
         self._capture = {
             "target": target, "attempt": attempt, "row": row, "col": col, "expected": expected,
-            "frames": frames, "still_mm": still_mm, "limit_s": limit_s,
+            "frames": frames, "still_mm": still_mm, "raw": raw,
             "ok": 0, "failed": 0, "tips": [], "table": [], "sensor_ns": [],
-            "started": None, "deadline": None,
+            "started": None, "deadline": None, "first_ns": None, "last_ns": None,
         }
         self._state = CAPTURING
         self._changed = True
@@ -259,10 +293,12 @@ class Experiments:
             self._finish_capture("stopped")
         self._pending = None
         self._state = IDLE
+        self._raw = False
         recorder, self._recorder = self._recorder, None
         recorder.close()
         for fh in (self._poses_file, self._targets_file, self._phase_file):
-            fh.close()
+            if fh is not None:
+                fh.close()
         self._meta["status"] = why
         self._meta["finished_at"] = datetime.now().isoformat(timespec="seconds")
         self._meta["targets_accepted"] = self._accepted
@@ -333,6 +369,7 @@ class Experiments:
         """Before the frame is worked on. A capture that begins later in this frame (the
         link is polled there) begins with the next, so every row has its images."""
         if self.capturing:
+            # None: the recording rate skipped this pair (a raw run below every frame).
             sync = self._recorder.add(raw0, raw1, ts0, ts1, sequences)
             self._pending = (ts0, ts1, sequences, sync)
 
@@ -346,7 +383,16 @@ class Experiments:
         c = self._capture
         if c["started"] is None:
             c["started"] = now
-            c["deadline"] = now + (c["limit_s"] if c["limit_s"] is not None else CAPTURE_TIMEOUT_S)
+            c["deadline"] = now + CAPTURE_TIMEOUT_S
+        if c["raw"]:
+            # A raw recording: the images went to the recorder, nothing else to keep.
+            if sync is not None:
+                c["frames"] += 1
+            if sync is not None and ts0 is not None:
+                c["first_ns"] = c["first_ns"] or ts0
+                c["last_ns"] = ts0
+            self._changed = self._changed or c["frames"] % 25 == 0
+            return
         number = c["ok"] + c["failed"]
         if ts0 is not None:
             c["sensor_ns"].append(ts0)
@@ -370,10 +416,7 @@ class Experiments:
         ])
         self._changed = self._changed or number % 5 == 0
 
-        if c["limit_s"] is not None:
-            if now >= c["deadline"]:
-                self._finish_capture("limit")
-        elif c["ok"] >= c["frames"]:
+        if c["ok"] >= c["frames"]:
             self._finish_capture("")
         elif now >= c["deadline"] and c["ok"] == 0:
             self._finish_capture("no_pose")
@@ -389,6 +432,8 @@ class Experiments:
         return ((a * dx + c * dz) * 1000.0, (b * dx + d * dz) * 1000.0)
 
     def _finish_capture(self, reason: str) -> None:
+        if self._capture["raw"]:
+            return self._finish_record(reason)
         c, self._capture = self._capture, None
         self._state = READY
         row = {"tip_mean": ["", "", ""], "tip_std": ["", "", ""], "table": ["", ""],
@@ -409,13 +454,9 @@ class Experiments:
             row["table"] = [f"{v:.3f}" for v in table_mean]
             if c["expected"] is not None:
                 row["offset"] = [f"{v:.3f}" for v in table_mean - np.array(c["expected"])]
-        if c["limit_s"] is not None:
-            # A recording is whatever it caught: stopped, cut off by the link or at its limit.
-            accepted = c["ok"] + c["failed"] > 0
-        else:
-            if not reason and dev is not None and dev > c["still_mm"]:
-                reason = "moved"
-            accepted = not reason
+        if not reason and dev is not None and dev > c["still_mm"]:
+            reason = "moved"
+        accepted = not reason
         self._accepted += int(accepted)
         ns = c["sensor_ns"]
         fps = (len(ns) - 1) * 1e9 / (ns[-1] - ns[0]) if len(ns) > 1 and ns[-1] > ns[0] else 0.0
@@ -437,6 +478,26 @@ class Experiments:
                       "max_dev_mm": dev, "fps": round(fps, 1)}
         self._changed = True
 
+    def _finish_record(self, reason: str) -> None:
+        """A raw recording's end: what it holds, in metadata.json."""
+        c, self._capture = self._capture, None
+        self._state = READY
+        first, last = c["first_ns"], c["last_ns"]
+        fps = (c["frames"] - 1) * 1e9 / (last - first) if c["frames"] > 1 and last > first else 0.0
+        edges = [e for e in self._recorder.sync.events() if first and first <= e[0] <= last]
+        accepted = c["frames"] > 0
+        self._accepted += int(accepted)
+        self._meta["capture"] = {
+            "reason": reason, "frames": c["frames"], "fps": round(fps, 2),
+            "wall_start_unix": c["started"], "wall_end_unix": time.time(),
+            "sensor_ns_start": first, "sensor_ns_end": last, "sync_edges": len(edges),
+            "sync_first_rise_ns": next((e[0] for e in edges if e[1]), None),
+        }
+        self._write_meta()
+        self._last = {"target": c["target"], "attempt": c["attempt"], "accepted": accepted,
+                      "reason": reason, "frames": c["frames"], "fps": round(fps, 1)}
+        self._changed = True
+
     # ── Status ────────────────────────────────────────────────────────────────
 
     def poll(self, now: float) -> Optional[bytes]:
@@ -446,6 +507,11 @@ class Experiments:
         if running and now >= self._next_phase:
             self._next_phase = now + PHASE_EVERY_S
             self._log_phase()
+        if self._capture is not None and self._capture["raw"] and now >= self._next_disk:
+            self._next_disk = now + DISK_EVERY_S
+            if shutil.disk_usage(self._dir).free < self.min_free_bytes:
+                print(f"[EXPERIMENT] Disk nearly full: recording stopped in {self._dir}", flush=True)
+                self._finish_capture("disk_full")
         sync = self._sync_status() if running or self._watching else None
         if sync is not None and (sync.get("level"), sync.get("edges")) != self._sync_sent:
             self._changed = True   # the trigger moved: at once, not at the next tick
@@ -462,8 +528,7 @@ class Experiments:
             c = self._capture
             status["capture"] = {"target": c["target"], "attempt": c["attempt"],
                                  "frames": c["frames"], "ok": c["ok"], "failed": c["failed"]}
-            if c["limit_s"] is not None:
-                status["capture"]["limit_s"] = c["limit_s"]
+            if c["raw"]:
                 status["capture"]["elapsed_s"] = round(now - c["started"], 2) if c["started"] else 0.0
         return protocol.encode(protocol.EXPERIMENT_STATUS, json.dumps(status))
 

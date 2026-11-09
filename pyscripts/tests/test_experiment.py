@@ -53,7 +53,7 @@ class Rig:
         self.exp = Experiments(
             root / "experiments",
             lambda: {"solver": "joint"},
-            lambda out, meta: FrameRecorder(out, metadata=meta, target_hz=0, chunk_frames=10),
+            lambda out, meta, fps=0: FrameRecorder(out, metadata=meta, target_hz=fps, chunk_frames=10),
             lambda: 2 * FRAME.size,
             lambda: [self.rigid, root / "not_there.toml"],
             lambda: (self.phase, self.nudges),
@@ -291,47 +291,75 @@ def test_watching_the_trigger(rig: Rig) -> None:
 
 
 def test_continuous_record(rig: Rig) -> None:
-    ok, path = rig.exp.command("start continuous_raw 1000 rec1")
+    assert rig.exp.command("start grid 30 r0")[0], "a grid run"
+    assert not rig.exp.command("record")[0], "only a raw run records"
+    rig.exp.command("stop stopped")
+
+    ok, path = rig.exp.command("start continuous_raw 1000 rec1 raw")
     assert ok, path
     run = Path(path)
-    assert not rig.exp.command("record 0")[0], "needs a time limit"
-    assert rig.exp.command("record 0.2")[0]
-    assert not rig.exp.command("record 5")[0], "one at a time"
-    rig.tick(rig.still())
-    rig.tick(None)                                  # out of view: kept, recording goes on
+    assert rig.exp.images_only, "nothing worked out from the moment a raw run starts"
+    assert not rig.exp.command("capture 1 1 1 0 0 30 5")[0], "a raw run does not capture points"
+    assert rig.exp.command("record")[0]
+    assert not rig.exp.command("record")[0], "one at a time"
     sync = rig.exp._recorder.sync
+    rig.tick(None)
     sync._note_edge(rig.ns + 1, 1, 1)
-    for i in range(10):
-        rig.tick(rig.still(wobble=i * 0.01))        # moving: a recording, not a held point
+    for _ in range(5):
+        rig.tick(None)
     status = json.loads(rig.exp.poll(rig.now)[1:])
-    assert status["capture"]["limit_s"] == 0.2 and status["capture"]["elapsed_s"] > 0, status
-    assert rig.exp.capturing
-    while rig.exp.capturing:
-        rig.tick(rig.still())
-    last = json.loads(rig.exp.poll(0.0)[1:])["last"]
-    assert last["accepted"] and last["reason"] == "limit", last
+    assert status["capture"]["frames"] == 6 and status["capture"]["elapsed_s"] > 0, status
+    for _ in range(1000):                           # 10 s: no limit, it goes on
+        rig.tick(None)
+    assert rig.exp.capturing, "only stop ends it"
+    rig.exp.poll(rig.now)
+    assert rig.exp.capturing, "with room on the disk"
     assert rig.exp.command("stop complete")[0]
+    assert not rig.exp.images_only
 
-    targets = rows(run / "targets.csv")
-    poses = rows(run / "poses.csv")
-    assert len(targets) == 1 and targets[0]["row"] == "" and targets[0]["expected_x_mm"] == ""
-    assert targets[0]["offset_x_mm"] == "" and targets[0]["sync_edges"] == "1", targets[0]
-    assert int(targets[0]["frames_ok"]) + int(targets[0]["frames_failed"]) == len(poses)
-    assert targets[0]["frames_failed"] == "1"
-    assert all(p["target"] == "1" and p["row"] == "" for p in poses)
-    assert 20 <= len(poses) <= 22, len(poses)      # 0.2 s at 100 Hz, the limit frame included
+    assert not (run / "poses.csv").exists() and not (run / "targets.csv").exists(), "no tracker data"
+    meta = json.loads((run / "metadata.json").read_text())
+    assert meta["raw"] and "columns" not in meta, meta
+    cap = meta["capture"]
+    assert cap["reason"] == "stopped" and cap["sync_edges"] == 1 and cap["frames"] == 1006, cap
+    assert abs(cap["fps"] - 100.0) < 1.0, cap
+    stamps = []
+    for f in sorted((run / "recording").glob("cam0_timestamp*.msgpack")):
+        stamps += [r[3] for r in unpack(f)]
+    assert len(stamps) == cap["frames"] and stamps[0] == cap["sensor_ns_start"], "every frame's images"
+    assert stamps[-1] == cap["sensor_ns_end"]
 
-    # Stopped before its limit: still the recording, accepted.
-    assert rig.exp.command("start continuous_raw 1000 rec2")[0]
-    assert rig.exp.command("record 60")[0]
+    # The disk nearly full: the tracker ends the recording itself, and says why.
+    assert rig.exp.command("start continuous_raw 1000 rec2 raw")[0]
+    assert rig.exp.command("record")[0]
     for _ in range(3):
-        rig.tick(rig.still())
+        rig.tick(None)
+    rig.exp.min_free_bytes = 10 ** 18
+    rig.exp.poll(rig.now + 5)
+    assert not rig.exp.capturing
+    last = json.loads(rig.exp.poll(rig.now + 6)[1:])["last"]
+    assert last["reason"] == "disk_full" and last["accepted"] and last["frames"] == 3, last
     assert rig.exp.command("stop complete")[0]
-    run2 = Path(json.loads(rig.exp.poll(0.0)[1:])["saved"]["path"])
-    t = rows(run2 / "targets.csv")[0]
-    assert t["accepted"] == "1" and t["reason"] == "stopped", t
-    assert json.loads((run2 / "metadata.json").read_text())["targets_accepted"] == 1
-    print("  continuous            every frame to the limit or the stop, one summary row")
+    assert not rig.exp.command("start continuous_raw 10 rec3 raw")[0], "and no new one starts"
+    rig.exp.min_free_bytes = 0
+
+    # At a chosen rate: the frames kept on sensor time, 100 Hz in, 25 Hz saved.
+    ok, path = rig.exp.command("start continuous_raw 1000 rec3 raw 25")
+    assert ok, path
+    assert rig.exp.command("record")[0]
+    for _ in range(40):
+        rig.tick(None)
+    assert json.loads(rig.exp.poll(rig.now + 1)[1:])["capture"]["frames"] == 10
+    assert rig.exp.command("stop complete")[0]
+    meta = json.loads((Path(path) / "metadata.json").read_text())
+    assert meta["recording_fps"] == 25.0 and meta["capture"]["frames"] == 10, meta
+    assert abs(meta["capture"]["fps"] - 25.0) < 0.5, meta["capture"]
+    stamps = []
+    for f in sorted((Path(path) / "recording").glob("cam0_timestamp*.msgpack")):
+        stamps += [r[3] for r in unpack(f)]
+    assert len(stamps) == 10, len(stamps)
+    assert not rig.exp.command("start continuous_raw 1000 rec4 raw -5")[0], "a bad rate"
+    print("  continuous raw        both feeds only, until stop or a full disk, at its rate")
 
 
 def main() -> None:
