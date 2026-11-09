@@ -99,6 +99,13 @@ func _reach_area() -> void:
 	_check(ReachArea.pick(PackedVector2Array([Vector2(400, 300), Vector2(420, 300), Vector2(400, 320)]),
 		26.0, Vector2i(200, 200), Vector2i(900, 600)) == null, "none in an outline too small")
 	_check(ReachArea.outline_px([[0, 0], [1]]).is_empty(), "no outline from under 3 points")
+	# The drawn workspace: a 200 px square onto the 700 x 400 box, one scale, centred.
+	var view := ReachArea.view_fit(square, Vector2i(200, 200), Vector2i(900, 600))
+	_check(is_equal_approx(view.get_scale().x, 2.0) and is_equal_approx(view.get_scale().y, 2.0), "one scale, the tighter side: %s" % str(view.get_scale()))
+	_check((view * Vector2(400, 350)).is_equal_approx(Vector2(550, 400)), "its centre on the box's")
+	var tiny := PackedVector2Array([Vector2(400, 300), Vector2(420, 300), Vector2(400, 320)])
+	_check(is_equal_approx(ReachArea.view_fit(tiny, Vector2i(200, 200), Vector2i(900, 600)).get_scale().x, ReachArea.GAIN_MAX), "the gain limited")
+	_check(ReachArea.view_fit(PackedVector2Array(), Vector2i(200, 200), Vector2i(900, 600)) == Transform2D.IDENTITY, "no outline, no scaling")
 
 
 ## The experiment's grid: 4 x 6 inside the margin, snaking, row 1 at the top.
@@ -359,6 +366,21 @@ func _reach_play_run() -> void:
 		_check(ReachArea.fits(outline, player.current_apple.position, player._apple_radius()),
 			"the apple inside the outline: %s" % str(player.current_apple.position))
 	_check(player.apples_outside_outline == 0, "none had to go outside")
+	# Scaled for the eye only: what is logged is the real hand and the real apple.
+	_check(not is_equal_approx(player.view_gain(), 1.0), "the workspace is drawn scaled: %s" % player.view_gain())
+	var apple_real: Vector2 = player._view_inv * player.current_apple.position
+	_check(is_equal_approx(player.target_x, (apple_real.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X),
+		"the apple logged where it really is")
+	var hand_was: Vector2 = GlobalScript.network_position
+	var real_hand := Vector2(GlobalScript.X_SCREEN_OFFSET + 30, GlobalScript.Y_SCREEN_OFFSET + 20)
+	GlobalScript.network_position = real_hand
+	for i in 40:
+		player._update_player_position()
+	GlobalScript.network_position = hand_was
+	_check(player.position.distance_to(player._view * real_hand) < 0.5, "the sheep drawn scaled: %s" % str(player.position))
+	_check(absf(player.game_x - 30.0 / GlobalScript.PLAYER_POS_SCALER_X) < 1e-4 \
+		and absf(player.game_z - 20.0 / GlobalScript.PLAYER_POS_SCALER_Z) < 1e-4,
+		"the hand logged unscaled: %f %f" % [player.game_x, player.game_z])
 	_check(not game.get_node("Paused/Restart").visible, "no restart in the experiment")
 	var sync: Array = player._exp.find_children("*", "PanelContainer", true, false) \
 		.filter(func(n): return n.get("edges") != null)

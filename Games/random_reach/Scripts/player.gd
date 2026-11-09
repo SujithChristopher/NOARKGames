@@ -246,7 +246,9 @@ func _update_player_position() -> void:
 	if network_position != Vector2.ZERO:
 		_reach_outline()   # the view follows today's outline
 		# The mouse is already where it is drawn; the tracker's hand is real, drawn scaled.
-		var drawn: Vector2 = network_position if debug_mode else _view * (network_position - zero_offset)
+		var drawn: Vector2 = network_position - zero_offset
+		if not debug_mode:
+			drawn = _view * drawn
 		network_position = network_position - zero_offset
 		position = position.lerp(drawn, 0.8)
 		position.x = clamp(position.x, MIN_BOUNDS.x, MAX_BOUNDS.x)

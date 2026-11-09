@@ -527,7 +527,7 @@ scan, for the time set on its screen. Only the game is recorded, from play to ga
 leaving early, `status` `stopped`). `metadata.json`: `kind: play`, `recording_fps` (0 every
 frame), `recording_scale` (1, 0.5 or 0.25 of each side), `game` {name, mode, seconds},
 `table_frame`, `capture` as for continuous raw plus `frames_ok` / `frames_failed`, and `game_end`
-{`score`, `apples_outside_outline` (apples with no room in the scan's outline, placed anywhere in the game's box), `sync_waited`, and either `sync_at_end` (the line when the time ran out: 0, or -1 no line)
+{`score`, `apples_outside_outline` (apples with no room in the scan's outline, placed anywhere in the game's box), `display_gain` (how much the workspace was drawn scaled on screen; logged positions are real, never scaled), `sync_waited`, and either `sync_at_end` (the line when the time ran out: 0, or -1 no line)
 or `how` (`mocap_stopped`, `skipped`, `recording_ended`), `wait_s`, `tail_s`}. If the trigger was HIGH
 when the time ran out, recording goes on until it is LOW plus 0.5 s, so the recording spans the
 mocap's take; the game's rows from then have status `waiting_sync`.
