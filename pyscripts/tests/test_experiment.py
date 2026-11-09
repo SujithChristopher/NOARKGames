@@ -24,6 +24,23 @@ FRAMES = 30
 TABLE = {"centre": [0.1, 0.4], "basis": [1.0, 0.0, 0.0, 1.0], "k": 1000.0, "y0": 0.0}
 
 
+class FakeSync:
+    """The trigger line as a screen watches it: a level and a count."""
+    available = True
+    edges_available = True
+
+    def __init__(self) -> None:
+        self.level = 0
+        self.event_count = 0
+        self.closed = False
+
+    def get_value(self) -> int:
+        return self.level
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def rows(path: Path) -> list:
     with open(path, newline="") as fh:
         return list(csv.DictReader(fh))
@@ -40,11 +57,18 @@ class Rig:
             lambda: 2 * FRAME.size,
             lambda: [self.rigid, root / "not_there.toml"],
             lambda: (self.phase, self.nudges),
+            self.open_monitor,
         )
+        self.monitors: list = []
         self.phase = SimpleNamespace(phase_us=12.5, jitter_us=3.0, drift_ppm=50.0, n=30)
         self.nudges = 0
         self.ns = 1_000_000_000
         self.now = 1000.0
+
+    def open_monitor(self):
+        monitor = FakeSync()
+        self.monitors.append(monitor)
+        return monitor
 
     def tick(self, pose) -> None:
         self.ns += 10_000_000
@@ -240,6 +264,76 @@ def test_status_repeats(rig: Rig) -> None:
     print("  status                on change, steadily during a run")
 
 
+def test_watching_the_trigger(rig: Rig) -> None:
+    assert rig.exp.command("watch on") == (True, "sync")
+    monitor = rig.monitors[-1]
+    status = json.loads(rig.exp.poll(10.0)[1:])
+    assert status["sync"] == {"available": True, "level": 0, "edges": 0, "edge_timestamps": True}
+    assert rig.exp.poll(10.1) is None
+    monitor.level, monitor.event_count = 1, 1
+    status = json.loads(rig.exp.poll(10.15)[1:])
+    assert status["sync"]["level"] == 1, "a change goes at once"
+    assert rig.exp.poll(10.5) is not None, "and steadily while watched"
+
+    # A run takes the line: the monitor lets go, the recorder's line is shown, then back.
+    assert rig.exp.command("start grid 30 w1")[0]
+    assert monitor.closed and rig.exp._monitor is None
+    status = json.loads(rig.exp.poll(11.0)[1:])
+    assert "sync" in status, status
+    assert rig.exp.command("stop complete")[0]
+    assert len(rig.monitors) == 2 and not rig.monitors[-1].closed, "watching again after the run"
+
+    rig.exp.link_lost()
+    assert rig.monitors[-1].closed and rig.exp._monitor is None, "a lost link stops watching"
+    rig.exp.command("status")
+    assert "sync" not in json.loads(rig.exp.poll(12.0)[1:])
+    print("  sync                  watched before a run, the run's line during it")
+
+
+def test_continuous_record(rig: Rig) -> None:
+    ok, path = rig.exp.command("start continuous_raw 1000 rec1")
+    assert ok, path
+    run = Path(path)
+    assert not rig.exp.command("record 0")[0], "needs a time limit"
+    assert rig.exp.command("record 0.2")[0]
+    assert not rig.exp.command("record 5")[0], "one at a time"
+    rig.tick(rig.still())
+    rig.tick(None)                                  # out of view: kept, recording goes on
+    sync = rig.exp._recorder.sync
+    sync._note_edge(rig.ns + 1, 1, 1)
+    for i in range(10):
+        rig.tick(rig.still(wobble=i * 0.01))        # moving: a recording, not a held point
+    status = json.loads(rig.exp.poll(rig.now)[1:])
+    assert status["capture"]["limit_s"] == 0.2 and status["capture"]["elapsed_s"] > 0, status
+    assert rig.exp.capturing
+    while rig.exp.capturing:
+        rig.tick(rig.still())
+    last = json.loads(rig.exp.poll(0.0)[1:])["last"]
+    assert last["accepted"] and last["reason"] == "limit", last
+    assert rig.exp.command("stop complete")[0]
+
+    targets = rows(run / "targets.csv")
+    poses = rows(run / "poses.csv")
+    assert len(targets) == 1 and targets[0]["row"] == "" and targets[0]["expected_x_mm"] == ""
+    assert targets[0]["offset_x_mm"] == "" and targets[0]["sync_edges"] == "1", targets[0]
+    assert int(targets[0]["frames_ok"]) + int(targets[0]["frames_failed"]) == len(poses)
+    assert targets[0]["frames_failed"] == "1"
+    assert all(p["target"] == "1" and p["row"] == "" for p in poses)
+    assert 20 <= len(poses) <= 22, len(poses)      # 0.2 s at 100 Hz, the limit frame included
+
+    # Stopped before its limit: still the recording, accepted.
+    assert rig.exp.command("start continuous_raw 1000 rec2")[0]
+    assert rig.exp.command("record 60")[0]
+    for _ in range(3):
+        rig.tick(rig.still())
+    assert rig.exp.command("stop complete")[0]
+    run2 = Path(json.loads(rig.exp.poll(0.0)[1:])["saved"]["path"])
+    t = rows(run2 / "targets.csv")[0]
+    assert t["accepted"] == "1" and t["reason"] == "stopped", t
+    assert json.loads((run2 / "metadata.json").read_text())["targets_accepted"] == 1
+    print("  continuous            every frame to the limit or the stop, one summary row")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         rig = Rig(Path(tmp))
@@ -249,6 +343,8 @@ def main() -> None:
         test_out_of_view_gives_up(rig)
         test_link_lost_mid_capture(rig)
         test_status_repeats(rig)
+        test_watching_the_trigger(rig)
+        test_continuous_record(rig)
     print("OK")
 
 

@@ -27,6 +27,8 @@ const APPLE := "res://Games/random_reach/scenes/apple.tscn"
 const MAIN_SCREEN := "res://Main_screen/Scenes/main.tscn"
 const STATIC_GRID := "res://Experiments/static_grid.tscn"
 const StaticGrid := preload("res://Experiments/static_grid.gd")
+const CONTINUOUS_RAW := "res://Experiments/continuous_raw.tscn"
+const ContinuousRaw := preload("res://Experiments/continuous_raw.gd")
 
 ## [scene, mode]. The 2D+3D games run in both modes.
 const SCENES := [
@@ -46,6 +48,7 @@ const SCENES := [
 	["res://Results/scenes/user_progress.tscn", "2D"],
 	["res://Experiments/experiment_menu.tscn", "2D"],
 	[STATIC_GRID, "2D"],
+	[CONTINUOUS_RAW, "2D"],
 ]
 
 
@@ -70,6 +73,7 @@ func _ready() -> void:
 	await _calibration_tab()
 	_grid_points()
 	await _static_grid_run()
+	await _continuous_raw_run()
 	print("SMOKE DONE %d scenes" % SCENES.size())
 	get_tree().quit()
 
@@ -172,6 +176,63 @@ func _static_grid_run() -> void:
 	GlobalScript._table_corners = table_was[2]
 	GlobalScript._table_basis = table_was[3]
 	GlobalScript._table_centre = table_was[4]
+
+
+## The continuous capture with the tracker's answers fed in: start, record, the mocap
+## trigger shown, the time limit ending it. As the static grid run, nothing leaves the app.
+func _continuous_raw_run() -> void:
+	print("SMOKE scene continuous raw run")
+	var scene: Control = (load(CONTINUOUS_RAW) as PackedScene).instantiate()
+	get_tree().root.add_child(scene)
+	get_tree().current_scene = scene
+	await get_tree().process_frame
+	_check(scene._start_button.disabled, "no start without the experiment's name")
+	scene._label.text = "rec 1"
+	scene._label.text_changed.emit(scene._label.text)
+	scene._limit.value = 30
+	_check(not scene._start_button.disabled, "named, it can start, table or not")
+
+	var sync: Control = scene.get_children().filter(func(n): return n.get("edges") != null)[0]
+	_check(sync._state.text == "?", "the trigger unknown until the tracker says: %s" % sync._state.text)
+	_feed_experiment({"state": "idle", "last": null, "saved": null,
+		"sync": {"available": true, "level": 0, "edges": 0, "edge_timestamps": true}})
+	_check(sync._state.text == "LOW", "LOW: %s" % sync._state.text)
+
+	GlobalScript.link.connected = true
+	scene._start()
+	GlobalScript.link.connected = false
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "sync")
+	_check(scene._view == ContinuousRaw.View.SETUP, "the indicator's watch ACK is not the start's")
+	GlobalScript.link_command_done.emit(LinkProtocol.EXPERIMENT, true, "/somewhere")
+	_check(scene._view == ContinuousRaw.View.RUN, "the tracker's yes starts the run")
+	var sent: Array = _experiment_commands()
+	_check(sent[0] == "start continuous_raw 3600 rec_1", "start: %s" % str(sent))
+	_check(sent.back() == "record 30", "then record: %s" % str(sent))
+	_check(sent.any(func(c): return c.begins_with("meta recording")), "the run says what it is")
+	for command in sent:
+		_check(command.length() < 240, "fits one BLE write: %d: %s" % [command.length(), command])
+
+	_feed_experiment({"state": "capturing", "last": null, "saved": null,
+		"capture": {"target": 1, "attempt": 1, "frames": 0, "ok": 40, "failed": 2, "limit_s": 30, "elapsed_s": 0.5},
+		"sync": {"available": true, "level": 1, "edges": 1, "edge_timestamps": true}})
+	_check(scene._recording and scene._ok == 40 and scene._failed == 2, "counts the frames")
+	_check(sync._state.text == "HIGH" and sync.edges == 1, "HIGH: %s" % sync._state.text)
+	await get_tree().process_frame
+	_check("00:00 / 00:30" in scene._clock.text, "clock: %s" % scene._clock.text)
+
+	_feed_experiment({"state": "ready", "saved": null,
+		"last": {"target": 1, "attempt": 1, "accepted": true, "reason": "limit", "frames_ok": 2900, "frames_failed": 10}})
+	_check(scene._view == ContinuousRaw.View.DONE, "the limit ends the run")
+	_check(_experiment_commands().back() == "stop complete", "stop: %s" % _experiment_commands().back())
+	_feed_experiment({"state": "idle", "last": null, "saved": {"path": "/there/rec_1", "status": "complete", "accepted": 1, "dropped": [0, 0]},
+		"sync": {"available": false}})
+	_check("/there/rec_1" in scene._done_text.text and "2910 frames" in scene._done_text.text,
+		"says where and how much: %s" % scene._done_text.text)
+	_check(sync._state.text == "NO LINE", "no line: %s" % sync._state.text)
+
+	GlobalScript.link._queue.clear()
+	scene.queue_free()
+	await get_tree().process_frame
 
 
 func _put_hand(table_m: Vector2) -> void:

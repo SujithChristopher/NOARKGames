@@ -22,6 +22,15 @@ are all CLOCK_MONOTONIC, so a pulse is placed against a frame or a capture by co
 
     idle -> ready <-> capturing
               `-> idle (stop, a link lost, a new HELLO)
+
+Two kinds of capture. `capture` is a held point (static grid): frames until enough have a
+pose, judged still or moved. `record <seconds>` is a continuous raw capture: every frame,
+pose or not, until `stop` or the time limit; one targets.csv row sums it up, row and col
+empty.
+
+The mocap trigger is shown on every experiment screen: `watch on` opens the sync line on its
+own while no run holds it (a run's recorder has it then), and every EXPERIMENT_STATUS
+carries `sync`. A changed level is sent at once, so the screen follows the trigger.
 """
 
 import csv
@@ -84,13 +93,18 @@ class Experiments:
     def __init__(self, root: Path, describe: Callable[[], dict],
                  open_recorder: Callable[[Path, dict], object], frame_bytes: Callable[[], int],
                  snapshot: Callable[[], list],
-                 phase: Callable[[], tuple] = lambda: (None, 0)) -> None:
+                 phase: Callable[[], tuple] = lambda: (None, 0),
+                 open_sync: Optional[Callable[[], object]] = None) -> None:
         self.root = Path(root)
         self._describe = describe           # how the tracker is set up now
         self._open_recorder = open_recorder # out_dir, metadata -> FrameRecorder
         self._frame_bytes = frame_bytes     # one pair of images on disk
         self._snapshot = snapshot           # the files that define the rig
         self._phase = phase                 # -> (PhaseReport or None, nudges so far)
+        self._open_sync = open_sync         # -> a SyncLine of its own, for watching
+        self._watching = False
+        self._monitor = None                # that SyncLine, while watching and no run
+        self._sync_sent = None              # (level, edges) in the last status
         self._phase_file = None
         self._next_phase = 0.0
         self._nudges = 0
@@ -122,6 +136,11 @@ class Experiments:
             if parts[0] == "status":
                 self._changed = True
                 return True, ""
+            if parts[0] == "watch":
+                self._watch(parts[1] == "on")
+                return True, "sync"
+            if parts[0] == "record":
+                return self._start_record(float(parts[1]))
             if parts[0] == "start":
                 return self._start(parts[1], int(parts[2]), parts[3])
             if parts[0] == "meta":
@@ -176,6 +195,7 @@ class Experiments:
             "columns": {"targets.csv": TARGET_COLUMNS, "poses.csv": POSE_COLUMNS},
         }
         self._write_meta()
+        self._close_monitor()   # the run's recorder takes the line
         self._recorder = self._open_recorder(
             self._dir / "recording", {"experiment": name, "run": self._dir.name})
         self._poses_file = open(self._dir / "poses.csv", "w", newline="", buffering=1)
@@ -208,17 +228,29 @@ class Experiments:
             return False, f"{self._state}, not ready"
         target, row, col = int(args[0]), int(args[1]), int(args[2])
         expected = (float(args[3]), float(args[4]))
+        self._begin_capture(target, row, col, expected, int(args[5]), float(args[6]), None)
+        return True, ""
+
+    def _start_record(self, seconds: float) -> tuple[bool, str]:
+        """A continuous raw capture: every frame until stop, or `seconds` after the first."""
+        if self._state != READY:
+            return False, f"{self._state}, not ready"
+        if not seconds > 0:
+            return False, "needs a time limit"
+        self._begin_capture(1, "", "", None, 0, None, seconds)
+        return True, ""
+
+    def _begin_capture(self, target, row, col, expected, frames, still_mm, limit_s) -> None:
         attempt = self._attempts.get(target, 0) + 1
         self._attempts[target] = attempt
         self._capture = {
             "target": target, "attempt": attempt, "row": row, "col": col, "expected": expected,
-            "frames": int(args[5]), "still_mm": float(args[6]),
+            "frames": frames, "still_mm": still_mm, "limit_s": limit_s,
             "ok": 0, "failed": 0, "tips": [], "table": [], "sensor_ns": [],
             "started": None, "deadline": None,
         }
         self._state = CAPTURING
         self._changed = True
-        return True, ""
 
     def _stop(self, why: str) -> tuple[bool, str]:
         if self._state == IDLE:
@@ -248,14 +280,46 @@ class Experiments:
         self._saved = {"path": str(self._dir), "status": why, "accepted": self._accepted,
                        "dropped": self._meta["images"]["dropped"]}
         self._changed = True
+        if self._watching:
+            self._open_monitor()
         print(f"[EXPERIMENT] {why}: {self._accepted} targets in {self._dir}", flush=True)
         return True, str(self._dir)
 
     def link_lost(self) -> None:
         self._stop("link_lost")
+        self._watch(False)
 
     def close(self) -> None:
         self._stop("tracker_stopped")
+        self._watch(False)
+
+    # ── The mocap trigger ─────────────────────────────────────────────────────
+
+    def _watch(self, on: bool) -> None:
+        self._watching = on
+        if on and self._recorder is None:
+            self._open_monitor()
+        elif not on:
+            self._close_monitor()
+        self._changed = True
+
+    def _open_monitor(self) -> None:
+        if self._monitor is None and self._open_sync is not None:
+            self._monitor = self._open_sync()
+
+    def _close_monitor(self) -> None:
+        monitor, self._monitor = self._monitor, None
+        if monitor is not None:
+            monitor.close()
+
+    def _sync_status(self) -> dict:
+        """The trigger as the screen shows it. `edges` counts from when this line was
+        opened: the run's start, or the screen's."""
+        line = self._recorder.sync if self._recorder is not None else self._monitor
+        if line is None or not line.available:
+            return {"available": False}
+        return {"available": True, "level": line.get_value(), "edges": line.event_count,
+                "edge_timestamps": line.edges_available}
 
     def _write_meta(self) -> None:
         """Whole or not at all: the file is what says what the rest of the folder is."""
@@ -282,7 +346,7 @@ class Experiments:
         c = self._capture
         if c["started"] is None:
             c["started"] = now
-            c["deadline"] = now + CAPTURE_TIMEOUT_S
+            c["deadline"] = now + (c["limit_s"] if c["limit_s"] is not None else CAPTURE_TIMEOUT_S)
         number = c["ok"] + c["failed"]
         if ts0 is not None:
             c["sensor_ns"].append(ts0)
@@ -306,7 +370,10 @@ class Experiments:
         ])
         self._changed = self._changed or number % 5 == 0
 
-        if c["ok"] >= c["frames"]:
+        if c["limit_s"] is not None:
+            if now >= c["deadline"]:
+                self._finish_capture("limit")
+        elif c["ok"] >= c["frames"]:
             self._finish_capture("")
         elif now >= c["deadline"] and c["ok"] == 0:
             self._finish_capture("no_pose")
@@ -340,10 +407,15 @@ class Experiments:
         if c["table"]:
             table_mean = np.mean(c["table"], axis=0)
             row["table"] = [f"{v:.3f}" for v in table_mean]
-            row["offset"] = [f"{v:.3f}" for v in table_mean - np.array(c["expected"])]
-        if not reason and dev is not None and dev > c["still_mm"]:
-            reason = "moved"
-        accepted = not reason
+            if c["expected"] is not None:
+                row["offset"] = [f"{v:.3f}" for v in table_mean - np.array(c["expected"])]
+        if c["limit_s"] is not None:
+            # A recording is whatever it caught: stopped, cut off by the link or at its limit.
+            accepted = c["ok"] + c["failed"] > 0
+        else:
+            if not reason and dev is not None and dev > c["still_mm"]:
+                reason = "moved"
+            accepted = not reason
         self._accepted += int(accepted)
         ns = c["sensor_ns"]
         fps = (len(ns) - 1) * 1e9 / (ns[-1] - ns[0]) if len(ns) > 1 and ns[-1] > ns[0] else 0.0
@@ -353,7 +425,7 @@ class Experiments:
         first_rise = next((e[0] for e in inside if e[1]), "")
         phase = self._phase()[0]
         self._targets.writerow([
-            c["target"], c["attempt"], c["row"], c["col"], *c["expected"],
+            c["target"], c["attempt"], c["row"], c["col"], *(c["expected"] or ("", "")),
             int(accepted), reason, c["ok"], c["failed"], f"{fps:.1f}",
             f"{c['started'] or 0:.6f}", f"{time.time():.6f}",
             ns[0] if ns else "", ns[-1] if ns else "", len(inside), first_rise,
@@ -374,16 +446,25 @@ class Experiments:
         if running and now >= self._next_phase:
             self._next_phase = now + PHASE_EVERY_S
             self._log_phase()
-        if not self._changed and not (running and now >= self._next_status):
+        sync = self._sync_status() if running or self._watching else None
+        if sync is not None and (sync.get("level"), sync.get("edges")) != self._sync_sent:
+            self._changed = True   # the trigger moved: at once, not at the next tick
+        steady = (running or self._watching) and now >= self._next_status
+        if not self._changed and not steady:
             return None
         self._changed = False
         self._next_status = now + STATUS_EVERY_S
         status = {"state": self._state, "last": self._last, "saved": self._saved}
+        if sync is not None:
+            status["sync"] = sync
+            self._sync_sent = (sync.get("level"), sync.get("edges"))
         if self._capture is not None:
-            status["capture"] = {"target": self._capture["target"],
-                                 "attempt": self._capture["attempt"],
-                                 "frames": self._capture["frames"],
-                                 "ok": self._capture["ok"], "failed": self._capture["failed"]}
+            c = self._capture
+            status["capture"] = {"target": c["target"], "attempt": c["attempt"],
+                                 "frames": c["frames"], "ok": c["ok"], "failed": c["failed"]}
+            if c["limit_s"] is not None:
+                status["capture"]["limit_s"] = c["limit_s"]
+                status["capture"]["elapsed_s"] = round(now - c["started"], 2) if c["started"] else 0.0
         return protocol.encode(protocol.EXPERIMENT_STATUS, json.dumps(status))
 
     def _log_phase(self) -> None:

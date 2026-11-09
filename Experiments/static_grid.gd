@@ -15,6 +15,7 @@ const Style := preload("res://Main_screen/Scripts/settings_style.gd")
 const TableSpace := preload("res://Games/firefly_reach/table_space.gd")
 const TableOverlay := preload("res://Main_screen/Scripts/table_overlay.gd")
 const LinkProtocol := preload("res://Main_screen/Scripts/link_protocol.gd")
+const SyncIndicatorScript := preload("res://Experiments/sync_indicator.gd")
 const MENU := "res://Experiments/experiment_menu.tscn"
 const NAME := "static_grid"
 
@@ -105,6 +106,7 @@ func _ready() -> void:
 	GlobalScript.link_connected_changed.connect(_on_link_changed)
 	_build_setup()
 	_build_run()
+	add_child(SyncIndicatorScript.new())
 	_show_view(View.SETUP)
 	_refresh_setup()
 
@@ -273,7 +275,7 @@ func _start() -> void:
 
 
 func _on_command_done(kind: int, ok: bool, detail: String) -> void:
-	if kind != LinkProtocol.EXPERIMENT:
+	if kind != LinkProtocol.EXPERIMENT or detail == "sync":   # the indicator's watch
 		return
 	if _waiting_start:
 		_waiting_start = false

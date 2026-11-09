@@ -467,9 +467,10 @@ Written by the tracker on the board (`pyscripts/experiment.py`), never by the ap
 outside `data/`: no patient, no upload, not listed in Settings > Storage.
 
 ```text
-NOARK_demo/experiments/static_grid/{label}_{YYYY-MM-DD}_{HH-MM-SS}/
+NOARK_demo/experiments/{static_grid|continuous_raw}/{label}_{YYYY-MM-DD}_{HH-MM-SS}/
     metadata.json   label (the name or number typed at the start), status (running, complete, stopped, link_lost, tracker_stopped),
-                    times, code version, tracker setup, table, grid, dwell, notes,
+                    times, code version, tracker setup, table, grid and dwell (static grid),
+                    recording {kind, limit_s} (continuous raw), notes,
                     units, every column name, images dropped
     targets.csv     one row per capture attempt
     poses.csv       one row per camera frame captured
@@ -511,3 +512,11 @@ range (while the device was moving) are kept but counted in no row.
 The expected positions come from the table's corners as the tracker measured them, and the
 device is steered by the screen. So the data measures precision across the table, not
 absolute accuracy: `offset_*` mostly says where the operator stopped inside the point's radius.
+
+**Continuous raw capture** (`continuous_raw`) is the same folder from one long capture: every
+frame from Start to Stop or the time limit, pose or not, the device moved freely. `poses.csv`
+has `target` 1, `attempt` 1, `row` and `col` empty, and the table columns only if a table was
+defined. `targets.csv` has one row summing it up: `expected_*` and `offset_*` empty,
+`accepted` 1 if any frame was saved, `reason` `limit` (the time ran out) or `stopped`
+(Stop, Esc, the link lost); `sync_edges` counts the edges during the recording.
+`tip_std_*` and `max_dev_mm` are of a moving device, so mean nothing here.

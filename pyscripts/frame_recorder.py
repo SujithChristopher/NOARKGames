@@ -65,7 +65,11 @@ class SyncLine:
     """
 
     def __init__(self, chip: str = "gpiochip4", line="PIN_11", latch_edges: bool = True,
-                 events_path: Optional[Path] = None):
+                 events_path: Optional[Path] = None, keep_events: bool = True):
+        # keep_events False: only the level and a count (a monitor that runs for hours
+        # beside a pulse train must not grow without end).
+        self._keep_events = keep_events
+        self._count = 0
         # Edges go here as they happen, so a crash keeps them. Created at the first edge.
         self._events_path = Path(events_path) if events_path is not None else None
         self._events_file = None
@@ -156,7 +160,9 @@ class SyncLine:
     def _note_edge(self, timestamp_ns: int, value: int, seqno: int) -> None:
         record = (timestamp_ns, value, seqno)
         with self._lock:
-            self._events.append(record)
+            if self._keep_events:
+                self._events.append(record)
+            self._count += 1
             self._level = value
         # Outside the lock: get_value takes it on the capture path, and a disk may stall.
         if self._events_path is not None:
@@ -184,7 +190,7 @@ class SyncLine:
     @property
     def event_count(self) -> int:
         with self._lock:
-            return len(self._events)
+            return self._count
 
     def write_events(self, out_dir: Path, filename: str = "sync_events.msgpack"):
         """Write the latched edges as [timestamp_ns, value, line_seqno] records.

@@ -27,7 +27,7 @@ from camera_view import CameraView, parse_exposure, parse_gain, save_settings
 from corner_stabilizer import CornerStabilizer
 from filters import ExponentialMovingAverageFilter3D
 from experiment import Experiments
-from frame_recorder import FrameRecorder
+from frame_recorder import FrameRecorder, SyncLine
 from hotspot import Hotspot
 from link import Link
 from picture_link import PictureLink
@@ -467,6 +467,8 @@ class TrackerClass:
             lambda: [rigidbody_path, device_path, stereo_calib_path, DATA_ROOT.parent / "settings.json"],
             lambda: (self.capture.phase_report(), self.capture.nudges)
             if self.capture is not None else (None, 0),
+            # The trigger shown on the experiment screens before a run: level and a count.
+            lambda: SyncLine(self._sync_chip, self._sync_pin, keep_events=False),
         )
         # Contour is the default. Crop refine (rapidtag 0.1.10) gave garbage poses on
         # this rig, so it is opt-in: settings.json tracker_refine = "crop". Track with

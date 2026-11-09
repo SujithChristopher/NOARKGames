@@ -1,6 +1,7 @@
 extends Control
 ## Picks an experiment, from the main menu's Experiments button. A new experiment is a
 ## row here and its own scene; the tracker writes what it measures (pyscripts/experiment.py).
+## Every experiment screen shows the mocap trigger: add sync_indicator.gd.
 
 const Style := preload("res://Main_screen/Scripts/settings_style.gd")
 const MAIN_SCREEN := "res://Main_screen/Scenes/main.tscn"
@@ -11,6 +12,12 @@ const EXPERIMENTS := [
 		"about": "Take the device to each point of a grid on the table. At each one, every " \
 			+ "camera frame is saved: the pose and the images.",
 		"scene": "res://Experiments/static_grid.tscn",
+	},
+	{
+		"title": "Continuous raw capture",
+		"about": "Record from Start to Stop: every camera frame, the images at full size and " \
+			+ "the pose, with the mocap trigger's edges. Move the device however the trial needs.",
+		"scene": "res://Experiments/continuous_raw.tscn",
 	},
 ]
 

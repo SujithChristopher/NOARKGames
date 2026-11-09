@@ -90,7 +90,7 @@ again and is not applied twice.
 | `0x07` | `STORAGE` | `list` \| `delete=<path>` | `listing` / `deleting <path>`, or why refused |
 | `0x08` | `RESTART` | — | `restarting`; then the tracker exits and systemd restarts it |
 | `0x0A` | `BODY` | `status` \| `start` \| `finish` \| `cancel` \| `save` \| `restore` \| `tip <tag> <x> <y> <z>` | below, or why refused |
-| `0x0B` | `EXPERIMENT` | `status` \| `start <name> <frames> <label>` \| `meta <key> <json>` \| `capture <target> <row> <col> <x_mm> <y_mm> <frames> <still_mm>` \| `stop <why>` | below, or why refused |
+| `0x0B` | `EXPERIMENT` | `status` \| `watch on\|off` \| `start <name> <frames> <label>` \| `meta <key> <json>` \| `capture <target> <row> <col> <x_mm> <y_mm> <frames> <still_mm>` \| `record <seconds>` \| `stop <why>` | below, or why refused |
 
 STORAGE (`pyscripts/storage.py`, the app's Settings > Storage tab) works on the
 board's camera recordings: `<patient>/<session>/Video/rec_*` and
@@ -244,15 +244,23 @@ on the board. `start` opens the run folder and answers its path, or why not (one
 time, not enough disk); `<frames>` is what the disk check is for, `<label>` (the name or number typed for the run: letters, digits, `_`, `-`) starts the folder's name. `meta` adds a key to its
 metadata.json, in pieces because one BLE write holds about 240 bytes; `table_frame`
 (`centre`, `basis`) also gives poses.csv its table columns. `capture` saves frames until
-`<frames>` have a pose, or gives up after 5 s with none. `stop` closes the run, `<why>` going
+`<frames>` have a pose, or gives up after 5 s with none. `record` is a continuous capture:
+every frame, pose or not, until `stop` or `<seconds>` after its first frame (then `last`
+comes with `reason` `limit` and the app sends `stop`). `watch on` shows the mocap trigger
+on an experiment screen: the tracker opens the line itself while no run holds it, and
+every status then carries `sync`; its ACK's detail is `sync`, so a screen can tell it from a
+`start`'s. `watch off`, a link lost or a new `HELLO` stops it. `stop` closes the run, `<why>` going
 into `status` (`complete`, `stopped`); a link lost or a new `HELLO` closes it as `link_lost`.
 
-`EXPERIMENT_STATUS`: `{"state": "idle" | "ready" | "capturing", "last", "saved", "capture"}`.
+`EXPERIMENT_STATUS`: `{"state": "idle" | "ready" | "capturing", "last", "saved", "capture", "sync"}`.
+`sync`, while watched or in a run: `{"available": false}` or `{"available": true, "level": 0|1,
+"edges", "edge_timestamps"}`, `edges` counted from when the line was opened (the run's start,
+or the screen's). A change of level or count is sent at once, otherwise every 0.25 s.
 `last` is the latest capture's result, repeated until the next, so a lost status costs
 nothing: `{"target", "attempt", "accepted", "reason", "frames_ok", "frames_failed",
 "max_dev_mm", "fps"}`. `reason` is `moved` (over `<still_mm>` from its mean in the table's
 plane), `no_pose`, `stopped` or empty. `capture`, while one runs: `{"target", "attempt",
-"frames", "ok", "failed"}`. `saved`, once a run has ended: `{"path", "status", "accepted",
+"frames", "ok", "failed"}`, and for a `record` also `limit_s` and `elapsed_s`. `saved`, once a run has ended: `{"path", "status", "accepted",
 "dropped"}`. Additive: `VERSION` did not change.
 
 ## 6. Tools
